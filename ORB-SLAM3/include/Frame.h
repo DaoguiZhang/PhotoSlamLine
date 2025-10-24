@@ -45,6 +45,7 @@ namespace ORB_SLAM3
 #define FRAME_GRID_COLS 64
 
 class MapPoint;
+class MapLine;
 class KeyFrame;
 class ConstraintPoseImu;
 class GeometricCamera;
@@ -234,6 +235,10 @@ public:
     std::vector<float> mvuRight;
     std::vector<float> mvDepth;
 
+    //Corresonding stereo coordinate and depth for each line keypoint
+    std::vector<MapLine*> mvpMapLines;
+    std::vector<Eigen::Vector2f> mvDepthLines; // First:depth from left keypoint, second:depth from right keypoint
+
     // Bag of Words Vector structures.
     DBoW2::BowVector mBowVec;
     DBoW2::FeatureVector mFeatVec;
@@ -245,6 +250,9 @@ public:
     // Flag to identify outlier associations.
     std::vector<bool> mvbOutlier;
     int mnCloseMPs;
+
+    //MapLines associated to line keypoints, NULL pointer if no association
+    std::vector<bool> mvbOutlierLines;
 
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.
     static float mfGridElementWidthInv;

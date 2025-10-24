@@ -22,6 +22,7 @@
 
 #include "Tracking.h"
 #include "MapPoint.h"
+#include "MapLine.h"    //added for MapLine visualization
 #include "Atlas.h"
 
 #include<opencv2/core/core.hpp>
@@ -83,6 +84,9 @@ protected:
 
     map<long unsigned int, cv::Point2f> mmProjectPoints;
     map<long unsigned int, cv::Point2f> mmMatchedInImage;
+
+    std::vector<MapLine*> mvpLocalMapLines; //added for MapLine visualization
+    //std::vector<>
 
 };
 
