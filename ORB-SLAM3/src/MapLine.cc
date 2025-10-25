@@ -248,32 +248,63 @@ int MapLine::Observations()
     return nObs;
 }
 
-#if 0
+
 
 void MapLine::SetBadFlag()
 {
-    map<KeyFrame*, tuple<int,int>> obs;
+    std::map<KeyFrame*, tuple<int,int>> obs;
     {
         unique_lock<mutex> lock1(mMutexFeatures);
         unique_lock<mutex> lock2(mMutexPos);
-        mbBad=true;
+        mbLineBad=true;
         obs = mLineObservations;
         mLineObservations.clear();
     }
-    for(map<KeyFrame*, tuple<int,int>>::iterator mit=obs.begin(), mend=obs.end(); mit!=mend; mit++)
+    for(std::map<KeyFrame*, tuple<int,int>>::iterator mit=obs.begin(), mend=obs.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
         int leftIndex = get<0>(mit -> second), rightIndex = get<1>(mit -> second);
         if(leftIndex != -1){
-            pKF->EraseMapPointMatch(leftIndex); //to do next...
+            pKF->EraseMapLineMatch(leftIndex);
         }
         if(rightIndex != -1){
-            pKF->EraseMapPointMatch(rightIndex);
+            pKF->EraseMapLineMatch(rightIndex);
         }
     }
-    mpMap->EraseMapPoint(this); //to do next...
+    mpMap->EraseMapLine(this);
 }
 
+void MapLine::PreSave(std::set<KeyFrame*>& spKF, std::set<MapLine*>& spML)
+{
+    mLineBackupReplacedId = -1;
+    if(mpLineReplaced && spML.find(mpLineReplaced) != spML.end())
+        mLineBackupReplacedId = mpLineReplaced->mnId;
+
+    mLineBackupObservationsId1.clear();
+    mLineBackupObservationsId2.clear();
+    // Save the id and position in each KF who view it
+    for(std::map<KeyFrame*,std::tuple<int,int> >::const_iterator it = mLineObservations.begin(), end = mLineObservations.end(); it != end; ++it)
+    {
+        KeyFrame* pKFi = it->first;
+        if(spKF.find(pKFi) != spKF.end())
+        {
+            mLineBackupObservationsId1[it->first->mnId] = get<0>(it->second);
+            mLineBackupObservationsId2[it->first->mnId] = get<1>(it->second);
+        }
+        else
+        {
+            EraseLineObservation(pKFi);
+        }
+    }
+
+    // Save the id of the reference KF
+    if(spKF.find(mpRefKF) != spKF.end())
+    {
+        mBackupRefKFId = mpRefKF->mnId;
+    }
+}
+
+#if 0
 MapLine* MapLine::GetReplaced()
 {
     unique_lock<mutex> lock1(mMutexFeatures);
@@ -605,35 +636,7 @@ void MapLine::UpdateMap(Map* pMap)
     mpMap = pMap;
 }
 
-void MapLine::PreSave(set<KeyFrame*>& spKF,set<MapLine*>& spMP)
-{
-    mBackupReplacedId = -1;
-    if(mpReplaced && spMP.find(mpReplaced) != spMP.end())
-        mBackupReplacedId = mpReplaced->mnId;
 
-    mBackupObservationsId1.clear();
-    mBackupObservationsId2.clear();
-    // Save the id and position in each KF who view it
-    for(std::map<KeyFrame*,std::tuple<int,int> >::const_iterator it = mObservations.begin(), end = mObservations.end(); it != end; ++it)
-    {
-        KeyFrame* pKFi = it->first;
-        if(spKF.find(pKFi) != spKF.end())
-        {
-            mBackupObservationsId1[it->first->mnId] = get<0>(it->second);
-            mBackupObservationsId2[it->first->mnId] = get<1>(it->second);
-        }
-        else
-        {
-            EraseObservation(pKFi);
-        }
-    }
-
-    // Save the id of the reference KF
-    if(spKF.find(mpRefKF) != spKF.end())
-    {
-        mBackupRefKFId = mpRefKF->mnId;
-    }
-}
 
 void MapLine::PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapLine*>& mpMPid)
 {

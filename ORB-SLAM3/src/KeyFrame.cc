@@ -32,14 +32,16 @@ KeyFrame::KeyFrame():
         mnTrackReferenceForFrame(0), mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0), mnBALocalForMerge(0),
         mnLoopQuery(0), mnLoopWords(0), mnRelocQuery(0), mnRelocWords(0), mnMergeQuery(0), mnMergeWords(0), mnBAGlobalForKF(0),
         fx(0), fy(0), cx(0), cy(0), invfx(0), invfy(0), mnPlaceRecognitionQuery(0), mnPlaceRecognitionWords(0), mPlaceRecognitionScore(0),
-        mbf(0), mb(0), mThDepth(0), N(0), mvKeys(static_cast<vector<cv::KeyPoint> >(NULL)), mvKeysUn(static_cast<vector<cv::KeyPoint> >(NULL)),
+        mbf(0), mb(0), mThDepth(0), N(0), NL(0), mvKeys(static_cast<vector<cv::KeyPoint> >(NULL)), mvKeysUn(static_cast<vector<cv::KeyPoint> >(NULL)),
+        mvKeyLines(static_cast<vector<cv::line_descriptor::KeyLine> >(NULL)), mvKeyLinesUn(static_cast<vector<cv::line_descriptor::KeyLine> >(NULL)),
+        mvuLineRight(static_cast<vector<std::pair<float,float> > >(NULL)), mvLineDepth(static_cast<vector<std::pair<float,float>> >(NULL)),
         mvuRight(static_cast<vector<float> >(NULL)), mvDepth(static_cast<vector<float> >(NULL)), mnScaleLevels(0), mfScaleFactor(0),
         mfLogScaleFactor(0), mvScaleFactors(0), mvLevelSigma2(0), mvInvLevelSigma2(0), mnMinX(0), mnMinY(0), mnMaxX(0),
         mnMaxY(0), mPrevKF(static_cast<KeyFrame*>(NULL)), mNextKF(static_cast<KeyFrame*>(NULL)), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
         mbToBeErased(false), mbBad(false), mHalfBaseline(0), mbCurrentPlaceRecognition(false), mnMergeCorrectedForKF(0),
         NLeft(0),NRight(0), mnNumberOfOpt(0), mbHasVelocity(false)
 {
-
+    //mLineDescriptors(static_cast<cv::Mat>(NULL)),
 }
 
 KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
@@ -48,7 +50,10 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mnTrackReferenceForFrame(0), mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0), mnBALocalForMerge(0),
     mnLoopQuery(0), mnLoopWords(0), mnRelocQuery(0), mnRelocWords(0), mnBAGlobalForKF(0), mnPlaceRecognitionQuery(0), mnPlaceRecognitionWords(0), mPlaceRecognitionScore(0),
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
-    mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), mvKeysUn(F.mvKeysUn),
+    mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), NL(F.NL), mvKeys(F.mvKeys), mvKeysUn(F.mvKeysUn),
+    mvKeyLines(F.mvKeyLines), mvKeyLinesUn(F.mvKeyLinesUn),
+    mvuLineRight(F.mvuLineRight), mvLineDepth(F.mvLineDepth),
+    mLineDescriptors(F.mLineDescriptors.clone()),
     mvuRight(F.mvuRight), mvDepth(F.mvDepth), mDescriptors(F.mDescriptors.clone()),
     mBowVec(F.mBowVec), mFeatVec(F.mFeatVec), mnScaleLevels(F.mnScaleLevels), mfScaleFactor(F.mfScaleFactor),
     mfLogScaleFactor(F.mfLogScaleFactor), mvScaleFactors(F.mvScaleFactors), mvLevelSigma2(F.mvLevelSigma2),
@@ -476,6 +481,101 @@ void KeyFrame::UpdateConnections(bool upParent)
     }
 }
 
+int KeyFrame::GetNumberMPL()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+
+    int numberMPL = 0;
+    for(size_t i=0, iend=mvpMapLines.size(); i<iend; i++)
+    {
+        if(!mvpMapLines[i])
+            continue;
+        numberMPL++;
+    }
+    return numberMPL;
+}
+
+void KeyFrame::AddMapLine(MapLine* pML, const size_t &idx)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    mvpMapLines[idx]=pML;
+}
+
+void KeyFrame::EraseMapLineMatch(const int &idx)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    mvpMapLines[idx]=static_cast<MapLine*>(NULL);
+}
+
+void KeyFrame::EraseMapLineMatch(MapLine* pML)
+{
+    tuple<size_t,size_t> indexes = pML->GetIndexInKeyFrame(this);
+    size_t leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
+    if(leftIndex != -1)
+        mvpMapLines[leftIndex]=static_cast<MapLine*>(NULL);
+    if(rightIndex != -1)
+        mvpMapLines[rightIndex]=static_cast<MapLine*>(NULL);
+}
+
+void KeyFrame::ReplaceMapLineMatch(const int &idx, MapLine* pML)
+{
+    mvpMapLines[idx]=pML;
+}
+
+std::set<MapLine*> KeyFrame::GetMapLines()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    std::set<MapLine*> s;
+    for(size_t i=0, iend=mvpMapLines.size(); i<iend; i++)
+    {
+        if(!mvpMapLines[i])
+            continue;
+        MapLine* pML = mvpMapLines[i];
+        if(!pML->isBad())
+            s.insert(pML);
+    }
+    return s;
+}
+
+std::vector<MapLine*> KeyFrame::GetMapLineMatches()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mvpMapLines;
+}
+
+int KeyFrame::TrackedMapLines(const int &minObs)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+
+    int nLines=0;
+    const bool bCheckObs = minObs>0;
+    for(int i=0; i<NL; i++)
+    {
+        MapLine* pML = mvpMapLines[i];
+        if(pML)
+        {
+            if(!pML->isBad())
+            {
+                if(bCheckObs)
+                {
+                    if(mvpMapLines[i]->Observations()>=minObs)
+                        nLines++;
+                }
+                else
+                    nLines++;
+            }
+        }
+    }
+
+    return nLines;
+}   
+
+MapLine* KeyFrame::GetMapLine(const size_t &idx)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mvpMapLines[idx];
+}
+
 void KeyFrame::AddChild(KeyFrame *pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
@@ -748,6 +848,43 @@ vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const
     }
 
     return vIndices;
+}
+
+std::vector<size_t> KeyFrame::GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
+        const float  &r, const int minLevel, const int maxLevel, const bool bRight) const
+{
+    vector<size_t> vIndices;
+    vIndices.reserve(NL);
+
+    std::vector<cv::line_descriptor::KeyLine> vkl = this->mvKeyLines;
+    const bool bCheckLevels = (minLevel > 0) || (maxLevel > 0);
+
+    for (size_t i = 0; i < vkl.size(); i++) {
+        cv::line_descriptor::KeyLine keyline = vkl[i];
+
+        //// 1.对比中点距离
+        // float distance = (0.5 * (x1 + x2) - keyline.pt.x) * (0.5 * (x1 + x2) - keyline.pt.x) +
+        //                    (0.5 * (y1 + y2) - keyline.pt.y) * (0.5 * (y1 + y2) - keyline.pt.y);
+        // 1.对比中点距离
+        float distance = (0.5 * (ls_x + le_x) - keyline.pt.x) * (0.5 * (ls_x + le_x) - keyline.pt.x) +
+                            (0.5 * (ls_y + le_y) - keyline.pt.y) * (0.5 * (ls_y + le_y) - keyline.pt.y);
+        if (distance > r * r)
+            continue;
+
+        //float slope = (y1 - y2) / (x1 - x2) - keyline.angle;
+        float slope = (ls_y - le_y) / (ls_x - le_x) - keyline.angle;
+        if (slope > r * 0.01)
+            continue;
+
+        if (bCheckLevels) 
+        {
+            if (keyline.octave < minLevel)
+                continue;
+            if (maxLevel >= 0 && keyline.octave > maxLevel)
+                continue;
+        }
+        vIndices.push_back(i);
+    }
 }
 
 bool KeyFrame::IsInImage(const float &x, const float &y) const

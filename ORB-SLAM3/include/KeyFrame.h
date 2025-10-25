@@ -21,6 +21,7 @@
 #define KEYFRAME_H
 
 #include "MapPoint.h"
+#include "MapLine.h"
 #include "Thirdparty/DBoW2/DBoW2/BowVector.h"
 #include "Thirdparty/DBoW2/DBoW2/FeatureVector.h"
 #include "ORBVocabulary.h"
@@ -38,12 +39,14 @@
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/map.hpp>
 
+#include <opencv2/line_descriptor/descriptor.hpp>
 
 namespace ORB_SLAM3
 {
 
 class Map;
 class MapPoint;
+class MapLine;
 class Frame;
 class KeyFrameDatabase;
 
@@ -257,11 +260,27 @@ public:
     int TrackedMapPoints(const int &minObs);
     MapPoint* GetMapPoint(const size_t &idx);
 
+    //MapLine observation functions(modified by zdg)
+    int GetNumberMPL(); 
+    void AddMapLine(MapLine* pML, const size_t &idx);
+    void EraseMapLineMatch(const int &idx);
+    void EraseMapLineMatch(MapLine* pML);
+    void ReplaceMapLineMatch(const int &idx, MapLine* pML);
+    std::set<MapLine*> GetMapLines();
+    std::vector<MapLine*> GetMapLineMatches();
+    int TrackedMapLines(const int &minObs);
+    MapLine* GetMapLine(const size_t &idx);
+
     // KeyPoint functions
     std::vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r, const bool bRight = false) const;
     bool UnprojectStereo(int i, Eigen::Vector3f &x3D, Eigen::Vector3f &colorRGB);
 
     void GetKeypointInfo(std::vector<float> &pixelsUndist, std::vector<float> &pointsLocal);
+
+    //keyLine functions(modified by zdg)
+    std::vector<size_t> GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
+        const float  &r, const int minLevel=-1, const int maxLevel=-1, const bool bRight = false) const;
+    //bool UnprojectStereoLine(int i, Eigen::Vector4f &line3D, Eigen::Vector3f &colorRGB);
 
     // Image
     bool IsInImage(const float &x, const float &y) const;
@@ -379,12 +398,23 @@ public:
     // Number of KeyPoints
     const int N;
 
+    //Number of KeyLines(modified by zdg)
+    const int NL;
+
     // KeyPoints, stereo coordinate and descriptors (all associated by an index)
     const std::vector<cv::KeyPoint> mvKeys;
     const std::vector<cv::KeyPoint> mvKeysUn;
     const std::vector<float> mvuRight; // negative value for monocular points
     const std::vector<float> mvDepth; // negative value for monocular points
     const cv::Mat mDescriptors;
+
+    //KeyLines and descriptors (modified by zdg)
+    const std::vector<cv::line_descriptor::KeyLine> mvKeyLines;
+    const std::vector<cv::line_descriptor::KeyLine> mvKeyLinesUn;
+    const std::vector<std::pair<float, float> > mvuLineRight; // negative value for monocular lines
+    const std::vector<std::pair<float,float> > mvLineDepth; // negative value for monocular lines
+    const cv::Mat mLineDescriptors;
+    std::vector<Eigen::Vector3f> mvKeyLineFunctions; // Key lines functions in the keyframe
 
     //BoW
     DBoW2::BowVector mBowVec;
@@ -456,6 +486,11 @@ protected:
     // For save relation without pointer, this is necessary for save/load function
     std::vector<long long int> mvBackupMapPointsId;
 
+    //MapLines associated to keylines(modified by zdg)
+    std::vector<MapLine*> mvpMapLines;
+    // For save relation without pointer, this is necessary for save/load function
+    std::vector<long long int> mvBackupMapLinesId;
+
     // BoW
     KeyFrameDatabase* mpKeyFrameDB;
     ORBVocabulary* mpORBvocabulary;
@@ -518,6 +553,7 @@ public:
 
     //KeyPoints in the right image (for stereo fisheye, coordinates are needed)
     const std::vector<cv::KeyPoint> mvKeysRight;
+    const std::vector<cv::line_descriptor::KeyLine> mvKeyLinesRight;    //added by zdg
 
     const int NLeft, NRight;
 

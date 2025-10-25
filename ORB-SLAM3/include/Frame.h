@@ -39,6 +39,8 @@
 #include "Eigen/Core"
 #include "sophus/se3.hpp"
 
+#include <opencv2/line_descriptor/descriptor.hpp>
+
 namespace ORB_SLAM3
 {
 #define FRAME_GRID_ROWS 48
@@ -73,6 +75,14 @@ public:
 
     // Extract ORB on the image. 0 for left image and 1 for right image.
     void ExtractORB(int flag, const cv::Mat &im, const int x0, const int x1);
+
+    // extract line feature, 自己添加的
+    void ExtractLSD(const cv::Mat &im);
+    //点线特征选择
+    void featureSelect(const cv::Mat &im);
+
+    // 自己添加的，线特征描述子MAD
+    void lineDescriptorMAD( std::vector<std::vector<cv::DMatch>> matches, double &nn_mad, double &nn12_mad) const;
 
     // Compute Bag of Words representation.
     void ComputeBoW();
@@ -222,6 +232,8 @@ public:
 
     // Number of KeyPoints.
     int N;
+    //Number of KeyLines
+    int NL;
 
     // Vector of keypoints (original for visualization) and undistorted (actually used by the system).
     // In the stereo case, mvKeysUn is redundant as images must be rectified.
@@ -229,11 +241,19 @@ public:
     std::vector<cv::KeyPoint> mvKeys, mvKeysRight;
     std::vector<cv::KeyPoint> mvKeysUn;
 
+    // Vector of line keypoints (original and undistorted)
+    std::vector<cv::line_descriptor::KeyLine> mvKeyLines, mvKeyLinesRight;
+    std::vector<cv::line_descriptor::KeyLine> mvKeyLinesUn;
+
     // Corresponding stereo coordinate and depth for each keypoint.
     std::vector<MapPoint*> mvpMapPoints;
+    // Corresponding stereo coordinate and depth for each keyLine keypoint
+    //std::vector<MapLine*> mvpMapLinesLines; //added by zdg
     // "Monocular" keypoints have a negative value.
     std::vector<float> mvuRight;
     std::vector<float> mvDepth;
+    std::vector<std::pair<float,float> > mvuLineRight; // "Mon
+    std::vector<std::pair<float,float> > mvLineDepth;
 
     //Corresonding stereo coordinate and depth for each line keypoint
     std::vector<MapLine*> mvpMapLines;
@@ -245,6 +265,9 @@ public:
 
     // ORB descriptor, each row associated to a keypoint.
     cv::Mat mDescriptors, mDescriptorsRight;
+
+    // Line descriptor, each row associated to a line keyline
+    cv::Mat mLineDescriptors;
 
     // MapPoints associated to keypoints, NULL pointer if no association.
     // Flag to identify outlier associations.
@@ -286,10 +309,10 @@ public:
     int mnScaleLevels;
     float mfScaleFactor;
     float mfLogScaleFactor;
-    vector<float> mvScaleFactors;
-    vector<float> mvInvScaleFactors;
-    vector<float> mvLevelSigma2;
-    vector<float> mvInvLevelSigma2;
+    std::vector<float> mvScaleFactors;
+    std::vector<float> mvInvScaleFactors;
+    std::vector<float> mvLevelSigma2;
+    std::vector<float> mvInvLevelSigma2;
 
     // Undistorted Image Bounds (computed once).
     static float mnMinX;
@@ -337,6 +360,9 @@ public:
     int Nleft, Nright;
     //Number of Non Lapping Keypoints
     int monoLeft, monoRight;
+
+    //Number of line extracted in the left and right images
+    int NLleft, NLright;
 
     //For stereo matching
     std::vector<int> mvLeftToRightMatch, mvRightToLeftMatch;
