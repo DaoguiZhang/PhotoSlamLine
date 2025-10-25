@@ -21,6 +21,7 @@
 #define MAP_H
 
 #include "MapPoint.h"
+#include "MapLine.h"
 #include "KeyFrame.h"
 
 #include <set>
@@ -33,6 +34,7 @@ namespace ORB_SLAM3
 {
 
 class MapPoint;
+class MapLine;
 class KeyFrame;
 class Atlas;
 class KeyFrameDatabase;
@@ -77,6 +79,12 @@ public:
     void EraseMapPoint(MapPoint* pMP);
     void EraseKeyFrame(KeyFrame* pKF);
     void SetReferenceMapPoints(const std::vector<MapPoint*> &vpMPs);
+    
+    //added for MapLine
+    void AddMapLine(MapLine* pML);
+    void EraseMapLine(MapLine* pML);
+    void SetReferenceMapLines(const std::vector<MapLine*> &vpMLs);
+
     void InformNewBigChange();
     int GetLastBigChangeIdx();
 
@@ -84,7 +92,12 @@ public:
     std::vector<MapPoint*> GetAllMapPoints();
     std::vector<MapPoint*> GetReferenceMapPoints();
 
+    //added for MapLine
+    std::vector<MapLine*> GetAllMapLines();
+    std::vector<MapLine*> GetReferenceMapLines();
+
     long unsigned int MapPointsInMap();
+    long unsigned int MapLinesInMap();  //added for MapLine
     long unsigned  KeyFramesInMap();
 
     long unsigned int GetId();
@@ -154,10 +167,13 @@ protected:
     long unsigned int mnId;
 
     std::set<MapPoint*> mspMapPoints;
+    std::set<MapLine*> mspMapLines;   //added for MapLine
     std::set<KeyFrame*> mspKeyFrames;
 
     // Save/load, the set structure is broken in libboost 1.58 for ubuntu 16.04, a vector is serializated
     std::vector<MapPoint*> mvpBackupMapPoints;
+    std::vector<MapLine*> mvpBackupMapLines;   //added for MapLine
+    std::vector<unsigned long int> mvBackupMapPointsId;
     std::vector<KeyFrame*> mvpBackupKeyFrames;
 
     KeyFrame* mpKFinitial;
@@ -167,6 +183,7 @@ protected:
     unsigned long int mnBackupKFlowerID;
 
     std::vector<MapPoint*> mvpReferenceMapPoints;
+    std::vector<MapLine*> mvpReferenceMapLines;  //added for MapLine
 
     bool mbImuInitialized;
 

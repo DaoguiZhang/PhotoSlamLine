@@ -43,12 +43,14 @@ Map::~Map()
 {
     //TODO: erase all points from memory
     mspMapPoints.clear();
+    mspMapLines.clear();  //added for MapLine
 
     //TODO: erase all keyframes from memory
     mspKeyFrames.clear();
 
     mvpReferenceMapPoints.clear();
     mvpKeyFrameOrigins.clear();
+    mvpReferenceMapLines.clear();  //added for MapLine
 }
 
 void Map::AddKeyFrame(KeyFrame *pKF)
@@ -125,6 +127,42 @@ void Map::SetReferenceMapPoints(const vector<MapPoint *> &vpMPs)
     unique_lock<mutex> lock(mMutexMap);
     mvpReferenceMapPoints = vpMPs;
 }
+
+void Map::AddMapLine(MapLine* pML)
+{
+    unique_lock<mutex> lock(mMutexMap);
+    mspMapLines.insert(pML);
+}
+
+void Map::EraseMapLine(MapLine* pML)
+{
+    unique_lock<mutex> lock(mMutexMap);
+    mspMapLines.erase(pML);
+}
+
+void Map::SetReferenceMapLines(const vector<MapLine *> &vpMLs)
+{
+    unique_lock<mutex> lock(mMutexMap);
+    mvpReferenceMapLines = vpMLs;
+}
+
+std::vector<MapLine*> Map::GetAllMapLines()
+{
+    unique_lock<mutex> lock(mMutexMap);
+    return vector<MapLine*>(mspMapLines.begin(),mspMapLines.end());
+}
+
+std::vector<MapLine*> Map::GetReferenceMapLines()
+{
+    unique_lock<mutex> lock(mMutexMap);
+    return mvpReferenceMapLines;
+}  
+
+long unsigned int Map::MapLinesInMap()
+{
+    unique_lock<mutex> lock(mMutexMap);
+    return mspMapLines.size();
+}  
 
 void Map::InformNewBigChange()
 {
@@ -218,10 +256,12 @@ void Map::clear()
     }
 
     mspMapPoints.clear();
+    mspMapLines.clear();  //added for MapLine
     mspKeyFrames.clear();
     mnMaxKFid = mnInitKFid;
     mbImuInitialized = false;
     mvpReferenceMapPoints.clear();
+    mvpReferenceMapLines.clear();  //added for MapLine
     mvpKeyFrameOrigins.clear();
     mbIMU_BA1 = false;
     mbIMU_BA2 = false;
@@ -373,6 +413,29 @@ void Map::PreSave(std::set<GeometricCamera*> &spCams)
         }
     }
 
+    std::cout << "Map " << mnId << ": " << nMPWithoutObs << " MapPoints without observations removed before saving." << std::endl;
+
+    int nMLWithoutObs = 0;
+    for(MapLine* pMLi : mspMapLines)
+    {
+        if(!pMLi || pMLi->isBad())
+            continue;
+        if(pMLi->GetLineObservations().size() == 0)
+        {
+            nMLWithoutObs++;
+        }
+        map<KeyFrame*, std::tuple<int,int>> mpObs = pMLi->GetLineObservations();
+        for(map<KeyFrame*, std::tuple<int,int>>::iterator it= mpObs.begin(), end=mpObs.end(); it!=end; ++it)
+        {
+            if(it->first->GetMap() != this || it->first->isBad())
+            {
+                pMLi->EraseLineObservation(it->first);
+            }
+
+        }
+    }   
+    std::cout << "Map " << mnId << ": " << nMLWithoutObs << " MapLines without observations removed before saving." << std::endl;
+
     // Saves the id of KF origins
     mvBackupKeyFrameOriginsId.clear();
     mvBackupKeyFrameOriginsId.reserve(mvpKeyFrameOrigins.size());
@@ -380,7 +443,6 @@ void Map::PreSave(std::set<GeometricCamera*> &spCams)
     {
         mvBackupKeyFrameOriginsId.push_back(mvpKeyFrameOrigins[i]->mnId);
     }
-
 
     // Backup of MapPoints
     mvpBackupMapPoints.clear();
@@ -391,6 +453,16 @@ void Map::PreSave(std::set<GeometricCamera*> &spCams)
 
         mvpBackupMapPoints.push_back(pMPi);
         pMPi->PreSave(mspKeyFrames,mspMapPoints);
+    }
+
+    //backup of MapLines
+    mvpBackupMapLines.clear();
+    for(MapLine* pMLi : mspMapLines)
+    {
+        if(!pMLi || pMLi->isBad())
+            continue;
+        mvpBackupMapLines.push_back(pMLi);
+        pMLi->PreSave(mspKeyFrames,mspMapLines);
     }
 
     // Backup of KeyFrames
