@@ -53,6 +53,7 @@ ${EIGEN3_INCLUDE_DIR}
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 
 add_library(${PROJECT_NAME} SHARED
+src/LineExtractor.cc
 src/System.cc
 src/Tracking.cc
 src/LocalMapping.cc
@@ -62,6 +63,8 @@ src/ORBmatcher.cc
 src/FrameDrawer.cc
 src/Converter.cc
 src/MapPoint.cc
+src/MapLine.cc
+src/LSDmatcher.cc
 src/KeyFrame.cc
 src/Atlas.cc
 src/Map.cc
@@ -81,6 +84,9 @@ src/GeometricTools.cc
 src/TwoViewReconstruction.cc
 src/Config.cc
 src/Settings.cc
+include/CommonTypeORB.h
+#include/levmar.h
+include/LineExtractor.h
 include/System.h
 include/Tracking.h
 include/LocalMapping.h
@@ -90,6 +96,8 @@ include/ORBmatcher.h
 include/FrameDrawer.h
 include/Converter.h
 include/MapPoint.h
+include/MapLine.h
+include/LSDmatcher.h
 include/KeyFrame.h
 include/Atlas.h
 include/Map.h
