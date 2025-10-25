@@ -17,18 +17,18 @@
 */
 
 
-#ifndef MAPPOINT_H
-#define MAPPOINT_H
+#ifndef MAPLINE_H
+#define MAPLINE_H
 
 #include "KeyFrame.h"
 #include "Frame.h"
 #include "Map.h"
 #include "Converter.h"
-
 #include "SerializationUtils.h"
 
 #include <opencv2/core/core.hpp>
 #include <mutex>
+#include <utility>
 
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/array.hpp>
@@ -44,6 +44,7 @@ class Frame;
 class MapLine
 {
 
+/*
     friend class boost::serialization::access;
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
@@ -67,11 +68,9 @@ class MapLine
         //ar & mTrackViewCosR;
         //ar & mnTrackReferenceForFrame;
         //ar & mnLastFrameSeen;
-
         // Variables used by local mapping
         //ar & mnBALocalForKF;
         //ar & mnFuseCandidateForKF;
-
         // Variables used by loop closing and merging
         //ar & mnLoopPointForKF;
         //ar & mnCorrectedByKF;
@@ -93,43 +92,41 @@ class MapLine
         ar & mBackupRefKFId;
         //ar & mnVisible;
         //ar & mnFound;
-
         ar & mbBad;
         ar & mBackupReplacedId;
-
         ar & mfMinDistance;
         ar & mfMaxDistance;
-
     }
-
+*/
 
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     MapLine();
 
-    MapLine(const Eigen::Vector3f &Pos, const Eigen::Vector3f &Color, KeyFrame* pRefKF, Map* pMap);
-    MapLine(const double invDepth, cv::Point2f uv_init, KeyFrame* pRefKF, KeyFrame* pHostKF, Map* pMap);
-    MapLine(const Eigen::Vector3f &Pos,  Map* pMap, Frame* pFrame, const int &idxF);
+    MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos, const Eigen::Vector3f &LsColor, const Eigen::Vector3f &LeColor, 
+         KeyFrame* pRefKF, Map* pMap);
+    //MapLine(const double invDepth, cv::Point2f uv_init, KeyFrame* pRefKF, KeyFrame* pHostKF, Map* pMap);
+    MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Map* pMap, Frame* pFrame, const int &idxF);
 
-    void SetWorldPos(const Eigen::Vector3f &Pos);
-    Eigen::Vector3f GetWorldPos();
+    void SetLineWorldPos(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos);
+    std::pair<Eigen::Vector3f, Eigen::Vector3f> GetLineWorldPos();  //get Line start and end point
 
-    void SetColorRGB(const Eigen::Vector3f &Color);
-    Eigen::Vector3f GetColorRGB();
+    void SetLineColorRGB(const Eigen::Vector3f &LsColor, const Eigen::Vector3f &LeColor);
+    std::pair<Eigen::Vector3f, Eigen::Vector3f> GetLineColorRGB();
 
     void setRetrived(const bool retrived);
     bool isRetrived();
 
-    Eigen::Vector3f GetNormal();
-    void SetNormalVector(const Eigen::Vector3f& normal);
+    std::pair<Eigen::Vector3f, Eigen::Vector3f> GetLineNormal();
+    void SetLineNormalVector(const Eigen::Vector3f& Lsnormal, const Eigen::Vector3f& Lenormal);
 
     KeyFrame* GetReferenceKeyFrame();
 
-    std::map<KeyFrame*,std::tuple<int,int>> GetObservations();
+    std::map<KeyFrame*,std::tuple<int,int>> GetLineObservations();
     int Observations();
 
-    void AddObservation(KeyFrame* pKF,int idx);
-    void EraseObservation(KeyFrame* pKF);
+    void AddLineObservation(KeyFrame* pKF,int idx);
+    void EraseLineObservation(KeyFrame* pKF);
 
     std::tuple<int,int> GetIndexInKeyFrame(KeyFrame* pKF);
     bool IsInKeyFrame(KeyFrame* pKF);
@@ -144,7 +141,7 @@ public:
     void IncreaseFound(int n=1);
     float GetFoundRatio();
     inline int GetFound(){
-        return mnFound;
+        return mnLineFound;
     }
 
     void ComputeDistinctiveDescriptors();
@@ -174,17 +171,34 @@ public:
     int nObs;
 
     // Variables used by the tracking
-    float mTrackProjX;
-    float mTrackProjY;
-    float mTrackDepth;
-    float mTrackDepthR;
-    float mTrackProjXR;
-    float mTrackProjYR;
-    bool mbTrackInView, mbTrackInViewR;
-    int mnTrackScaleLevel, mnTrackScaleLevelR;
-    float mTrackViewCos, mTrackViewCosR;
-    long unsigned int mnTrackReferenceForFrame;
+    float mLsTrackProjX;
+    float mLsTrackProjY;
+    float mLeTrackProjX;
+    float mLeTrackProjY;
+    float mLsTrackDepth;
+    float mLeTrackDepth;
+
+    float mTrackDepthR; //to do next...
+    float mTrackProjXR; //to do next...
+    float mTrackProjYR; //to do next...
+
+    // TrackLocalMap - UpdateLocalLines中防止将MapLines重复添加至mvpLocalMapLines的标记
+    bool mbLineTrackInView, mbLineTrackInViewR;
+    int mnLineTrackScaleLevel, mnLineTrackScaleLevelR;
+    float mLineTrackViewCos, mLineTrackViewCosR;
     long unsigned int mnLastFrameSeen;
+
+    //TrackLocalMap - SearchByProjection 中决定是否对特征线进行投影匹配的参考
+    //mbTrackInView == false 的点有几种：
+    //1. 该线段已经和当前帧经过匹配(TrackReferenceKeyFrame, TrackWithMotionModel),但是在优化过程中被认为是外点
+    //2. 该线段在当前帧视野内且进行匹配后为内点，这类点不需要再进行投影
+    //3. 该线段在当前帧视野外（为通过isInFrustum的判断）
+    long unsigned int mnTrackReferenceForFrame;
+    
+    // TrackLocalMap - SearchLocalLines中决定是否进行isInFrustum判断的变量
+    // mnLastFrameSeen==mCurrentFrame.mnId的line有集中：
+    // a.已经和当前帧经过匹配（TrackReferenceKeyFrame, TrackWithMotionModel)，但在优化过程中认为是外点
+    // b.已经和当前帧经过匹配且为内点，这类line也不需要再进行投影
 
     // Variables used by local mapping
     long unsigned int mnBALocalForKF;
@@ -192,6 +206,7 @@ public:
 
     // Variables used by loop closing
     long unsigned int mnLoopPointForKF;
+    long unsigned int mnLoopLineForKF;
     long unsigned int mnCorrectedByKF;
     long unsigned int mnCorrectedReference;    
     Eigen::Vector3f mPosGBA;
@@ -204,9 +219,11 @@ public:
 
 
     // For inverse depth optimization
-    double mInvDepth;
-    double mInitU;
-    double mInitV;
+    double mLsInvDepth, mLeInvDepth;
+    double mLsInitU;
+    double mLsInitV;
+    double mLeInitU;
+    double mLeInitV;
     KeyFrame* mpHostKF;
 
     static std::mutex mGlobalMutex;
@@ -216,40 +233,46 @@ public:
 protected:    
 
      // Position in absolute coordinates
-     Eigen::Vector3f mWorldPos;
+     Eigen::Matrix<float,6,1> mLineWorldPos;
+     Eigen::Vector3f mLsWorldPos, mLeWorldPos;  //line start and end point
 
      // RGB Color from the first observation
      // -- Useless for ORB-SLAM3 but useful in Gaussian Mapping, so supposed to be constant since created
-     Eigen::Vector3f mColorRGB;
+     Eigen::Vector3f mLsColorRGB, mLeColorRGB;  //line start and end point color
 
      // Retrival flag, ever retirved by Gaussian Mapping
      bool mbRetrived;
 
-     // Keyframes observing the point and associated index in keyframe
-     std::map<KeyFrame*,std::tuple<int,int> > mObservations;
+     // Keyframes observing the Line and associated index in keyframe
+     std::map<KeyFrame*,std::tuple<int,int> > mLineObservations;
      // For save relation without pointer, this is necessary for save/load function
-     std::map<long unsigned int, int> mBackupObservationsId1;
-     std::map<long unsigned int, int> mBackupObservationsId2;
+     std::map<long unsigned int, int> mLineBackupObservationsId1;
+     std::map<long unsigned int, int> mLineBackupObservationsId2;
 
-     // Mean viewing direction
-     Eigen::Vector3f mNormalVector;
+     // Mean viewing direction(to do nnext)
+     Eigen::Vector3f mLineNormalVector;
 
      // Best descriptor to fast matching
-     cv::Mat mDescriptor;
+     cv::Mat mLineDescriptor;
+
+     //先特征的描述子集
+     std::vector<cv::Mat> mLineDescriptors;
+     //每个观察线段的单位方向向量，中点
+     std::vector<Eigen::Vector3f> mLineDirVectors;
 
      // Reference KeyFrame
      KeyFrame* mpRefKF;
      long unsigned int mBackupRefKFId;
 
      // Tracking counters
-     int mnVisible;
-     int mnFound;
+     int mnLineVisible;
+     int mnLineFound;
 
-     // Bad flag (we do not currently erase MapPoint from memory)
-     bool mbBad;
-     MapPoint* mpReplaced;
+     // Bad flag (we do not currently erase MapLine from memory)
+     bool mbLineBad;
+     MapLine* mpLineReplaced;
      // For save relation without pointer, this is necessary for save/load function
-     long long int mBackupReplacedId;
+     long long int mLineBackupReplacedId;
 
      // Scale invariance distances
      float mfMinDistance;
@@ -267,4 +290,4 @@ protected:
 
 } //namespace ORB_SLAM
 
-#endif // MAPPOINT_H
+#endif // MAPLINE_H
