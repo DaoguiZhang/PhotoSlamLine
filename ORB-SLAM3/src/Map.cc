@@ -493,6 +493,7 @@ void Map::PreSave(std::set<GeometricCamera*> &spCams)
 void Map::PostLoad(KeyFrameDatabase* pKFDB, ORBVocabulary* pORBVoc/*, map<long unsigned int, KeyFrame*>& mpKeyFrameId*/, map<unsigned int, GeometricCamera*> &mpCams)
 {
     std::copy(mvpBackupMapPoints.begin(), mvpBackupMapPoints.end(), std::inserter(mspMapPoints, mspMapPoints.begin()));
+    std::copy(mvpBackupMapLines.begin(), mvpBackupMapLines.end(), std::inserter(mspMapLines, mspMapLines.begin()));
     std::copy(mvpBackupKeyFrames.begin(), mvpBackupKeyFrames.end(), std::inserter(mspKeyFrames, mspKeyFrames.begin()));
 
     map<long unsigned int,MapPoint*> mpMapPointId;
@@ -517,15 +518,6 @@ void Map::PostLoad(KeyFrameDatabase* pKFDB, ORBVocabulary* pORBVoc/*, map<long u
         mpKeyFrameId[pKFi->mnId] = pKFi;
     }
 
-    // References reconstruction between different instances
-    for(MapPoint* pMPi : mspMapPoints)
-    {
-        if(!pMPi || pMPi->isBad())
-            continue;
-
-        pMPi->PostLoad(mpKeyFrameId, mpMapPointId);
-    }
-
     for(KeyFrame* pKFi : mspKeyFrames)
     {
         if(!pKFi || pKFi->isBad())
@@ -533,6 +525,23 @@ void Map::PostLoad(KeyFrameDatabase* pKFDB, ORBVocabulary* pORBVoc/*, map<long u
 
         pKFi->PostLoad(mpKeyFrameId, mpMapPointId, mpCams);
         pKFDB->add(pKFi);
+    }
+
+     // References reconstruction between different instances
+    for(MapPoint* pMPi : mspMapPoints)
+    {
+        if(!pMPi || pMPi->isBad())
+            continue;
+        pMPi->PostLoad(mpKeyFrameId, mpMapPointId);
+    }
+
+    //Reference reconstruction between different instances
+    map<long unsigned int,MapLine*> mpMapLineId;
+    for(MapLine* pMLi : mspMapLine)
+    {
+        if(!pMLi || pMLi->isBad())
+            continue;
+        pMLi->PostLoad(mpKeyFrameId, mpMapLineId);
     }
 
 

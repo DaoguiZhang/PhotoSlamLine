@@ -40,7 +40,7 @@ class Settings;
 class Viewer
 {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
     Viewer(System* pSystem, FrameDrawer* pFrameDrawer, MapDrawer* pMapDrawer, Tracking *pTracking, const string &strSettingPath, Settings* settings);
 
     void newParameterLoader(Settings* settings);

@@ -67,11 +67,9 @@ class MapPoint
         //ar & mTrackViewCosR;
         //ar & mnTrackReferenceForFrame;
         //ar & mnLastFrameSeen;
-
         // Variables used by local mapping
         //ar & mnBALocalForKF;
         //ar & mnFuseCandidateForKF;
-
         // Variables used by loop closing and merging
         //ar & mnLoopPointForKF;
         //ar & mnCorrectedByKF;
@@ -81,7 +79,6 @@ class MapPoint
         //ar & mnBALocalForMerge;
         //serializeMatrix(ar,mPosMerge,version);
         //serializeMatrix(ar,mNormalVectorMerge,version);
-
         // Protected variables
         ar & boost::serialization::make_array(mWorldPos.data(), mWorldPos.size());
         ar & boost::serialization::make_array(mNormalVector.data(), mNormalVector.size());
@@ -93,18 +90,16 @@ class MapPoint
         ar & mBackupRefKFId;
         //ar & mnVisible;
         //ar & mnFound;
-
         ar & mbBad;
         ar & mBackupReplacedId;
-
         ar & mfMinDistance;
         ar & mfMaxDistance;
-
     }
 
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
     MapPoint();
 
     MapPoint(const Eigen::Vector3f &Pos, const Eigen::Vector3f &Color, KeyFrame* pRefKF, Map* pMap);

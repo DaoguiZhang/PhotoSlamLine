@@ -15,9 +15,62 @@ namespace ORB_SLAM3
     const int LSDmatcher::TH_HIGH = 100;
     const int LSDmatcher::TH_LOW = 50;
 
-    LSDmatcher::LSDmatcher(float nnratio, bool checkOri):mfNNratio(nnratio), mbCheckOrientation(checkOri)
+    void LSDmatcher::match(const std::vector<cv::line_descriptor::KeyLine>& keylines1, const cv::Mat& desc1,
+               const std::vector<cv::line_descriptor::KeyLine>& keylines2, const cv::Mat& desc2,
+               std::vector<cv::DMatch>& good_matches) 
     {
+        cv::BFMatcher matcher(cv::NORM_HAMMING, false);
+        std::vector<std::vector<cv::DMatch>> knn_matches;
+        matcher.knnMatch(desc1, desc2, knn_matches, 2);
+
+        // ratio test
+        std::vector<cv::DMatch> ratio_matches;
+        for (size_t i = 0; i < knn_matches.size(); ++i) {
+            if (knn_matches[i].size() < 2) continue;
+            if (knn_matches[i][0].distance < mratio_thresh * knn_matches[i][1].distance)
+                ratio_matches.push_back(knn_matches[i][0]);
+        }
+
+        // 角度和长度比过滤
+        std::vector<cv::DMatch> geom_matches;
+        for (auto &m : ratio_matches) {
+            const cv::line_descriptor::KeyLine &kl1 = keylines1[m.queryIdx];
+            const cv::line_descriptor::KeyLine &kl2 = keylines2[m.trainIdx];
+
+            float len_ratio = kl1.lineLength / kl2.lineLength;
+            if (len_ratio < 1.0f/mmax_length_ratio || len_ratio > mmax_length_ratio)
+                continue;
+
+            float angle_diff = std::fabs(kl1.angle - kl2.angle);
+            angle_diff = std::fmod(angle_diff, 180.0f); // 保证在 0~180
+            if (angle_diff > mmax_angle_diff)
+                continue;
+
+            geom_matches.push_back(m);
+        }
+
+        good_matches = geom_matches;
+
+        // 几何验证：RANSAC 基于中心点
+        if (good_matches.size() >= 4) {
+            vector<Point2f> pts1, pts2;
+            for (auto &m : good_matches) {
+                pts1.push_back(keylines1[m.queryIdx].pt);
+                pts2.push_back(keylines2[m.trainIdx].pt);
+            }
+
+            cv::Mat inlierMask;
+            cv::findHomography(pts1, pts2, RANSAC, mransac_threshold, inlierMask);
+
+            vector<DMatch> inlier_matches;
+            for (size_t i = 0; i < good_matches.size(); ++i)
+                if (inlierMask.at<uchar>(i))
+                    inlier_matches.push_back(good_matches[i]);
+
+            good_matches.swap(inlier_matches);
+        }
     }
+
 
 #if 0   //to do next...
 

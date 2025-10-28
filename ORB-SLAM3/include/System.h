@@ -100,9 +100,15 @@ public:
     };
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
     // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and Viewer threads.
     System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor, const int initFr = 0, const string &strSequence = std::string());
+
+    //Set Line Flag
+    void SetLineFeatrues(bool check_line);
+
+    //Get Line flag
+    bool GetLineFeatrueFlag();
 
     // Proccess the given stereo frame. Images must be synchronized and rectified.
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
@@ -114,6 +120,12 @@ public:
     // Input depthmap: Float (CV_32F).
     // Returns the camera pose (empty if tracking fails).
     Sophus::SE3f TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp, const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(), string filename="");
+
+    // Process the given rgbd frame. Depthmap must be registered to the RGB frame.
+    // Input image: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
+    // Input depthmap: Float (CV_32F).
+    // Returns the camera pose (empty if tracking fails). Use the line featrue
+    Sophus::SE3f TrackRGBDWithLine(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp, const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(), string filename="");
 
     // Proccess the given monocular frame and optionally imu data
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
@@ -212,6 +224,9 @@ private:
     bool LoadAtlas(int type);
 
     string CalculateCheckSum(string filename, int type);
+
+    //use line flag
+    bool mUseLineFlag;
 
     // Input sensor
     eSensor mSensor;

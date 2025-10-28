@@ -43,7 +43,15 @@ namespace ORB_SLAM3
     public:
         static const int TH_HIGH, TH_LOW;
 
-        LSDmatcher(float nnratio=0.6, bool checkOri=true);
+        LSDmatcher(float nnratio=0.6, bool checkOri=true, float ratio=0.85f, float ransac_thresh=3.0f, float maxAngleDiff=30.0f, float maxLengthRatio=2.0f): mfNNratio(nnratio), mbCheckOrientation(checkOri), mratio_thresh(ratio), mransac_threshold(ransac_thresh),
+          mmax_angle_diff(maxAngleDiff), mmax_length_ratio(maxLengthRatio) {}
+        
+        ~LSDmatcher(){}
+
+        // 匹配 keylines + descriptors
+    void match(const std::vector<cv::line_descriptor::KeyLine>& keylines1, const cv::Mat& desc1,
+               const std::vector<cv::line_descriptor::KeyLine>& keylines2, const cv::Mat& desc2,
+               std::vector<cv::DMatch>& good_matches); 
 
         int SearchByDescriptor(KeyFrame* pKF, Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
         int SearchByDescriptor(KeyFrame* pKF, KeyFrame *pKF2, std::vector<MapLine*> &vpMapLineMatches);
@@ -66,6 +74,11 @@ namespace ORB_SLAM3
         float RadiusByViewingCos(const float &viewCos);
         float mfNNratio;
         bool mbCheckOrientation;
+
+        float mratio_thresh;
+        float mransac_threshold;
+        float mmax_angle_diff;     // 最大角度差
+        float mmax_length_ratio;   // 最大长度比
     };
 }
 

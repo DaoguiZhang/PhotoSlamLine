@@ -21,6 +21,7 @@
 
 #include "Map.h"
 #include "MapPoint.h"
+#include "MapLine.h"  //added for MapLine
 #include "KeyFrame.h"
 #include "GeometricCamera.h"
 #include "Pinhole.h"
@@ -40,6 +41,7 @@ namespace ORB_SLAM3
 class Viewer;
 class Map;
 class MapPoint;
+class MapLine;  //added for MapLine
 class KeyFrame;
 class KeyFrameDatabase;
 class Frame;
@@ -207,7 +209,7 @@ class Atlas
     }
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
     Atlas();
     Atlas(int initKFid); // When its initialization the first map is created
@@ -243,6 +245,10 @@ public:
     std::vector<MapPoint*> GetReferenceMapPoints();
     std::unordered_set<unsigned long> GetCurrentKeyFrameIds();
 
+    //Method for get all maps in the atlas
+    std::vector<MapLine*> GetAllMapLines();  //added for MapLine
+    std::vector<MapLine*> GetReferenceMapLines();  //added for MapLine
+
     vector<Map*> GetAllMaps();
 
     int CountMaps();
@@ -277,6 +283,7 @@ public:
 
     long unsigned int GetNumLivedMP();
 
+    // Mapping operations queue, important for Gaussian splatting module(inteface between slam results and Gaussian splatting module)
     void pushMappingOperation(MappingOperation opr);
     MappingOperation getAndPopMappingOperation();
     bool hasMappingOperation();

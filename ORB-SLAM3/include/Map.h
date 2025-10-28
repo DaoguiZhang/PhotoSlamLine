@@ -27,7 +27,7 @@
 #include <set>
 #include <mutex>
 
-#include <boost/serialization/base_object.hpp>
+//#include <boost/serialization/base_object.hpp>
 
 
 namespace ORB_SLAM3
@@ -42,7 +42,6 @@ class KeyFrameDatabase;
 class Map
 {
     friend class boost::serialization::access;
-
     template<class Archive>
     void serialize(Archive &ar, const unsigned int version)
     {
@@ -50,18 +49,14 @@ class Map
         ar & mnInitKFid;
         ar & mnMaxKFid;
         ar & mnBigChangeIdx;
-
         // Save/load a set structure, the set structure is broken in libboost 1.58 for ubuntu 16.04, a vector is serializated
         //ar & mspKeyFrames;
         //ar & mspMapPoints;
         ar & mvpBackupKeyFrames;
         ar & mvpBackupMapPoints;
-
         ar & mvBackupKeyFrameOriginsId;
-
         ar & mnBackupKFinitialID;
         ar & mnBackupKFlowerID;
-
         ar & mbImuInitialized;
         ar & mbIsInertial;
         ar & mbIMU_BA1;
@@ -69,7 +64,8 @@ class Map
     }
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
     Map();
     Map(int initKFid);
     ~Map();
@@ -146,8 +142,8 @@ public:
 
     void printReprojectionError(list<KeyFrame*> &lpLocalWindowKFs, KeyFrame* mpCurrentKF, string &name, string &name_folder);
 
-    vector<KeyFrame*> mvpKeyFrameOrigins;
-    vector<unsigned long int> mvBackupKeyFrameOriginsId;
+    std::vector<KeyFrame*> mvpKeyFrameOrigins;
+    std::vector<unsigned long int> mvBackupKeyFrameOriginsId;
     KeyFrame* mpFirstRegionKF;
     std::mutex mMutexMapUpdate;
 

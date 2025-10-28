@@ -40,6 +40,11 @@
 #include "sophus/se3.hpp"
 
 #include <opencv2/line_descriptor/descriptor.hpp>
+#include "MapPoint.h"
+#include"MapLine.h"
+#include "LineExtractor.h"  //TO DELETE LATER
+#include "LSDextractor.h"
+#include "LSDmatcher.h"
 
 namespace ORB_SLAM3
 {
@@ -78,6 +83,7 @@ public:
 
     // extract line feature, 自己添加的
     void ExtractLSD(const cv::Mat &im);
+    
     //点线特征选择
     void featureSelect(const cv::Mat &im);
 
@@ -113,6 +119,10 @@ public:
     // and fill variables of the MapPoint to be used by the tracking
     bool isInFrustum(MapPoint* pMP, float viewingCosLimit);
 
+    // Check if a MapLine is in the frustum of the camera
+    // and fill variables of the MapPoint to be used by the tracking
+    bool isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight=false);
+
     bool ProjectPointDistort(MapPoint* pMP, cv::Point2f &kp, float &u, float &v);
 
     Eigen::Vector3f inRefCoordinates(Eigen::Vector3f pCw);
@@ -125,6 +135,10 @@ public:
     // Search a match for each keypoint in the left image to a keypoint in the right image.
     // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
     void ComputeStereoMatches();
+
+    // Search a match for each keyline in the left image to a keypoint in the right image.
+    // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
+    void ComputeStereoLinesMatches();
 
     // Associate a "right" coordinate to a keypoint if there is valid depth in the depthmap.
     void ComputeStereoFromRGBD(const cv::Mat &imDepth);
@@ -198,13 +212,16 @@ private:
     bool mbHasVelocity;
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
     // Vocabulary used for relocalization.
     ORBVocabulary* mpORBvocabulary;
 
     // Feature extractor. The right is used only in the stereo case.
     ORBextractor* mpORBextractorLeft, *mpORBextractorRight;
+
+    //Line Featrue extractor, The right is used only in the stereo case
+    LSDextractor* mpLSDextractorLeft, *mpLSDextractorRight; //to do next
 
     // Frame timestamp.
     double mTimeStamp;
@@ -274,7 +291,26 @@ public:
     std::vector<bool> mvbOutlier;
     int mnCloseMPs;
 
-    //MapLines associated to line keypoints, NULL pointer if no association
+    SurfaceNormal mpSurfaceNormal;  //
+    std::vector<SurfaceNormal> mvFurfaceNormal; //
+    std::vector<VanishingDirection> mvVanishingDirection; //
+    std::vector<cv::Point2i> vSurfaceNormalX;
+    std::vector<cv::Point2i> vSurfaceNormalY;
+    std::vector<cv::Point2i> vSurfaceNormalZ;
+    std::vector<cv::Point3f> vSurfacePointX;
+    std::vector<cv::Point3f> vSurfacePointY;
+    std::vector<cv::Point3f> vSurfacePointZ;
+    std::vector<std::vector<cv::Point2d> > vVanishingLineX;
+    std::vector<std::vector<cv::Point2d> > vVanishingLineY;
+    std::vector<std::vector<cv::Point2d> > vVanishingLineZ;
+    //2D endpoints, 3D linesPC
+    std::vector<RandomLine3d> vVanishingLinePCx;
+    std::vector<RandomLine3d> vVanishingLinePCy;
+    std::vector<RandomLine3d> vVanishingLinePCz;
+
+    //use the opencv line matcher(lsd)
+
+    //MapLines associated to keyline, NULL pointer if no association
     std::vector<bool> mvbOutlierLines;
 
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.

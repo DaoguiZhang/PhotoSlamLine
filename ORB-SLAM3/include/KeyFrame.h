@@ -55,7 +55,6 @@ class GeometricCamera;
 class KeyFrame
 {
     friend class boost::serialization::access;
-
     template<class Archive>
     void serialize(Archive& ar, const unsigned int version)
     {
@@ -67,7 +66,6 @@ class KeyFrame
         ar & const_cast<int&>(mnGridRows);
         ar & const_cast<float&>(mfGridElementWidthInv);
         ar & const_cast<float&>(mfGridElementHeightInv);
-
         // Variables of tracking
         //ar & mnTrackReferenceForFrame;
         //ar & mnFuseTargetForKF;
@@ -107,7 +105,6 @@ class KeyFrame
         //ar & mnMergeForKF;
         //ar & mfScaleMerge;
         //ar & mnBALocalForMerge;
-
         // Scale
         ar & mfScale;
         // Calibration parameters
@@ -165,15 +162,11 @@ class KeyFrame
         ar & mbNotErase;
         ar & mbToBeErased;
         ar & mbBad;
-
         ar & mHalfBaseline;
-
         ar & mnOriginMapId;
-
         // Camera variables
         ar & mnBackupIdCamera;
         ar & mnBackupIdCamera2;
-
         // Fisheye variables
         ar & mvLeftToRightMatch;
         ar & mvRightToLeftMatch;
@@ -182,7 +175,6 @@ class KeyFrame
         serializeSophusSE3<Archive>(ar, mTlr, version);
         serializeVectorKeyPoints<Archive>(ar, mvKeysRight, version);
         ar & mGridRight;
-
         // Inertial variables
         ar & mImuBias;
         ar & mBackupImuPreintegrated;
@@ -196,7 +188,8 @@ class KeyFrame
     }
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+    
     KeyFrame();
     KeyFrame(Frame &F, Map* pMap, KeyFrameDatabase* pKFDB);
 

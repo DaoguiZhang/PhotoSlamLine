@@ -162,9 +162,14 @@ int main(int argc, char **argv)
         }
 
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
-
-        // Pass the image to the SLAM system
+        bool UseLineFlag = true;
+        if (UseLineFlag)
+        {
+            //set line flag
+        }
+         // Pass the image to the SLAM system
         pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+       
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
@@ -237,10 +242,15 @@ void saveGpuPeakMemoryUsage(std::filesystem::path pathSave)
     namespace c10Alloc = c10::cuda::CUDACachingAllocator;
     c10Alloc::DeviceStats mem_stats = c10Alloc::getDeviceStats(0);
 
-    c10Alloc::Stat reserved_bytes = mem_stats.reserved_bytes[static_cast<int>(c10Alloc::StatType::AGGREGATE)];
+    //c10Alloc::Stat reserved_bytes = mem_stats.reserved_bytes[static_cast<int>(c10Alloc::StatType::AGGREGATE)];
+    //float max_reserved_MB = reserved_bytes.peak / (1024.0 * 1024.0);
+    //c10Alloc::Stat alloc_bytes = mem_stats.allocated_bytes[static_cast<int>(c10Alloc::StatType::AGGREGATE)];
+    //float max_alloc_MB = alloc_bytes.peak / (1024.0 * 1024.0);
+    
+    c10::CachingAllocator::Stat reserved_bytes = mem_stats.reserved_bytes[static_cast<int>(c10::CachingAllocator::StatType::AGGREGATE)];
     float max_reserved_MB = reserved_bytes.peak / (1024.0 * 1024.0);
-
-    c10Alloc::Stat alloc_bytes = mem_stats.allocated_bytes[static_cast<int>(c10Alloc::StatType::AGGREGATE)];
+    
+    c10::CachingAllocator::Stat alloc_bytes = mem_stats.allocated_bytes[static_cast<int>(c10::CachingAllocator::StatType::AGGREGATE)];
     float max_alloc_MB = alloc_bytes.peak / (1024.0 * 1024.0);
 
     std::ofstream out(pathSave);

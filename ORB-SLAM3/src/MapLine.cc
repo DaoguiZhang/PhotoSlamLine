@@ -304,7 +304,73 @@ void MapLine::PreSave(std::set<KeyFrame*>& spKF, std::set<MapLine*>& spML)
     }
 }
 
+int MapLine::PredictScale(const float &currentDist, KeyFrame* pKF)
+{
+    float ratio;
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        ratio = mfMaxDistance/currentDist;
+    }
+
+    int nScale = ceil(log(ratio)/pKF->mfLogScaleFactor);
+    if(nScale<0)
+        nScale = 0;
+    else if(nScale>=pKF->mnScaleLevels)
+        nScale = pKF->mnScaleLevels-1;
+
+    return nScale;
+}
+
+int MapLine::PredictScale(const float &currentDist, Frame* pF)
+{
+    float ratio;
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        ratio = mfMaxDistance/currentDist;
+    }
+
+    int nScale = ceil(log(ratio)/pF->mfLogScaleFactor);
+    if(nScale<0)
+        nScale = 0;
+    else if(nScale>=pF->mnScaleLevels)
+        nScale = pF->mnScaleLevels-1;
+
+    return nScale;
+}
+
+void MapLine::PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapLine*>& mpMLid)
+{
+    mpRefKF = mpKFid[mBackupRefKFId];
+    if(!mpRefKF)
+    {
+        cout << "ERROR: MP without KF reference " << mBackupRefKFId << "; Num obs: " << nObs << endl;
+    }
+    mpLineReplaced = static_cast<MapLine*>(NULL);
+    if(mLineBackupReplacedId>=0)
+    {
+        map<long unsigned int, MapLine*>::iterator it = mpMLid.find(mLineBackupReplacedId);
+        if (it != mpMLid.end())
+            mpLineReplaced = it->second;
+    }
+    mLineObservations.clear();
+    for(map<long unsigned int, int>::const_iterator it = mLineBackupObservationsId1.begin(), end = mLineBackupObservationsId1.end(); it != end; ++it)
+    {
+        KeyFrame* pKFi = mpKFid[it->first];
+        map<long unsigned int, int>::const_iterator it2 = mLineBackupObservationsId2.find(it->first);
+        std::tuple<int, int> indexes = tuple<int,int>(it->second,it2->second);
+        if(pKFi)
+        {
+           mLineObservations[pKFi] = indexes;
+        }
+    }
+
+    mLineBackupObservationsId1.clear();
+    mLineBackupObservationsId2.clear();
+}
+
+
 #if 0
+
 MapLine* MapLine::GetReplaced()
 {
     unique_lock<mutex> lock1(mMutexFeatures);
@@ -578,39 +644,7 @@ float MapLine::GetMaxDistanceInvariance()
     return 1.2f * mfMaxDistance;
 }
 
-int MapLine::PredictScale(const float &currentDist, KeyFrame* pKF)
-{
-    float ratio;
-    {
-        unique_lock<mutex> lock(mMutexPos);
-        ratio = mfMaxDistance/currentDist;
-    }
 
-    int nScale = ceil(log(ratio)/pKF->mfLogScaleFactor);
-    if(nScale<0)
-        nScale = 0;
-    else if(nScale>=pKF->mnScaleLevels)
-        nScale = pKF->mnScaleLevels-1;
-
-    return nScale;
-}
-
-int MapLine::PredictScale(const float &currentDist, Frame* pF)
-{
-    float ratio;
-    {
-        unique_lock<mutex> lock(mMutexPos);
-        ratio = mfMaxDistance/currentDist;
-    }
-
-    int nScale = ceil(log(ratio)/pF->mfLogScaleFactor);
-    if(nScale<0)
-        nScale = 0;
-    else if(nScale>=pF->mnScaleLevels)
-        nScale = pF->mnScaleLevels-1;
-
-    return nScale;
-}
 
 void MapLine::PrintObservations()
 {
@@ -636,39 +670,6 @@ void MapLine::UpdateMap(Map* pMap)
     mpMap = pMap;
 }
 
-
-
-void MapLine::PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapLine*>& mpMPid)
-{
-    mpRefKF = mpKFid[mBackupRefKFId];
-    if(!mpRefKF)
-    {
-        cout << "ERROR: MP without KF reference " << mBackupRefKFId << "; Num obs: " << nObs << endl;
-    }
-    mpReplaced = static_cast<MapPoint*>(NULL);
-    if(mBackupReplacedId>=0)
-    {
-        map<long unsigned int, MapPoint*>::iterator it = mpMPid.find(mBackupReplacedId);
-        if (it != mpMPid.end())
-            mpReplaced = it->second;
-    }
-
-    mObservations.clear();
-
-    for(map<long unsigned int, int>::const_iterator it = mBackupObservationsId1.begin(), end = mBackupObservationsId1.end(); it != end; ++it)
-    {
-        KeyFrame* pKFi = mpKFid[it->first];
-        map<long unsigned int, int>::const_iterator it2 = mBackupObservationsId2.find(it->first);
-        std::tuple<int, int> indexes = tuple<int,int>(it->second,it2->second);
-        if(pKFi)
-        {
-           mObservations[pKFi] = indexes;
-        }
-    }
-
-    mBackupObservationsId1.clear();
-    mBackupObservationsId2.clear();
-}
 
 #endif
 

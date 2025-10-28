@@ -41,7 +41,7 @@ namespace ORB_SLAM3
             cv::Point3d A = pts[indexes[0]], B = pts[indexes[1]];
             std::cout<<"A:"<<A.x<<","<<A.y<<","<<A.z<<".B:"<<B.x<<std::endl;
             // compute a line from A and B
-            if (cv::norm(B-A) < EPS ) continue;
+            if (cv::norm(B-A) < MYEPS ) continue;
             /*
             * 随机取出来两点 作为直线端点，计算 其他点X 到直线距离，距离小于 阈值（disThresh）时，把X作为inlierSet,
             * 最后，size of inlierSet 最大的两个端点，最为bestA and bestB，点集则是maxInlierSet
@@ -137,7 +137,7 @@ namespace ORB_SLAM3
     double dist3d_pt_line (cv::Point3f X, cv::Point3f A, cv::Point3f B)
     // input: point X, line (A,B)
     {
-        if(cv::norm(A-B)<EPS) {
+        if(cv::norm(A-B)<MYEPS) {
             std::cerr<<"error in function dist3d_pt_line: line length can not be 0!"<<std::endl;
             return -1;
         }
@@ -174,7 +174,7 @@ namespace ORB_SLAM3
         cv::Point3d C = projectPt3d2Ln3d (pts[idx1], (A+B)*0.5, B-A);
         cv::Point3d D = projectPt3d2Ln3d (pts[idx2], (A+B)*0.5, B-A);
         double cd = cv::norm(D-C);
-        if(cd < EPS) {
+        if(cd < MYEPS) {
             delete[] cells;
             return false;
         }
@@ -485,7 +485,7 @@ namespace ORB_SLAM3
     // distance from point(x,y) to line ax+by+c=0;
     // l=(a, b, c), p = (x,y)
     {
-        if(abs(l[0]*l[0]+l[1]*l[1]-1)>EPS) {
+        if(abs(l[0]*l[0]+l[1]*l[1]-1)>MYEPS) {
             std::cout<<"pt_to_line_dist2d: error,l should be normalized/initialized\n";
             std::exit(0);
         }
@@ -651,7 +651,7 @@ namespace ORB_SLAM3
             col = int(p2.x);
             row = int(p2.y);
         }
-        if(depth.at<double>(row,col) < EPS) { // no depth info
+        if(depth.at<double>(row,col) < MYEPS) { // no depth info
             return false;
         } else {
             double zval = depth.at<double>(row,col)/5000; // in meter, z-value
@@ -1239,7 +1239,7 @@ namespace ORB_SLAM3
             const RandomPoint3d& A = pts[indexes[0]];
             const RandomPoint3d& B = pts[indexes[1]];
             //cout<<"A:"<<A.xyz[0]<<","<<A.xyz[1]<<","<<A.xyz[2]<<".B:"<<B.xyz[2]<<endl;
-            if (cv::norm(B.pos-A.pos) < EPS ) continue;
+            if (cv::norm(B.pos-A.pos) < MYEPS ) continue;
             for (int i=0; i<pts.size(); ++i) {
                 // compute distance to AB
                 double dist = mah_dist3d_pt_line(pts[i], A.pos, B.pos);
@@ -1338,7 +1338,7 @@ namespace ORB_SLAM3
         cv::Point3d C = projectPt3d2Ln3d (pts[idx1].pos, (A+B)*0.5, B-A);
         cv::Point3d D = projectPt3d2Ln3d (pts[idx2].pos, (A+B)*0.5, B-A);
         double cd = cv::norm(D-C);
-        if(cd < EPS) {
+        if(cd < MYEPS) {
             delete[] cells;
             return false;
         }

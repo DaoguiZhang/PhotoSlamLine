@@ -55,7 +55,8 @@ public:
     Eigen::Vector3f a;
     Eigen::Vector3f w;
     double t;
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
 };
 
 //IMU biases (gyro and accelerometer)
@@ -68,7 +69,6 @@ class Bias
         ar & bax;
         ar & bay;
         ar & baz;
-
         ar & bwx;
         ar & bwy;
         ar & bwz;
@@ -85,7 +85,7 @@ public:
 public:
     float bax, bay, baz;
     float bwx, bwy, bwz;
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 };
 
 //IMU calibration (Tbc, Tcb, noise)
@@ -97,10 +97,8 @@ class Calib
     {
         serializeSophusSE3(ar,mTcb,version);
         serializeSophusSE3(ar,mTbc,version);
-
         ar & boost::serialization::make_array(Cov.diagonal().data(), Cov.diagonal().size());
         ar & boost::serialization::make_array(CovWalk.diagonal().data(), CovWalk.diagonal().size());
-
         ar & mbIsSet;
     }
 
@@ -136,7 +134,7 @@ public:
     float deltaT; //integration time
     Eigen::Matrix3f deltaR;
     Eigen::Matrix3f rightJ; // right jacobian
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 };
 
 //Preintegration of Imu Measurements
@@ -162,14 +160,13 @@ class Preintegrated
         ar & boost::serialization::make_array(JPa.data(), JPa.size());
         ar & boost::serialization::make_array(avgA.data(), avgA.size());
         ar & boost::serialization::make_array(avgW.data(), avgW.size());
-
         ar & bu;
         ar & boost::serialization::make_array(db.data(), db.size());
         ar & mvMeasurements;
     }
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
     Preintegrated(const Bias &b_, const Calib &calib);
     Preintegrated(Preintegrated* pImuPre);
     Preintegrated() {}
@@ -238,7 +235,7 @@ private:
             ar & t;
         }
 
-        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
         integrable(){}
         integrable(const Eigen::Vector3f &a_, const Eigen::Vector3f &w_ , const float &t_):a(a_),w(w_),t(t_){}
         Eigen::Vector3f a, w;

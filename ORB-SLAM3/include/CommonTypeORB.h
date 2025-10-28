@@ -6,7 +6,7 @@
 namespace ORB_SLAM3
 {
 
-    #define EPS	(1e-10)
+    #define MYEPS	1e-10
     #define PI 3.141592653589793
     //#define OPT_USE_MAHDIST 0
 

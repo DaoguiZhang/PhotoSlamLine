@@ -449,6 +449,7 @@ void Frame::featureSelect(const cv::Mat &im)
     // TO DO: Implement feature selection if needed
 }
 
+//Get good line Matchers
 void Frame::lineDescriptorMAD( std::vector<std::vector<cv::DMatch>> matches, double &nn_mad, double &nn12_mad) const
 {
     // TO DO: Implement line descriptor MAD if needed
@@ -614,6 +615,72 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
         return pMP->mbTrackInView || pMP->mbTrackInViewR;
     }
 }
+
+bool Frame::isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight)
+{
+    if(Nleft == -1){
+        pML->mbLineTrackInView = false;
+        pML->mLsTrackProjX = -1;
+        pML->mLsTrackProjY = -1;
+        pML->mLeTrackProjX = -1;
+        pML->mLeTrackProjY = -1;
+
+        Eigen::Vector3f P1 = pML->GetLineWorldPos().first;
+        Eigen::Vector3f P2 = pML->GetLineWorldPos().second;
+
+        // 3D in camera coordinates
+        const Eigen::Matrix<float,3,1> Pc1 = mRcw * P1 + mtcw;
+        const Eigen::Matrix<float,3,1> Pc2 = mRcw * P2 + mtcw;
+
+        // 深度检查
+        if(Pc1(2) <= 0 || Pc2(2) <= 0)
+            return false;
+
+        // 投影到图像
+        Eigen::Vector2f uv1 = mpCamera->project(Pc1);
+        Eigen::Vector2f uv2 = mpCamera->project(Pc2);
+
+        // 裁剪到图像边界
+        Eigen::Vector2f uv1_clip = uv1;
+        Eigen::Vector2f uv2_clip = uv2;
+        uv1_clip(0) = std::min(std::max(uv1(0), mnMinX), mnMaxX);
+        uv1_clip(1) = std::min(std::max(uv1(1), mnMinY), mnMaxY);
+        uv2_clip(0) = std::min(std::max(uv2(0), mnMinX), mnMaxX);
+        uv2_clip(1) = std::min(std::max(uv2(1), mnMinY), mnMaxY);
+
+        // 投影长度判断
+        float lenImg = (uv2_clip - uv1_clip).norm();
+        if(lenImg < minLengthPixels)
+            return false;
+
+        // 预测尺度
+        Eigen::Vector3f PcCenter = (Pc1 + Pc2) * 0.5f;
+        float dist = (PcCenter - mOw).norm();
+        int nPredictedLevel = pML->PredictScale(dist, this);
+
+         // Data used by the tracking
+        pML->mbLineTrackInView = true;
+        pML->mLsTrackProjX = uv1(0);
+        pML->mLsTrackProjY = uv1(1);
+        pML->mLeTrackProjX = uv2(0);
+        pML->mLeTrackProjY = uv2(1);
+        //pMP->mTrackProjXR = uv(0) - mbf*invz;
+        pML->mLineTrackDepth = dist;    //MEAN point
+        pML->mnLineTrackScaleLevel= nPredictedLevel;
+
+        return true;
+    }
+    else
+    {
+        //TO DO next...
+    }
+
+    
+
+    
+    return true;
+}
+
 
 bool Frame::ProjectPointDistort(MapPoint* pMP, cv::Point2f &kp, float &u, float &v)
 {

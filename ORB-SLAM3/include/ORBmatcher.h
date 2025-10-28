@@ -91,7 +91,7 @@ namespace ORB_SLAM3
         static const int TH_LOW;
         static const int TH_HIGH;
         static const int HISTO_LENGTH;
-        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
     protected:
         float RadiusByViewingCos(const float &viewCos);

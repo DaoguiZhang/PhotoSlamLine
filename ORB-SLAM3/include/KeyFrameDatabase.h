@@ -47,7 +47,6 @@ class Map;
 class KeyFrameDatabase
 {
     friend class boost::serialization::access;
-
     template<class Archive>
     void serialize(Archive& ar, const unsigned int version)
     {
@@ -55,7 +54,7 @@ class KeyFrameDatabase
     }
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
     KeyFrameDatabase(){}
     KeyFrameDatabase(const ORBVocabulary &voc);

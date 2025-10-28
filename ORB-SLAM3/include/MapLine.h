@@ -44,8 +44,8 @@ class Frame;
 class MapLine
 {
 
-/*
-    friend class boost::serialization::access;
+/*  
+    friend class boost::serialization::access;  //to do serialization next
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {
@@ -100,7 +100,7 @@ class MapLine
 */
 
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
     MapLine();
 
     MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos, const Eigen::Vector3f &LsColor, const Eigen::Vector3f &LeColor, 
@@ -177,6 +177,7 @@ public:
     float mLeTrackProjY;
     float mLsTrackDepth;
     float mLeTrackDepth;
+    float mLineTrackDepth;
 
     float mTrackDepthR; //to do next...
     float mTrackProjXR; //to do next...

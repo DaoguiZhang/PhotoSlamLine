@@ -30,7 +30,8 @@
 namespace ORB_SLAM3 {
 class  EdgeSE3ProjectXYZOnlyPose: public  g2o::BaseUnaryEdge<2, Eigen::Vector2d, g2o::VertexSE3Expmap>{
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
 
     EdgeSE3ProjectXYZOnlyPose(){}
 
@@ -58,7 +59,8 @@ public:
 
 class  EdgeSE3ProjectXYZOnlyPoseToBody: public  g2o::BaseUnaryEdge<2, Eigen::Vector2d, g2o::VertexSE3Expmap>{
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
 
     EdgeSE3ProjectXYZOnlyPoseToBody(){}
 
@@ -88,7 +90,7 @@ public:
 
 class  EdgeSE3ProjectXYZ: public  g2o::BaseBinaryEdge<2, Eigen::Vector2d, g2o::VertexSBAPointXYZ, g2o::VertexSE3Expmap>{
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
     EdgeSE3ProjectXYZ();
 
@@ -116,7 +118,7 @@ public:
 
 class  EdgeSE3ProjectXYZToBody: public  g2o::BaseBinaryEdge<2, Eigen::Vector2d, g2o::VertexSBAPointXYZ, g2o::VertexSE3Expmap>{
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
     EdgeSE3ProjectXYZToBody();
 
@@ -146,7 +148,8 @@ public:
 class VertexSim3Expmap : public g2o::BaseVertex<7, g2o::Sim3>
 {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
     VertexSim3Expmap();
     virtual bool read(std::istream& is);
     virtual bool write(std::ostream& os) const;
@@ -175,7 +178,8 @@ public:
 class EdgeSim3ProjectXYZ : public  g2o::BaseBinaryEdge<2, Eigen::Vector2d, g2o::VertexSBAPointXYZ, ORB_SLAM3::VertexSim3Expmap>
 {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
     EdgeSim3ProjectXYZ();
     virtual bool read(std::istream& is);
     virtual bool write(std::ostream& os) const;
@@ -196,7 +200,8 @@ public:
 class EdgeInverseSim3ProjectXYZ : public  g2o::BaseBinaryEdge<2, Eigen::Vector2d,  g2o::VertexSBAPointXYZ, VertexSim3Expmap>
 {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
     EdgeInverseSim3ProjectXYZ();
     virtual bool read(std::istream& is);
     virtual bool write(std::ostream& os) const;
