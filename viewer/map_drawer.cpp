@@ -170,6 +170,18 @@ void ImGuiMapDrawer::DrawMapPoints()
     glEnd();
 }
 
+void ImGuiMapDrawer::DrawMapPointsLines(const bool bDrawLines)
+{
+    // This function can be implemented to visualize map points and Map Lines
+    Map* pActiveMap = mpAtlas->GetCurrentMap();
+    if(!pActiveMap)
+        return;
+    // Implementation goes here
+
+    const std::vector<MapPoint*> &vpMPs = pActiveMap->GetAllMapPoints();
+    //const std::vector<>
+}
+
 void ImGuiMapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const bool bDrawInertialGraph, const bool bDrawOptLba)
 {
     const float &w = mKeyFrameSize;

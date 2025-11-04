@@ -57,7 +57,7 @@ class Settings;
 class ImGuiViewer
 {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
     ImGuiViewer(
         std::shared_ptr<ORB_SLAM3::System> pSLAM,
         std::shared_ptr<GaussianMapper> pGausMapper,

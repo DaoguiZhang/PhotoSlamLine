@@ -10,6 +10,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CUDA_STANDARD 17)
 
+add_compile_options(-w)
+
+
+#set(CMAKE_CXX_STANDARD 14)
+#set(CMAKE_CXX_EXTENSIONS OFF)
+#set(CMAKE_CUDA_STANDARD 14)
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
 
 set(CAFFE2_USE_CUDNN on)
@@ -17,14 +24,20 @@ set(CAFFE2_USE_CUDNN on)
 # Uncomment the following line if you want to solve CMake Warning "Failed to compute shorthash for libnvrtc.so"
 # set(PYTHON_EXECUTABLE "/usr/bin/python3")
 
+#set(Torch_DIR /media/zdg/8B8C373DB98C1535/zdg/software/cuda118/libtorch/libtorch/share/cmake/Torch)
+set(Torch_DIR /media/zdg/8B8C373DB98C1535/zdg/software/cuda129/libtorch/libtorch/share/cmake/Torch)
+#/media/zdg/8B8C373DB98C1535/zdg/software/cuda118/libtorch/libtorch
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -pthread")
+
+
 
 # set(ENV{CUDA_LAUNCH_BLOCKING} 1)
 # set(ENV{TORCH_USE_CUDA_DSA} 1)
 
 find_package(CUDA REQUIRED)
 find_package(Eigen3 REQUIRED)
+set(OpenCV_DIR /usr/local/lib/cmake/opencv4)
 find_package(OpenCV 4 REQUIRED)
 find_package(jsoncpp REQUIRED)
 

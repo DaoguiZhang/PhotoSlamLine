@@ -537,7 +537,7 @@ void Map::PostLoad(KeyFrameDatabase* pKFDB, ORBVocabulary* pORBVoc/*, map<long u
 
     //Reference reconstruction between different instances
     map<long unsigned int,MapLine*> mpMapLineId;
-    for(MapLine* pMLi : mspMapLine)
+    for(MapLine* pMLi : mspMapLines)
     {
         if(!pMLi || pMLi->isBad())
             continue;

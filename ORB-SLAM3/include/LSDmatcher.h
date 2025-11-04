@@ -56,11 +56,13 @@ namespace ORB_SLAM3
         int SearchByDescriptor(KeyFrame* pKF, Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
         int SearchByDescriptor(KeyFrame* pKF, KeyFrame *pKF2, std::vector<MapLine*> &vpMapLineMatches);
         int SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono);
+        int MatchLinesByProjection(Frame &currentFrame, const Frame &lastFrame, const float threshold, const bool isMono);
         int SearchByProjection(KeyFrame* pKF,Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
         int SearchByProjection(Frame &F, const std::vector<MapLine*> &vpMapLines, const float th=3);
         int SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const std::vector<MapLine*> &vpLines, std::vector<MapLine*> &vpMatched, int th);
         int SearchBySim3(KeyFrame* pKF1, KeyFrame* pKF2, std::vector<MapLine *> &vpMatches12, const float &s12, const cv::Mat &R12, const cv::Mat &t12, const float th);
         int SerachForInitialize(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int,int>> &LineMatches);
+        int SerachForInitializeCV(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int, int>> &LineMatches); //use OpenCV functions
         int SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<size_t, size_t>> &vMatchedPairs);
 
         // Project MapLines into KeyFrame and search for duplicated MapLines
@@ -69,6 +71,10 @@ namespace ORB_SLAM3
         int Fuse(KeyFrame* pKF, cv::Mat Scw, const std::vector<MapLine*> &vpLines, float th, std::vector<MapLine *> &vpReplaceLine);
 
         static int DescriptorDistance(const cv::Mat &a, const cv::Mat &b);
+
+        //Draw matches for visualization
+        static cv::Mat DrawLineMatches(const cv::Mat &img1, const std::vector<cv::line_descriptor::KeyLine> &keylines1,
+                                       const cv::Mat &img2, const std::vector<cv::line_descriptor::KeyLine> &keylines2, std::vector<cv::DMatch> &nmatches);
 
     protected:
         float RadiusByViewingCos(const float &viewCos);
@@ -79,6 +85,11 @@ namespace ORB_SLAM3
         float mransac_threshold;
         float mmax_angle_diff;     // 最大角度差
         float mmax_length_ratio;   // 最大长度比
+
+        static bool sortByQueryIdx(const std::vector<cv::DMatch>& a, const std::vector<cv::DMatch>& b) {
+            if (a.empty() || b.empty()) return false;
+            return a[0].queryIdx < b[0].queryIdx;
+        }
     };
 }
 

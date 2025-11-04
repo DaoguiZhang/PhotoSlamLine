@@ -71,9 +71,14 @@ public:
 
     // Constructor for RGB-D cameras.
     Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
-
+    // Constructor for RGB-D cameras. add line featrue
+    Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
+    
     // Constructor for Monocular cameras.
-    Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
+    Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
+
+     // Constructor for Monocular cameras, with line feature.
+    Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor,  ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
 
     // Destructor
     // ~Frame();
@@ -83,12 +88,14 @@ public:
 
     // extract line feature, 自己添加的
     void ExtractLSD(const cv::Mat &im);
-    
+
     //点线特征选择
     void featureSelect(const cv::Mat &im);
 
     // 自己添加的，线特征描述子MAD
-    void lineDescriptorMAD( std::vector<std::vector<cv::DMatch>> matches, double &nn_mad, double &nn12_mad) const;
+    //void lineDescriptorMAD(const std::vector<std::vector<cv::DMatch>> matches, double &nn_mad, double &nn12_mad) const;
+    void lineDescriptorMAD(const std::vector<std::vector<cv::DMatch>>& matches, double &nn_mad, double &nn12_mad) const;
+    //lineDescriptorMAD(const std::vector<std::vector<cv::DMatch>>& matches, double &nn_mad, double &nn12_mad) const
 
     // Compute Bag of Words representation.
     void ComputeBoW();
@@ -132,16 +139,22 @@ public:
 
     vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel=-1, const int maxLevel=-1, const bool bRight = false) const;
 
+    std::vector<size_t> GetLinesInArea(const float &x1, const float  &y1, const float &x2, const float &y2, const float  &r, const int minLevel=-1, const int maxLevel=-1, const bool bRight = false) const;
+
     // Search a match for each keypoint in the left image to a keypoint in the right image.
     // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
     void ComputeStereoMatches();
 
     // Search a match for each keyline in the left image to a keypoint in the right image.
-    // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
-    void ComputeStereoLinesMatches();
+    // If there is a match, depth is computed and the right coordinate associated to the left keyLine is stored.
+    void ComputeStereoLineMatches();
+
+    void ComputeStereoLineMatchesRobustEndpoints();
 
     // Associate a "right" coordinate to a keypoint if there is valid depth in the depthmap.
     void ComputeStereoFromRGBD(const cv::Mat &imDepth);
+    // Associate a "right" coordinate to a keyline if there is valid depth in the depthmap.
+    void ComputeLineStereoFromRGBD(const cv::Mat &imDepth);
 
     // Backprojects a keypoint (if stereo/depth info available) into 3D world coordinates.
     bool UnprojectStereo(const int &i, Eigen::Vector3f &x3D, Eigen::Vector3f &colorRGB);
@@ -211,6 +224,21 @@ private:
     Eigen::Vector3f mVw;
     bool mbHasVelocity;
 
+    // === 内部比较器 ===
+    static bool compare_descriptor_by_NN_dist(const std::vector<cv::DMatch>& a,
+                                              const std::vector<cv::DMatch>& b)
+    {
+        return a[0].distance < b[0].distance;
+    }
+
+    static bool compare_descriptor_by_NN12_dist(const std::vector<cv::DMatch>& a,
+                                                const std::vector<cv::DMatch>& b)
+    {
+        float diff_a = a[1].distance - a[0].distance;
+        float diff_b = b[1].distance - b[0].distance;
+        return diff_a < diff_b;
+    }
+
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
@@ -221,7 +249,7 @@ public:
     ORBextractor* mpORBextractorLeft, *mpORBextractorRight;
 
     //Line Featrue extractor, The right is used only in the stereo case
-    LSDextractor* mpLSDextractorLeft, *mpLSDextractorRight; //to do next
+    LSDextractor* mpLineExtractorLeft, *mpLineExtractorRight; //to do next
 
     // Frame timestamp.
     double mTimeStamp;
@@ -271,6 +299,7 @@ public:
     std::vector<float> mvDepth;
     std::vector<std::pair<float,float> > mvuLineRight; // "Mon
     std::vector<std::pair<float,float> > mvLineDepth;
+    std::vector<float> mvLineDepthConfidence;
 
     //Corresonding stereo coordinate and depth for each line keypoint
     std::vector<MapLine*> mvpMapLines;
@@ -284,12 +313,17 @@ public:
     cv::Mat mDescriptors, mDescriptorsRight;
 
     // Line descriptor, each row associated to a line keyline
-    cv::Mat mLineDescriptors;
+    cv::Mat mLineDescriptors, mLineDescriptorsRight;
 
     // MapPoints associated to keypoints, NULL pointer if no association.
     // Flag to identify outlier associations.
     std::vector<bool> mvbOutlier;
     int mnCloseMPs;
+
+    //MapLines associated to keylines, NULL pointer if no association.
+    //Flag to identify outlier associations
+    std::vector<bool> mvbLineOutlier;
+    int mnCloseMLs;
 
     SurfaceNormal mpSurfaceNormal;  //
     std::vector<SurfaceNormal> mvFurfaceNormal; //
@@ -310,7 +344,7 @@ public:
 
     //use the opencv line matcher(lsd)
 
-    //MapLines associated to keyline, NULL pointer if no association
+    //MapLines associated to keylines, NULL pointer if no association
     std::vector<bool> mvbOutlierLines;
 
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.

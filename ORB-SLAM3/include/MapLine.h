@@ -118,7 +118,10 @@ public:
     bool isRetrived();
 
     std::pair<Eigen::Vector3f, Eigen::Vector3f> GetLineNormal();
-    void SetLineNormalVector(const Eigen::Vector3f& Lsnormal, const Eigen::Vector3f& Lenormal);
+    //void SetLineNormalVector(const Eigen::Vector3f& Lsnormal, const Eigen::Vector3f& Lenormal);
+
+    Eigen::Vector3f GetLineNormalVector();
+    void SetLineNormalVector(const Eigen::Vector3f& normal);
 
     KeyFrame* GetReferenceKeyFrame();
 
@@ -147,6 +150,8 @@ public:
     void ComputeDistinctiveDescriptors();
 
     cv::Mat GetDescriptor();
+    cv::Mat GetDescriptorAt(int i);
+    cv::Mat GetLineDescriptor();
 
     void UpdateNormalAndDepth();
 

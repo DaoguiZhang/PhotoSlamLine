@@ -58,12 +58,12 @@ Frame::Frame(const Frame &frame)
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), NL(frame.NL), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), mvKeysUn(frame.mvKeysUn), mvuRight(frame.mvuRight),
      mvKeyLines(frame.mvKeyLines), mvKeyLinesRight(frame.mvKeyLinesRight), mvKeyLinesUn(frame.mvKeyLinesUn),
-     mvuLineRight(frame.mvuLineRight),mvLineDepth(frame.mvLineDepth),mvDepthLines(frame.mvDepthLines),
+     mvuLineRight(frame.mvuLineRight),mvLineDepth(frame.mvLineDepth),mvDepthLines(frame.mvDepthLines),mpLineExtractorLeft(frame.mpLineExtractorLeft), mpLineExtractorRight(frame.mpLineExtractorRight),
      mvDepth(frame.mvDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec), mLineDescriptors(frame.mLineDescriptors.clone()),
      mDescriptors(frame.mDescriptors.clone()), mDescriptorsRight(frame.mDescriptorsRight.clone()), mvpMapPoints(frame.mvpMapPoints), mvbOutlier(frame.mvbOutlier), mImuCalib(frame.mImuCalib), mnCloseMPs(frame.mnCloseMPs),
      mpImuPreintegrated(frame.mpImuPreintegrated), mpImuPreintegratedFrame(frame.mpImuPreintegratedFrame), mImuBias(frame.mImuBias),
-     mnId(frame.mnId), mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels),
-     mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor), mvbOutlierLines(frame.mvbOutlierLines),
+     mnId(frame.mnId), mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels), mvbLineOutlier(frame.mvbLineOutlier),NLleft (frame.NLleft), NLright(frame.NLright),
+     mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor), mvbOutlierLines(frame.mvbOutlierLines), mnCloseMLs(frame.mnCloseMLs),mLineDescriptorsRight(frame.mLineDescriptorsRight.clone()),
      mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors), mNameFile(frame.mNameFile), mnDataset(frame.mnDataset),
      mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2), mpPrevFrame(frame.mpPrevFrame), mpLastKeyFrame(frame.mpLastKeyFrame),
      mbIsSet(frame.mbIsSet), mbImuPreintegrated(frame.mbImuPreintegrated), mpMutexImu(frame.mpMutexImu),
@@ -298,8 +298,199 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
 }
 
 
+Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF, const IMU::Calib &ImuCalib)
+    :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor), mpLineExtractorLeft(lsd_extractor), ORBextractorRight(static_cast<ORBextractor*>(NULL)),
+     mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
+     mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
+     mpCamera(pCamera),mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+{
+    // Frame ID
+    mnId=nNextId++;
+
+    // Save RGB image for Gaussian Mapping
+    this->imgLeftRGB = imRGB.clone();
+    this->imgAuxiliary = imDepth.clone();
+
+    // Scale Level Info
+    mnScaleLevels = mpORBextractorLeft->GetLevels();
+    mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
+    mfLogScaleFactor = log(mfScaleFactor);
+    mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
+    mvInvScaleFactors = mpORBextractorLeft->GetInverseScaleFactors();
+    mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
+    mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
+
+    // ORB extraction
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
+#endif
+    ExtractORB(0,imGray,0,0);
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
+
+    mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
+#endif
+
+
+    N = mvKeys.size();
+
+    if(mvKeys.empty())
+        return;
+
+    UndistortKeyPoints();
+
+    ComputeStereoFromRGBD(imDepth);
+
+    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
+
+    mmProjectPoints.clear();
+    mmMatchedInImage.clear();
+
+    mvbOutlier = vector<bool>(N,false);
+
+    // This is done only for the first Frame (or after a change in the calibration)
+    if(mbInitialComputations)
+    {
+        ComputeImageBounds(imGray);
+
+        mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/static_cast<float>(mnMaxX-mnMinX);
+        mfGridElementHeightInv=static_cast<float>(FRAME_GRID_ROWS)/static_cast<float>(mnMaxY-mnMinY);
+
+        fx = K.at<float>(0,0);
+        fy = K.at<float>(1,1);
+        cx = K.at<float>(0,2);
+        cy = K.at<float>(1,2);
+        invfx = 1.0f/fx;
+        invfy = 1.0f/fy;
+
+        mbInitialComputations=false;
+    }
+
+    mb = mbf/fx;
+
+    if(pPrevF){
+        if(pPrevF->HasVelocity())
+            SetVelocity(pPrevF->GetVelocity());
+    }
+    else{
+        mVw.setZero();
+    }
+
+    mpMutexImu = new std::mutex();
+
+    //Set no stereo fisheye information
+    Nleft = -1;
+    Nright = -1;
+    mvLeftToRightMatch = vector<int>(0);
+    mvRightToLeftMatch = vector<int>(0);
+    mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
+    monoLeft = -1;
+    monoRight = -1;
+
+    AssignFeaturesToGrid();
+}
+
+
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF, const IMU::Calib &ImuCalib)
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
+     mTimeStamp(timeStamp), mK(static_cast<Pinhole*>(pCamera)->toK()), mK_(static_cast<Pinhole*>(pCamera)->toK_()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
+     mImuCalib(ImuCalib), mpImuPreintegrated(NULL),mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false), mpCamera(pCamera),
+     mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+{
+    // Frame ID
+    mnId=nNextId++;
+
+    // Save RGB image for Gaussian Mapping
+    this->imgLeftRGB = imRGB.clone();
+
+    // Scale Level Info
+    mnScaleLevels = mpORBextractorLeft->GetLevels();
+    mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
+    mfLogScaleFactor = log(mfScaleFactor);
+    mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
+    mvInvScaleFactors = mpORBextractorLeft->GetInverseScaleFactors();
+    mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
+    mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
+
+    // ORB extraction
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
+#endif
+    ExtractORB(0,imGray,0,1000);
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
+
+    mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
+#endif
+
+
+    N = mvKeys.size();
+    if(mvKeys.empty())
+        return;
+
+    UndistortKeyPoints();
+
+    // Set no stereo information
+    mvuRight = vector<float>(N,-1);
+    mvDepth = vector<float>(N,-1);
+    mnCloseMPs = 0;
+
+    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
+
+    mmProjectPoints.clear();// = map<long unsigned int, cv::Point2f>(N, static_cast<cv::Point2f>(NULL));
+    mmMatchedInImage.clear();
+
+    mvbOutlier = vector<bool>(N,false);
+
+    // This is done only for the first Frame (or after a change in the calibration)
+    if(mbInitialComputations)
+    {
+        ComputeImageBounds(imGray);
+
+        mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/static_cast<float>(mnMaxX-mnMinX);
+        mfGridElementHeightInv=static_cast<float>(FRAME_GRID_ROWS)/static_cast<float>(mnMaxY-mnMinY);
+
+        fx = static_cast<Pinhole*>(mpCamera)->toK().at<float>(0,0);
+        fy = static_cast<Pinhole*>(mpCamera)->toK().at<float>(1,1);
+        cx = static_cast<Pinhole*>(mpCamera)->toK().at<float>(0,2);
+        cy = static_cast<Pinhole*>(mpCamera)->toK().at<float>(1,2);
+        invfx = 1.0f/fx;
+        invfy = 1.0f/fy;
+
+        mbInitialComputations=false;
+    }
+
+
+    mb = mbf/fx;
+
+    //Set no stereo fisheye information
+    Nleft = -1;
+    Nright = -1;
+    mvLeftToRightMatch = vector<int>(0);
+    mvRightToLeftMatch = vector<int>(0);
+    mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
+    monoLeft = -1;
+    monoRight = -1;
+
+    AssignFeaturesToGrid();
+
+    if(pPrevF)
+    {
+        if(pPrevF->HasVelocity())
+        {
+            SetVelocity(pPrevF->GetVelocity());
+        }
+    }
+    else
+    {
+        mVw.setZero();
+    }
+
+    mpMutexImu = new std::mutex();
+}
+
+Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF, const IMU::Calib &ImuCalib)
+    :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor), mpLineExtractorLeft(lsd_extractor), mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(static_cast<Pinhole*>(pCamera)->toK()), mK_(static_cast<Pinhole*>(pCamera)->toK_()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL),mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false), mpCamera(pCamera),
      mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
@@ -449,11 +640,11 @@ void Frame::featureSelect(const cv::Mat &im)
     // TO DO: Implement feature selection if needed
 }
 
-//Get good line Matchers
-void Frame::lineDescriptorMAD( std::vector<std::vector<cv::DMatch>> matches, double &nn_mad, double &nn12_mad) const
-{
-    // TO DO: Implement line descriptor MAD if needed
-}
+// //Get good line Matchers
+// void Frame::lineDescriptorMAD( std::vector<std::vector<cv::DMatch>> matches, double &nn_mad, double &nn12_mad) const
+// {
+//     // TO DO: Implement line descriptor MAD if needed
+// }
 
 bool Frame::isSet() const {
     return mbIsSet;
@@ -819,6 +1010,42 @@ vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const f
     return vIndices;
 }
 
+std::vector<size_t> Frame::GetLinesInArea(const float &x1, const float  &y1, const float &x2, const float &y2, const float  &r, const int minLevel, const int maxLevel, const bool bRight) const
+{
+    std::vector<size_t> vIndices;
+
+    std::vector<cv::line_descriptor::KeyLine> vkl = this->mvKeyLinesUn;
+
+    const bool bCheckLevels = (minLevel > 0) || (maxLevel > 0);
+
+    for (size_t i = 0; i < vkl.size(); i++) {
+        cv::line_descriptor::KeyLine keyline = vkl[i];
+
+        // 1. 对比中点距离
+        float distance = (0.5 * (x1 + x2) - keyline.pt.x) * (0.5 * (x1 + x2) - keyline.pt.x) +
+                         (0.5 * (y1 + y2) - keyline.pt.y) * (0.5 * (y1 + y2) - keyline.pt.y);
+        if (distance > r * r)
+            continue;
+
+        // 2. 比较角度差
+        float angle_diff = std::abs(keyline.angle - atan2(y2 - y1, x2 - x1));
+        if (angle_diff > r * 0.01)
+            continue;
+
+        // 3. 比较金字塔层数
+        if (bCheckLevels) {
+            if (keyline.octave < minLevel)
+                continue;
+            if (maxLevel >= 0 && keyline.octave > maxLevel)
+                continue;
+        }
+
+        vIndices.push_back(i);
+    }
+
+    return vIndices;
+}
+
 bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 {
     posX = round((kp.pt.x-mnMinX)*mfGridElementWidthInv);
@@ -830,6 +1057,67 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 
     return true;
 }
+
+
+void Frame::lineDescriptorMAD(const std::vector<std::vector<cv::DMatch>>& matches, double &nn_mad, double &nn12_mad) const
+{
+    if (matches.empty()) {
+        nn_mad = 0;
+        nn12_mad = 0;
+        return;
+    }
+
+    std::vector<std::vector<cv::DMatch>> matches_nn = matches;
+    std::vector<std::vector<cv::DMatch>> matches_12 = matches;
+    //cout << "Frame::lineDescriptorMAD——matches_nn = "<<matches_nn.size() << endl;
+
+    // NN距离的MAD
+    std::sort(matches_nn.begin(), matches_nn.end(), Frame::compare_descriptor_by_NN_dist);
+    double nn_dist_median = matches_nn[matches_nn.size()/2][0].distance;
+
+    for (auto &m : matches_nn)
+        m[0].distance = std::fabs(m[0].distance - nn_dist_median);
+
+    std::sort(matches_nn.begin(), matches_nn.end(), Frame::compare_descriptor_by_NN_dist);
+    nn_mad = 1.4826 * matches_nn[matches_nn.size()/2][0].distance;
+
+    // NN-12距离差的MAD
+    std::sort(matches_12.begin(), matches_12.end(), Frame::compare_descriptor_by_NN_dist);
+    double nn12_dist_median = matches_12[matches_12.size()/2][1].distance -
+                              matches_12[matches_12.size()/2][0].distance;
+
+    for (auto &m : matches_12)
+        m[0].distance = std::fabs((m[1].distance - m[0].distance) - nn12_dist_median);
+
+    std::sort(matches_12.begin(), matches_12.end(), Frame::compare_descriptor_by_NN_dist);
+    nn12_mad = 1.4826 * matches_12[matches_12.size()/2][0].distance;
+}
+
+
+// void Frame::lineDescriptorMAD( std::vector<std::vector<cv::DMatch>> matches, double &nn_mad, double &nn12_mad) const
+// {
+//     // TO DO: Implement line descriptor MAD if needed
+//     vector<vector<DMatch>> matches_nn, matches_12;
+//     matches_nn = line_matches;
+//     matches_12 = line_matches;
+// //    cout << "Frame::lineDescriptorMAD——matches_nn = "<<matches_nn.size() << endl;
+//     // estimate the NN's distance standard deviation
+//     double nn_dist_median;
+//     std::sort( matches_nn.begin(), matches_nn.end(), compare_descriptor_by_NN_dist());
+//     nn_dist_median = matches_nn[int(matches_nn.size()/2)][0].distance;
+//     for(unsigned int i=0; i<matches_nn.size(); i++)
+//         matches_nn[i][0].distance = fabsf(matches_nn[i][0].distance - nn_dist_median);
+//     std::sort(matches_nn.begin(), matches_nn.end(), compare_descriptor_by_NN_dist());
+//     nn_mad = 1.4826 * matches_nn[int(matches_nn.size()/2)][0].distance;
+//     // estimate the NN's 12 distance standard deviation
+//     double nn12_dist_median;
+//     std::sort( matches_12.begin(), matches_12.end(), conpare_descriptor_by_NN12_dist());
+//     nn12_dist_median = matches_12[int(matches_12.size()/2)][1].distance - matches_12[int(matches_12.size()/2)][0].distance;
+//     for (unsigned int j=0; j<matches_12.size(); j++)
+//         matches_12[j][0].distance = fabsf( matches_12[j][1].distance - matches_12[j][0].distance - nn12_dist_median);
+//     sort(matches_12.begin(), matches_12.end(), compare_descriptor_by_NN_dist());
+//     nn12_mad = 1.4826 * matches_12[int(matches_12.size()/2)][0].distance;
+// }
 
 
 void Frame::ComputeBoW()
@@ -1077,6 +1365,324 @@ void Frame::ComputeStereoMatches()
     }
 }
 
+void Frame::ComputeStereoLineMatches()
+{
+    const int NL = mvKeyLines.size();
+    mvuLineRight = std::vector<std::pair<float, float>>(NL, {-1.0f, -1.0f});
+    mvLineDepth = std::vector<std::pair<float, float>>(NL, {-1.0f, -1.0f});
+    std::vector<std::pair<float, float>> mvLineDepthConfidenceEndpoints(NL, {0.0f, 0.0f});
+    mvLineDepthConfidence = std::vector<float>(NL, 0.0f);
+
+    if (mvKeyLinesRight.empty() || mvKeyLines.empty())
+        return;
+
+    const int thDescDist = (LSDmatcher::TH_HIGH + LSDmatcher::TH_LOW) / 2;
+    const float thAngle = 10.0f * CV_PI / 180.0f;
+    const float thLengthRatio = 0.5f;
+
+    const float minZ = mb;
+    const float minDisp = 0.0f;
+    const float maxDisp = mbf / minZ;
+    const float thConf = 0.3f; // 置信度阈值
+
+    const int nRows = mpLineExtractorLeft->mvImagePyramid[0].rows;
+    std::vector<std::vector<size_t>> vRowIndices(nRows);
+
+    // 按行分桶右图线段
+    for (int i = 0; i < (int)mvKeyLinesRight.size(); i++)
+    {
+        const float yR = 0.5f * (mvKeyLinesRight[i].startPointY + mvKeyLinesRight[i].endPointY);
+        const int rmin = std::max(0, (int)floor(yR - 2.0f));
+        const int rmax = std::min(nRows - 1, (int)ceil(yR + 2.0f));
+        for (int r = rmin; r <= rmax; r++)
+            vRowIndices[r].push_back(i);
+    }
+
+    for (int iL = 0; iL < NL; iL++)
+    {
+        const cv::line_descriptor::KeyLine &klL = mvKeyLines[iL];
+        const float yL = 0.5f * (klL.startPointY + klL.endPointY);
+        if (yL < 0 || yL >= nRows) continue;
+
+        const auto &vCandidates = vRowIndices[(int)yL];
+        if (vCandidates.empty()) continue;
+
+        const cv::Mat dL = mLineDescriptors.row(iL);
+
+        float bestScore = 1e9;
+        int bestIdxR = -1;
+
+        for (size_t c = 0; c < vCandidates.size(); c++)
+        {
+            const int iR = vCandidates[c];
+            const cv::line_descriptor::KeyLine &klR = mvKeyLinesRight[iR];
+
+            // 方向约束
+            float angleDiff = fabs(klL.angle - klR.angle);
+            if (angleDiff > thAngle && fabs(angleDiff - CV_PI) > thAngle)
+                continue;
+
+            // 长度约束
+            float lenL = klL.lineLength;
+            float lenR = klR.lineLength;
+            if (fabs(lenL - lenR) / lenL > thLengthRatio)
+                continue;
+
+            // 端点视差一致性
+            float u1L = klL.startPointX, u2L = klL.endPointX;
+            float u1R = klR.startPointX, u2R = klR.endPointX;
+            float disp1 = u1L - u1R, disp2 = u2L - u2R;
+
+            if (disp1 <= minDisp || disp2 <= minDisp || disp1 > maxDisp || disp2 > maxDisp)
+                continue;
+            if (fabs(disp1 - disp2) > 2.0f)
+                continue;
+
+            // 描述子距离
+            const cv::Mat dR = mLineDescriptorsRight.row(iR);
+            const int dist = LSDmatcher::DescriptorDistance(dL, dR);
+
+            if (dist < bestScore)
+            {
+                bestScore = dist;
+                bestIdxR = iR;
+            }
+        }
+
+        if (bestIdxR < 0 || bestScore > thDescDist)
+            continue;
+
+        // --- 深度计算（端点法） ---
+        const cv::line_descriptor::KeyLine &bestR = mvKeyLinesRight[bestIdxR];
+        float u1L = klL.startPointX, u2L = klL.endPointX;
+        float u1R = bestR.startPointX, u2R = bestR.endPointX;
+
+        float disp1 = u1L - u1R;
+        float disp2 = u2L - u2R;
+
+        float Z1 = mbf / disp1;
+        float Z2 = mbf / disp2;
+
+        // --- 每个端点单独置信度 ---
+        float conf1 = exp(-0.01f * bestScore) * (disp1 / maxDisp);
+        float conf2 = exp(-0.01f * bestScore) * (disp2 / maxDisp);
+
+        // 自动剔除异常端点深度
+        if (conf1 < thConf) { Z1 = -1.0f; u1R = -1.0f; conf1 = 0.0f; }
+        if (conf2 < thConf) { Z2 = -1.0f; u2R = -1.0f; conf2 = 0.0f; }
+
+        mvLineDepth[iL] = {Z1, Z2};
+        mvuLineRight[iL] = {u1R, u2R};
+        mvLineDepthConfidenceEndpoints[iL] = {conf1, conf2};
+
+        // 总置信度可以取两端平均
+        mvLineDepthConfidence[iL] = 0.5f * (conf1 + conf2);
+    }
+}
+
+void Frame::ComputeStereoLineMatchesRobustEndpoints()
+{
+    const int NL = mvKeyLines.size();
+    mvuLineRight = std::vector<std::pair<float,float>>(NL, {-1.0f, -1.0f});
+    mvLineDepth  = std::vector<std::pair<float,float>>(NL, {-1.0f, -1.0f});
+    std::vector<std::pair<float,float>> mvLineDepthConfidenceEndpoints(NL, {0.0f,0.0f});
+    mvLineDepthConfidence = std::vector<float>(NL, 0.0f);
+
+    if (mvKeyLinesRight.empty() || mvKeyLines.empty()) return;
+
+    const int thDescDist = (LSDmatcher::TH_HIGH + LSDmatcher::TH_LOW)/2;
+    const float minZ = mb;
+    const float minDisp = 0.0f;
+    const float maxDisp = mbf/minZ;
+    const float maxEndpointDispRelDiff = 0.25f;
+    const float maxAngleDiffDeg = 20.0f;
+    const float minLenRatio = 0.7f;
+    const float maxLenRatio = 1.3f;
+    const float thConf = 0.3f;
+
+    // 按行分桶右线段
+    const int nRows = mpLineExtractorLeft->mvImagePyramid[0].rows;
+    std::vector<std::vector<size_t>> vRowIndices(nRows);
+    for (size_t i=0; i<mvKeyLinesRight.size(); ++i)
+    {
+        const auto &klR = mvKeyLinesRight[i];
+        const float y = 0.5f*(klR.startPointY + klR.endPointY);
+        int ymin = std::max(0,(int)std::floor(y-2.0f));
+        int ymax = std::min(nRows-1,(int)std::ceil(y+2.0f));
+        for(int r=ymin;r<=ymax;r++) vRowIndices[r].push_back(i);
+    }
+
+    std::vector<std::pair<int,int>> vDistIdx; // <descDist, idxL>
+
+    for(int iL=0;iL<NL;iL++)
+    {
+        const auto &klL = mvKeyLines[iL];
+        const float xL_c = 0.5f*(klL.startPointX + klL.endPointX);
+        const float yL_c = 0.5f*(klL.startPointY + klL.endPointY);
+        if(yL_c<0 || yL_c>=nRows) continue;
+
+        const auto &cands = vRowIndices[(int)std::round(yL_c)];
+        if(cands.empty()) continue;
+
+        const float minU = xL_c - maxDisp;
+        const float maxU = xL_c - minDisp;
+        if(maxU<0) continue;
+
+        int bestDist = LSDmatcher::TH_HIGH;
+        int bestIdxR = -1;
+        const cv::Mat dL = mLineDescriptors.row(iL);
+
+        for(size_t idx=0; idx<cands.size(); ++idx)
+        {
+            size_t iR = cands[idx];
+            const auto &klR = mvKeyLinesRight[iR];
+            const float xR_c = 0.5f*(klR.startPointX + klR.endPointX);
+            if(xR_c<minU || xR_c>maxU) continue;
+            if(klR.octave < klL.octave-1 || klR.octave > klL.octave+1) continue;
+
+            const cv::Mat dR = mLineDescriptorsRight.row((int)iR);
+            int dist = LSDmatcher::DescriptorDistance(dL,dR);
+            if(dist<bestDist){ bestDist=dist; bestIdxR=(int)iR; }
+        }
+
+        if(bestIdxR<0) continue;
+        const auto &klRbest = mvKeyLinesRight[bestIdxR];
+
+        // 端点坐标
+        float uL1=klL.startPointX, uL2=klL.endPointX;
+        float uR1=klRbest.startPointX, uR2=klRbest.endPointX;
+        float d1=uL1-uR1, d2=uL2-uR2;
+        if(!(d1>0 && d1<maxDisp && d2>0 && d2<maxDisp)) continue;
+        float maxd=std::max(std::abs(d1),std::abs(d2));
+        if(maxd<=1e-6f) continue;
+        if(std::abs(d1-d2)/maxd>maxEndpointDispRelDiff) continue;
+
+        float angleL=klL.angle, angleR=klRbest.angle;
+        float angleDiff=std::fabs(angleL-angleR);
+        if(angleDiff>180) angleDiff=std::fmod(angleDiff,180.0f);
+        if(angleDiff>maxAngleDiffDeg) continue;
+
+        float lenL=klL.lineLength,lenR=klRbest.lineLength;
+        if(lenL<=1e-6f || lenR<=1e-6f) continue;
+        float lenRatio = lenR/lenL;
+        if(lenRatio<minLenRatio || lenRatio>maxLenRatio) continue;
+
+        // --- 端点法深度 ---
+        float Z1 = mbf/d1, Z2 = mbf/d2;
+        float conf1 = exp(-0.01f*bestDist)*(d1/maxDisp);
+        float conf2 = exp(-0.01f*bestDist)*(d2/maxDisp);
+
+        if(conf1<thConf){ Z1=-1.0f; uR1=-1.0f; conf1=0.0f; }
+        if(conf2<thConf){ Z2=-1.0f; uR2=-1.0f; conf2=0.0f; }
+
+        mvLineDepth[iL]={Z1,Z2};
+        mvuLineRight[iL]={uR1,uR2};
+        mvLineDepthConfidenceEndpoints[iL]={conf1,conf2};
+        mvLineDepthConfidence[iL]=0.5f*(conf1+conf2);
+
+        vDistIdx.emplace_back(bestDist,iL);
+    }
+
+    // 描述符距离中位数剔除最差匹配
+    if(!vDistIdx.empty())
+    {
+        std::sort(vDistIdx.begin(),vDistIdx.end());
+        float median = vDistIdx[vDistIdx.size()/2].first;
+        float thDist = 1.4f*1.5f*median;
+        for(int i=(int)vDistIdx.size()-1;i>=0;i--)
+        {
+            if(vDistIdx[i].first<thDist) break;
+            int idxL=vDistIdx[i].second;
+            mvLineDepth[idxL]={-1.0f,-1.0f};
+            mvuLineRight[idxL]={-1.0f,-1.0f};
+            mvLineDepthConfidenceEndpoints[idxL]={0.0f,0.0f};
+            mvLineDepthConfidence[idxL]=0.0f;
+        }
+    }
+}
+
+
+// void Frame::ComputeStereoLineMatches()
+// {
+//     mvuLineRight = std::vector<float>(NL, -1.0f);
+//     mvLineDepth = std::vector<float>(NL, -1.0f);
+//     const int thDescDist = (LSDmatcher::TH_HIGH + LSDmatcher::TH_LOW) / 2;
+//     if (mvKeyLinesRight.empty() || mvKeyLines.empty())
+//         return;
+//     // Set limits for disparity search
+//     const float minZ = mb;
+//     const float minDisp = 0.0f;
+//     const float maxDisp = mbf / minZ;
+//     // Candidate right lines per row
+//     const int nRows = mpLineExtractorLeft->mvImagePyramid[0].rows;
+//     std::vector<std::vector<std::size_t>> vRowIndices(nRows);
+//     for (int i = 0; i < mvKeyLinesRight.size(); i++) {
+//         const float y = (mvKeyLinesRight[i].startPointY + mvKeyLinesRight[i].endPointY) * 0.5f;
+//         const int rmin = std::max(0, (int)floor(y - 2.0f));
+//         const int rmax = std::min(nRows - 1, (int)ceil(y + 2.0f));
+//         for (int r = rmin; r <= rmax; r++)
+//             vRowIndices[r].push_back(i);
+//     }
+//     std::vector<std::pair<int,int>> vDistIdx;
+//     vDistIdx.reserve(NL);
+//     for (int iL = 0; iL < NL; iL++) {
+//         const cv::line_descriptor::KeyLine &klL = mvKeyLines[iL];
+//         const float yL = (klL.startPointY + klL.endPointY) * 0.5f;
+//         const float xL = (klL.startPointX + klL.endPointX) * 0.5f;
+//         if (yL < 0 || yL >= nRows) continue;
+//         const std::vector<std::size_t> &vCandidates = vRowIndices[(int)yL];
+//         if (vCandidates.empty()) continue;
+//         const float minU = xL - maxDisp;
+//         const float maxU = xL - minDisp;
+//         if (maxU < 0) continue;
+//         int bestDist = LSDmatcher::TH_HIGH;
+//         std::size_t bestIdxR = 0;
+//         const cv::Mat dL = mLineDescriptors.row(iL);
+//         // Match candidates by descriptor distance
+//         for (std::size_t c = 0; c < vCandidates.size(); c++) {
+//             const std::size_t iR = vCandidates[c];
+//             const cv::line_descriptor::KeyLine &klR = mvKeyLinesRight[iR];
+//             const float xR = (klR.startPointX + klR.endPointX) * 0.5f;
+//             if (xR >= minU && xR <= maxU) {
+//                 const cv::Mat dR = mLineDescriptorsRight.row(iR);
+//                 const int dist = LSDmatcher::DescriptorDistance(dL, dR);
+//                 if (dist < bestDist) {
+//                     bestDist = dist;
+//                     bestIdxR = iR;
+//                 }
+//             }
+//         }
+//         // Subpixel refinement based on center disparity
+//         if (bestDist < thDescDist) {
+//             const cv::line_descriptor::KeyLine &bestR = mvKeyLinesRight[bestIdxR];
+//             const float xR = (bestR.startPointX + bestR.endPointX) * 0.5f;
+//             float disparity = xL - xR;
+//             // Sanity check
+//             if (disparity < minDisp || disparity > maxDisp)
+//                 continue;
+//             if (disparity <= 0.01f)
+//                 disparity = 0.01f;
+//             mvLineDepth[iL] = mbf / disparity;
+//             mvuLineRight[iL] = xR;
+//             vDistIdx.emplace_back(bestDist, iL);
+//         }
+//     }
+//     // Filter unreliable matches
+//     if (vDistIdx.empty()) return;
+//     sort(vDistIdx.begin(), vDistIdx.end());
+//     const float median = vDistIdx[vDistIdx.size()/2].first;
+//     const float thDist = 1.4f * 1.5f * median;
+//     for (int i = vDistIdx.size()-1; i >= 0; i--) {
+//         if (vDistIdx[i].first < thDist)
+//             break;
+//         else {
+//             mvuLineRight[vDistIdx[i].second] = -1;
+//             mvLineDepth[vDistIdx[i].second] = -1;
+//         }
+//     }
+// }
+
+
 
 void Frame::ComputeStereoFromRGBD(const cv::Mat &imDepth)
 {
@@ -1100,6 +1706,154 @@ void Frame::ComputeStereoFromRGBD(const cv::Mat &imDepth)
         }
     }
 }
+
+void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
+{
+    const int rows = imDepth.rows;
+    const int cols = imDepth.cols;
+
+    // 初始化存储
+    mvuLineRight = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
+    mvLineDepth  = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
+    std::vector<std::pair<float,float>> mvLineDepthConfidenceEndpoints(NL, {0.0f,0.0f});
+    mvLineDepthConfidence = std::vector<float>(NL, 0.0f);
+
+    const float minDepth = 0.1f;     
+    const float maxDepth = 10.0f;    
+    const float maxDepthDiffRatio = 0.2f; 
+    const float thConf = 0.3f;       
+
+    for (int i = 0; i < NL; i++)
+    {
+        const cv::line_descriptor::KeyLine &kl = mvKeyLinesUn[i];
+
+        float u1 = kl.startPointX;
+        float v1 = kl.startPointY;
+        float u2 = kl.endPointX;
+        float v2 = kl.endPointY;
+
+        // 边界检查
+        if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
+            u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
+            continue;
+
+        // 读取两端深度
+        float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
+        float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
+
+        bool valid1 = (d1 > minDepth && d1 < maxDepth);
+        bool valid2 = (d2 > minDepth && d2 < maxDepth);
+
+        if (!valid1 && !valid2) continue; // 两端都无效
+
+        float Z1 = valid1 ? d1 : -1.0f;
+        float Z2 = valid2 ? d2 : -1.0f;
+
+        float conf1 = valid1 ? 1.0f : 0.0f;
+        float conf2 = valid2 ? 1.0f : 0.0f;
+
+        // --- 深度一致性判断 ---
+        if (valid1 && valid2)
+        {
+            float diff = std::abs(d1 - d2);
+            float avg = 0.5f * (d1 + d2);
+
+            if (diff / avg > maxDepthDiffRatio)
+            {
+                // 不一致时降低置信度
+                float ratio = std::max(0.0f, 1.0f - diff/avg);
+                conf1 *= ratio;
+                conf2 *= ratio;
+            }
+        }
+
+        // --- 单端点有效时，用该端点近似整条线 ---
+        if (!valid1 && valid2)
+        {
+            Z1 = Z2;
+            u1 = u2;
+            conf1 = conf2 * 0.8f; // 略低置信度
+        }
+        else if (valid1 && !valid2)
+        {
+            Z2 = Z1;
+            u2 = u1;
+            conf2 = conf1 * 0.8f;
+        }
+
+        // --- 根据置信度剔除异常端点 ---
+        if(conf1 < thConf){ Z1=-1.0f; u1=-1.0f; conf1=0.0f; }
+        if(conf2 < thConf){ Z2=-1.0f; u2=-1.0f; conf2=0.0f; }
+
+        // --- 计算右图端点坐标 ---
+        float uR1 = (Z1>0) ? u1 - mbf/Z1 : -1.0f;
+        float uR2 = (Z2>0) ? u2 - mbf/Z2 : -1.0f;
+
+        mvLineDepth[i] = {Z1, Z2};
+        mvuLineRight[i] = {uR1, uR2};
+        mvLineDepthConfidenceEndpoints[i] = {conf1, conf2};
+        mvLineDepthConfidence[i] = 0.5f*(conf1 + conf2);
+    }
+}
+
+
+// void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
+// {
+//     const int rows = imDepth.rows;
+//     const int cols = imDepth.cols;
+//     // 初始化存储
+//     mvuLineRight = std::vector<float>(NL, -1.0f);
+//     mvLineDepth  = std::vector<float>(NL, -1.0f);
+//     const float minDepth = 0.1f;     // 深度下限（单位：m）
+//     const float maxDepth = 10.0f;    // 深度上限（单位：m）
+//     const float maxDepthDiffRatio = 0.2f; // 允许两端深度相差不超过20%
+//     for (int i = 0; i < NL; i++)
+//     {
+//         const cv::line_descriptor::KeyLine &kl = mvKeyLinesUn[i];
+//         float u1 = kl.startPointX;
+//         float v1 = kl.startPointY;
+//         float u2 = kl.endPointX;
+//         float v2 = kl.endPointY;
+//         // --- 1. 边界检查 ---
+//         if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
+//             u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
+//             continue;
+//         // --- 2. 读取两端深度，跳过无效值 ---
+//         float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
+//         float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
+//         bool valid1 = (d1 > minDepth && d1 < maxDepth);
+//         bool valid2 = (d2 > minDepth && d2 < maxDepth);
+//         if (!valid1 && !valid2)
+//             continue;  // 两端都没深度，跳过
+//         float d = -1.0f;
+//         // --- 3. 深度一致性判断 ---
+//         if (valid1 && valid2)
+//         {
+//             float diff = std::abs(d1 - d2);
+//             float avg = 0.5f * (d1 + d2);
+
+//             if (diff / avg < maxDepthDiffRatio)
+//                 d = avg;   // 两端深度接近，取平均
+//             else
+//                 continue;  // 深度差太大，不可信
+//         }
+//         else if (valid1)
+//             d = d1;
+//         else if (valid2)
+//             d = d2;
+
+//         // --- 4. 计算右图x坐标 ---
+//         if (d > 0)
+//         {
+//             mvLineDepth[i] = d;
+//             // 计算线段中点
+//             float u_mid = 0.5f * (u1 + u2);
+//             float disparity = mbf / d;
+//             mvuLineRight[i] = u_mid - disparity;
+//         }
+//     }
+// }
+
 
 bool Frame::UnprojectStereo(const int &i, Eigen::Vector3f &x3D, Eigen::Vector3f &colorRGB)
 {
@@ -1232,8 +1986,8 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
 
 void Frame::ComputeStereoFishEyeMatches() {
     //Speed it up by matching keypoints in the lapping area
-    vector<cv::KeyPoint> stereoLeft(mvKeys.begin() + monoLeft, mvKeys.end());
-    vector<cv::KeyPoint> stereoRight(mvKeysRight.begin() + monoRight, mvKeysRight.end());
+    std::vector<cv::KeyPoint> stereoLeft(mvKeys.begin() + monoLeft, mvKeys.end());
+    std::vector<cv::KeyPoint> stereoRight(mvKeysRight.begin() + monoRight, mvKeysRight.end());
 
     cv::Mat stereoDescLeft = mDescriptors.rowRange(monoLeft, mDescriptors.rows);
     cv::Mat stereoDescRight = mDescriptorsRight.rowRange(monoRight, mDescriptorsRight.rows);

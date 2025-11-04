@@ -163,7 +163,7 @@ protected:
     long unsigned int mnId;
 
     std::set<MapPoint*> mspMapPoints;
-    std::set<MapLine*> mspMapLines;   //added for MapLine
+    std::set<MapLine*> mspMapLines;   //added for MapLine mspMapLine
     std::set<KeyFrame*> mspKeyFrames;
 
     // Save/load, the set structure is broken in libboost 1.58 for ubuntu 16.04, a vector is serializated

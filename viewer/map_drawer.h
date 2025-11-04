@@ -45,7 +45,7 @@ class Settings;
 class ImGuiMapDrawer
 {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
     ImGuiMapDrawer(Atlas* pAtlas, const string &strSettingPath, Settings* settings);
 
     void newParameterLoader(Settings* settings);
@@ -53,6 +53,7 @@ public:
     Atlas* mpAtlas;
 
     void DrawMapPoints();
+    void DrawMapPointsLines(const bool bDrawLines); //added for visualization of point and lines
     void DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const bool bDrawInertialGraph, const bool bDrawOptLba);
     void DrawCurrentCamera(glm::mat4 &Twc);
     void SetCurrentCameraTwc(const Sophus::SE3f &Twc);

@@ -1,14 +1,18 @@
 /**
 * This file is part of Structure-SLAM.
-* Copyright (C) 2020 Yanyan Li <yanyan.li at tum.de> (Technical University of Munich)
+* Copyright (C) 2025 zdg(daiguizhanghao@gmail.com) (zhejiang University of china)
 *
 */
 #include "LSDmatcher.h"
+#include "Converter.h"
+#include "LSDVisualizer.h"
 
 using namespace std;
 using namespace cv;
 using namespace cv::line_descriptor;
 using namespace Eigen;
+
+#define LSD_VISUALIZER_FLAG 1  // 1: enable visualization; 0: disable visualization
 
 namespace ORB_SLAM3
 {
@@ -53,7 +57,7 @@ namespace ORB_SLAM3
 
         // 几何验证：RANSAC 基于中心点
         if (good_matches.size() >= 4) {
-            vector<Point2f> pts1, pts2;
+            std::vector<cv::Point2f> pts1, pts2;
             for (auto &m : good_matches) {
                 pts1.push_back(keylines1[m.queryIdx].pt);
                 pts2.push_back(keylines2[m.trainIdx].pt);
@@ -62,7 +66,7 @@ namespace ORB_SLAM3
             cv::Mat inlierMask;
             cv::findHomography(pts1, pts2, RANSAC, mransac_threshold, inlierMask);
 
-            vector<DMatch> inlier_matches;
+            std::vector<cv::DMatch> inlier_matches;
             for (size_t i = 0; i < good_matches.size(); ++i)
                 if (inlierMask.at<uchar>(i))
                     inlier_matches.push_back(good_matches[i]);
@@ -71,19 +75,66 @@ namespace ORB_SLAM3
         }
     }
 
+    // // Descriptor distance using Hamming distance (for binary descriptors)
+    // int LSDmatcher::DescriptorDistance(const cv::Mat& desc1, const cv::Mat& desc2) {
+    // // Ensure descriptors are of type CV_8U (binary)
+    //     if (desc1.type() != CV_8U || desc2.type() != CV_8U) {
+    //         std::cerr << "Error: Descriptors must be binary!" << std::endl;
+    //         return -1;
+    //     }
+    //     // Use cv::norm with NORM_HAMMING for binary descriptors
+    //     return cv::norm(desc1, desc2, cv::NORM_HAMMING);
+    // }
 
-#if 0   //to do next...
+    int LSDmatcher::DescriptorDistance(const cv::Mat& a, const cv::Mat& b)
+    {
+    // 基础检查（两种版本都适用）
+    assert(a.cols == b.cols && a.rows == b.rows);
+    assert(a.type() == CV_8U && b.type() == CV_8U);
+
+    #ifdef USE_FAST_HAMMING
+        // -------------------------
+        // 🔥 高速版本（手写 XOR）
+        // -------------------------
+        const int* pa = a.ptr<int32_t>();
+        const int* pb = b.ptr<int32_t>();
+        int dist = 0;
+
+        // 假设每个描述子为 256 bits（= 32 bytes = 8×int）
+        for (int i = 0; i < 8; i++, pa++, pb++)
+        {
+            unsigned int v = *pa ^ *pb;
+            v = v - ((v >> 1) & 0x55555555);
+            v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+            dist += (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;
+        }
+        return dist;
+
+#else
+        // -------------------------
+        // 🧩 安全版本（OpenCV 原生）
+        // -------------------------
+        return cv::norm(a, b, cv::NORM_HAMMING);
+#endif
+    }
+
 
     int LSDmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono) {
         int nmatches = 0;
 
-        const cv::Mat Rcw = CurrentFrame.mTcw.rowRange(0, 3).colRange(0, 3);
-        const cv::Mat tcw = CurrentFrame.mTcw.rowRange(0, 3).col(3);
+        Eigen::Matrix4f Tcw_g = CurrentFrame.GetPose().matrix();
+        const cv::Mat Tcw = Converter::toCvMat(Tcw_g);
+        //const Eigen::Vector3f twc = Tcw.inverse().translation();
+
+        const cv::Mat Rcw = Tcw.rowRange(0, 3).colRange(0, 3);
+        const cv::Mat tcw = Tcw.rowRange(0, 3).col(3);
 
         const cv::Mat twc = -Rcw.t()*tcw;
 
-        const cv::Mat Rlw = LastFrame.mTcw.rowRange(0, 3).colRange(0, 3);
-        const cv::Mat tlw = LastFrame.mTcw.rowRange(0, 3).col(3);
+        Eigen::Matrix4f Tcmlw_g = LastFrame.GetPose().matrix();
+        const cv::Mat Tcmlw = Converter::toCvMat(Tcmlw_g);
+        const cv::Mat Rlw = Tcmlw.rowRange(0, 3).colRange(0, 3);
+        const cv::Mat tlw = Tcmlw.rowRange(0, 3).col(3);
 
         const cv::Mat tlc = Rlw*twc+tlw;
 
@@ -97,10 +148,11 @@ namespace ORB_SLAM3
                 continue;
             }
 
-            Vector6d P = pML->GetWorldPos();
+            //Vector6d P = pML->GetWorldPos();
+            std::pair<Eigen::Vector3f, Eigen::Vector3f> P = pML->GetLineWorldPos();
 
-            cv::Mat SP = (Mat_<float>(3, 1) << P(0), P(1), P(2));
-            cv::Mat EP = (Mat_<float>(3, 1) << P(3), P(4), P(5));
+            cv::Mat SP = (Mat_<float>(3, 1) << P.first(0), P.first(1), P.first(2));
+            cv::Mat EP = (Mat_<float>(3, 1) << P.second(3), P.second(4), P.second(5));
 
             const cv::Mat SPc = Rcw * SP + tcw;
             const auto &SPcX = SPc.at<float>(0);
@@ -149,7 +201,7 @@ namespace ORB_SLAM3
             if(vIndices.empty())
                 continue;
 
-            const cv::Mat desc = pML->GetDescriptor();
+            const cv::Mat desc = pML->GetLineDescriptor();
 
             int bestDist=256;
             int bestLevel= -1;
@@ -163,7 +215,7 @@ namespace ORB_SLAM3
                     if( CurrentFrame.mvpMapLines[idx]->Observations()>0)
                         continue;
 
-                const cv::Mat &d =  CurrentFrame.mLdesc.row(idx);
+                const cv::Mat &d =  CurrentFrame.mLineDescriptors.row(idx);
 
                 const int dist = DescriptorDistance(desc, d);
 
@@ -172,12 +224,12 @@ namespace ORB_SLAM3
                     bestDist2 = bestDist;
                     bestDist = dist;
                     bestLevel2 = bestLevel;
-                    bestLevel =  CurrentFrame.mvKeylinesUn[idx].octave;
+                    bestLevel =  CurrentFrame.mvKeyLinesUn[idx].octave;
                     bestIdx = idx;
                 }
                 else if(dist < bestDist2)
                 {
-                    bestLevel2 =  CurrentFrame.mvKeylinesUn[idx].octave;
+                    bestLevel2 =  CurrentFrame.mvKeyLinesUn[idx].octave;
                     bestDist2 = dist;
                 }
             }
@@ -195,25 +247,181 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    int LSDmatcher::MatchLinesByProjection(Frame &currentFrame, const Frame &lastFrame, const float threshold, const bool isMono) {
+        int numMatches = 0;
+
+        Eigen::Matrix4f currentFramePose = currentFrame.GetPose().matrix();
+        const cv::Mat currentFramePoseMat = Converter::toCvMat(currentFramePose);
+
+        const cv::Mat rotationMatrixCurrent = currentFramePoseMat.rowRange(0, 3).colRange(0, 3);
+        const cv::Mat translationVectorCurrent = currentFramePoseMat.rowRange(0, 3).col(3);
+
+        const cv::Mat cameraToWorld = -rotationMatrixCurrent.t() * translationVectorCurrent;
+
+        Eigen::Matrix4f lastFramePose = lastFrame.GetPose().matrix();
+        const cv::Mat lastFramePoseMat = Converter::toCvMat(lastFramePose);
+        const cv::Mat rotationMatrixLast = lastFramePoseMat.rowRange(0, 3).colRange(0, 3);
+        const cv::Mat translationVectorLast = lastFramePoseMat.rowRange(0, 3).col(3);
+
+        const cv::Mat cameraToLastFrame = rotationMatrixLast * cameraToWorld + translationVectorLast;
+
+        const bool isForwardMatch = cameraToLastFrame.at<float>(2) > currentFrame.mb && !isMono;
+        const bool isBackwardMatch = -cameraToLastFrame.at<float>(2) > currentFrame.mb && !isMono;
+
+        for (int i = 0; i < lastFrame.NL; i++) {
+            MapLine *line = lastFrame.mvpMapLines[i];
+
+            if (!line || line->isBad() || lastFrame.mvbLineOutlier[i]) {
+                continue;
+            }
+
+            std::pair<Eigen::Vector3f, Eigen::Vector3f> lineWorldPosition = line->GetLineWorldPos();
+
+            cv::Mat startPointWorld = (cv::Mat_<float>(3, 1) << lineWorldPosition.first(0), lineWorldPosition.first(1), lineWorldPosition.first(2));
+            cv::Mat endPointWorld = (cv::Mat_<float>(3, 1) << lineWorldPosition.second(0), lineWorldPosition.second(1), lineWorldPosition.second(2));
+
+            const cv::Mat startPointCamera = rotationMatrixCurrent * startPointWorld + translationVectorCurrent;
+            const auto &startPointCameraX = startPointCamera.at<float>(0);
+            const auto &startPointCameraY = startPointCamera.at<float>(1);
+            const auto &startPointCameraZ = startPointCamera.at<float>(2);
+
+            const cv::Mat endPointCamera = rotationMatrixCurrent * endPointWorld + translationVectorCurrent;
+            const auto &endPointCameraX = endPointCamera.at<float>(0);
+            const auto &endPointCameraY = endPointCamera.at<float>(1);
+            const auto &endPointCameraZ = endPointCamera.at<float>(2);
+
+            if (startPointCameraZ < 0.0f || endPointCameraZ < 0.0f)
+                continue;
+
+            const float inverseStartPointZ = 1.0f / startPointCameraZ;
+            const float u1 = currentFrame.fx * startPointCameraX * inverseStartPointZ + currentFrame.cx;
+            const float v1 = currentFrame.fy * startPointCameraY * inverseStartPointZ + currentFrame.cy;
+
+            if (u1 < currentFrame.mnMinX || u1 > currentFrame.mnMaxX)
+                continue;
+            if (v1 < currentFrame.mnMinY || v1 > currentFrame.mnMaxY)
+                continue;
+
+            const float inverseEndPointZ = 1.0f / endPointCameraZ;
+            const float u2 = currentFrame.fx * endPointCameraX * inverseEndPointZ + currentFrame.cx;
+            const float v2 = currentFrame.fy * endPointCameraY * inverseEndPointZ + currentFrame.cy;
+
+            if (u2 < currentFrame.mnMinX || u2 > currentFrame.mnMaxX)
+                continue;
+            if (v2 < currentFrame.mnMinY || v2 > currentFrame.mnMaxY)
+                continue;
+
+            int lastFrameOctave = lastFrame.mvKeys[i].octave;
+
+            float searchRadius = threshold * currentFrame.mvScaleFactors[lastFrameOctave];
+
+            std::vector<size_t> candidateLineIndices;
+
+            if (isForwardMatch)
+                candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, lastFrameOctave);
+            else if (isBackwardMatch)
+                candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, 0, lastFrameOctave);
+            else
+                candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, lastFrameOctave - 1, lastFrameOctave + 1);
+
+            if (candidateLineIndices.empty())
+                continue;
+
+            const cv::Mat lineDescriptor = line->GetLineDescriptor();
+
+            int bestMatchDistance = 256;
+            int bestMatchLevel = -1;
+            int secondBestMatchDistance = 256;
+            int secondBestMatchLevel = -1;
+            int bestMatchedIndex = -1;
+
+            for (unsigned long index : candidateLineIndices) {
+                if (currentFrame.mvpMapLines[index]) {
+                    if (currentFrame.mvpMapLines[index]->Observations() > 0)
+                        continue;
+                }
+
+                const cv::Mat &descriptor = currentFrame.mLineDescriptors.row(index);
+
+                const int dist = DescriptorDistance(lineDescriptor, descriptor);
+
+                if (dist < bestMatchDistance) {
+                    secondBestMatchDistance = bestMatchDistance;
+                    bestMatchDistance = dist;
+                    secondBestMatchLevel = bestMatchLevel;
+                    bestMatchLevel = currentFrame.mvKeyLinesUn[index].octave;
+                    bestMatchedIndex = index;
+                } else if (dist < secondBestMatchDistance) {
+                    secondBestMatchLevel = currentFrame.mvKeyLinesUn[index].octave;
+                    secondBestMatchDistance = dist;
+                }
+            }
+
+            if (bestMatchDistance <= TH_HIGH) {
+                if (bestMatchLevel == secondBestMatchLevel && bestMatchDistance > mfNNratio * secondBestMatchDistance)
+                    continue;
+
+                currentFrame.mvpMapLines[bestMatchedIndex] = line;
+                numMatches++;
+            }
+        }
+
+        return numMatches;
+    }
+
+
+    int LSDmatcher::SerachForInitializeCV(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int, int>> &LineMatches)
+    {
+        LineMatches.clear();
+        int nmatches = 0;
+        const std::vector<cv::line_descriptor::KeyLine> &keylines1 = InitialFrame.mvKeyLinesUn;
+        const cv::Mat &desc1 = InitialFrame.mLineDescriptors;
+        const std::vector<cv::line_descriptor::KeyLine> &keylines2 = CurrentFrame.mvKeyLinesUn;
+        const cv::Mat &desc2 = CurrentFrame.mLineDescriptors;
+        std::vector<cv::DMatch> good_matches;
+        match(keylines1, desc1, keylines2, desc2, good_matches);
+        // store matches
+        for (auto &m : good_matches) {
+            LineMatches.emplace_back(m.queryIdx, m.trainIdx);
+            nmatches++;
+        }
+
+#if LSD_VISUALIZER_FLAG   //visualization
+        cv::Mat imgMatches = LSDVisualizer::DrawLineMatches(InitialFrame.imgLeftRGB, keylines1,
+                                                           CurrentFrame.imgLeftRGB, keylines2,
+                                                           good_matches);
+        cv::imshow("Line Matches for Initialization", imgMatches);
+        cv::waitKey(0);
+
+#endif
+
+
+        return nmatches;
+    }
+    
     int LSDmatcher::SearchByProjection(KeyFrame* pKF,Frame &currentF, vector<MapLine*> &vpMapLineMatches)
     {
-        const vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
+        const std::vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
 
-        vpMapLineMatches = vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
+        vpMapLineMatches = std::vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
 
         int nmatches = 0;
-        BFMatcher* bfm = new BFMatcher(NORM_HAMMING, false);
-        Mat ldesc1, ldesc2;
-        vector<vector<DMatch>> lmatches;
+        cv::BFMatcher bfm(cv::NORM_HAMMING, false);
+        cv::Mat ldesc1, ldesc2;
+        std::vector<std::vector<cv::DMatch>> lmatches;
         ldesc1 = pKF->mLineDescriptors;
-        ldesc2 = currentF.mLdesc;
-        bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
+        ldesc2 = currentF.mLineDescriptors;
+        //bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
+        bfm.knnMatch(ldesc1, ldesc2, lmatches, 2);
+
+        if (lmatches.empty())
+            return 0;
 
         double nn_dist_th, nn12_dist_th;
         const float minRatio=1.0f/1.5f;
         currentF.lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
         nn12_dist_th = nn12_dist_th*0.5;
-        sort(lmatches.begin(), lmatches.end(), sort_descriptor_by_queryIdx());
+        std::sort(lmatches.begin(), lmatches.end(), LSDmatcher::sortByQueryIdx);
         for(int i=0; i<lmatches.size(); i++)
         {
             //lmatches里装的 是匹配的编号，
@@ -245,24 +453,24 @@ namespace ORB_SLAM3
 
         for(auto pML : vpMapLines)
         {
-            if(!pML || pML->isBad() || !pML->mbTrackInView)
+            if(!pML || pML->isBad() || !pML->mbLineTrackInView)
                 continue;
 
-            const int &nPredictLevel = pML->mnTrackScaleLevel;
+            const int &nPredictLevel = pML->mnLineTrackScaleLevel;
 
-            float r = RadiusByViewingCos(pML->mTrackViewCos);
+            float r = RadiusByViewingCos(pML->mLineTrackViewCos);
 
             if(bFactor)
                 r*=th;
 
             vector<size_t> vIndices =
-                    F.GetLinesInArea(pML->mTrackProjX1, pML->mTrackProjY1, pML->mTrackProjX2, pML->mTrackProjY2,
+                    F.GetLinesInArea(pML->mLsTrackProjX, pML->mLsTrackProjY, pML->mLeTrackProjX, pML->mLeTrackProjY,
                                      r*F.mvScaleFactors[nPredictLevel], nPredictLevel-1, nPredictLevel);
 
             if(vIndices.empty())
                 continue;
 
-            const cv::Mat MLdescriptor = pML->GetDescriptor();
+            const cv::Mat MLdescriptor = pML->GetLineDescriptor();
 
             int bestDist=256;
             int bestLevel= -1;
@@ -276,7 +484,7 @@ namespace ORB_SLAM3
                     if(F.mvpMapLines[idx]->Observations()>0)
                         continue;
 
-                const cv::Mat &d = F.mLdesc.row(idx);
+                const cv::Mat &d = F.mLineDescriptors.row(idx);
 
                 const int dist = DescriptorDistance(MLdescriptor, d);
 
@@ -286,12 +494,12 @@ namespace ORB_SLAM3
                     bestDist2 = bestDist;
                     bestDist = dist;
                     bestLevel2 = bestLevel;
-                    bestLevel = F.mvKeylinesUn[idx].octave;
+                    bestLevel = F.mvKeyLinesUn[idx].octave;
                     bestIdx = idx;
                 }
                 else if(dist < bestDist2)
                 {
-                    bestLevel2 = F.mvKeylinesUn[idx].octave;
+                    bestLevel2 = F.mvKeyLinesUn[idx].octave;
                     bestDist2 = dist;
                 }
             }
@@ -309,56 +517,28 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
-    int LSDmatcher::SerachForInitialize(Frame &InitialFrame, Frame &CurrentFrame, vector<pair<int, int>> &LineMatches)
-    {
-        LineMatches.clear();
-        int nmatches = 0;
-        BFMatcher* bfm = new BFMatcher(NORM_HAMMING, false);
-        Mat ldesc1, ldesc2;
-        vector<vector<DMatch>> lmatches;
-        ldesc1 = InitialFrame.mLdesc;
-        ldesc2 = CurrentFrame.mLdesc;
-        bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
-
-        double nn_dist_th, nn12_dist_th;
-        CurrentFrame.lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
-        nn12_dist_th = nn12_dist_th*0.5;
-        sort(lmatches.begin(), lmatches.end(), sort_descriptor_by_queryIdx());
-        for(int i=0; i<lmatches.size(); i++)
-        {
-            int qdx = lmatches[i][0].queryIdx;
-            int tdx = lmatches[i][0].trainIdx;
-            double dist_12 = lmatches[i][1].distance - lmatches[i][0].distance;
-            if(dist_12>nn12_dist_th)
-            {
-                LineMatches.push_back(make_pair(qdx, tdx));
-                nmatches++;
-            }
-        }
-        return nmatches;
-    }
 
     int LSDmatcher::SearchByDescriptor(KeyFrame* pKF, Frame &currentF, vector<MapLine*> &vpMapLineMatches)
     {
-        const vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
+        const std::vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
 
-        vpMapLineMatches = vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
+        vpMapLineMatches = std::vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
 
         int nmatches = 0;
-        BFMatcher* bfm = new BFMatcher(NORM_HAMMING, false);
-        Mat ldesc1, ldesc2;
-        vector<vector<DMatch>> lmatches;
+        cv::BFMatcher* bfm = new cv::BFMatcher(cv::NORM_HAMMING, false);
+        cv::Mat ldesc1, ldesc2;
+        std::vector<std::vector<cv::DMatch>> lmatches;
         ldesc1 = pKF->mLineDescriptors;
-        ldesc2 = currentF.mLdesc;
+        ldesc2 = currentF.mLineDescriptors;
         bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
 
-        cout<<"LSDMATCH:lmatches"<<lmatches.size()<<endl;
+        std::cout<<"LSDMATCH:lmatches"<<lmatches.size()<<endl;
 
         double nn_dist_th, nn12_dist_th;
         const float minRatio=1.0f/1.5f;
         currentF.lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
         nn12_dist_th = nn12_dist_th*0.5;
-        sort(lmatches.begin(), lmatches.end(), sort_descriptor_by_queryIdx());
+        sort(lmatches.begin(), lmatches.end(), LSDmatcher::sortByQueryIdx);
         for(int i=0; i<lmatches.size(); i++)
         {
             //lmatches里装的 是匹配的编号，
@@ -383,13 +563,13 @@ namespace ORB_SLAM3
 
     int LSDmatcher::SearchByDescriptor(KeyFrame* pKF, KeyFrame *pKF2, vector<MapLine*> &vpMapLineMatches)
     {
-        const vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
-        const vector<MapLine*> vpMapLinesKF2 = pKF2->GetMapLineMatches();
+        const std::vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
+        const std::vector<MapLine*> vpMapLinesKF2 = pKF2->GetMapLineMatches();
 
-        vpMapLineMatches = vector<MapLine*>(vpMapLinesKF.size(),static_cast<MapLine*>(NULL));
+        vpMapLineMatches = std::vector<MapLine*>(vpMapLinesKF.size(),static_cast<MapLine*>(NULL));
         int nmatches = 0;
-        BFMatcher* bfm = new BFMatcher(NORM_HAMMING, false);
-        Mat ldesc1, ldesc2;
+        cv::BFMatcher* bfm = new cv::BFMatcher(cv::NORM_HAMMING, false);
+        cv::Mat ldesc1, ldesc2;
         vector<vector<DMatch>> lmatches;
         ldesc1 = pKF->mLineDescriptors;
         ldesc2 = pKF2->mLineDescriptors;
@@ -398,7 +578,7 @@ namespace ORB_SLAM3
         double nn_dist_th, nn12_dist_th;
         pKF2->lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
         nn12_dist_th = nn12_dist_th*0.5;
-        sort(lmatches.begin(), lmatches.end(), sort_descriptor_by_queryIdx());
+        sort(lmatches.begin(), lmatches.end(), LSDmatcher::sortByQueryIdx);
         for(int i=0; i<lmatches.size(); i++)
         {
             int qdx = lmatches[i][0].queryIdx;
@@ -416,32 +596,14 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
-    int LSDmatcher::DescriptorDistance(const Mat &a, const Mat &b)
-    {
-        const int *pa = a.ptr<int32_t>();
-        const int *pb = b.ptr<int32_t>();
-
-        int dist=0;
-
-        for(int i=0; i<8; i++, pa++, pb++)
-        {
-            unsigned  int v = *pa ^ *pb;
-            v = v - ((v >> 1) & 0x55555555);
-            v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
-            dist += (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;
-        }
-
-        return dist;
-    }
-
-    int LSDmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2,
-                                           vector<pair<size_t, size_t>> &vMatchedPairs)
+     int LSDmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2,
+                                           std::vector<std::pair<size_t, size_t>> &vMatchedPairs)
     {
         vMatchedPairs.clear();
         int nmatches = 0;
-        BFMatcher* bfm = new BFMatcher(NORM_HAMMING, false);
-        Mat ldesc1, ldesc2;
-        vector<vector<DMatch>> lmatches;
+        cv::BFMatcher* bfm = new cv::BFMatcher(cv::NORM_HAMMING, false);
+        cv::Mat ldesc1, ldesc2;
+        std::vector<std::vector<cv::DMatch>> lmatches;
         ldesc1 = pKF1->mLineDescriptors;
         ldesc2 = pKF2->mLineDescriptors;
         bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
@@ -449,16 +611,14 @@ namespace ORB_SLAM3
         double nn_dist_th, nn12_dist_th;
         pKF1->lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
         nn12_dist_th = nn12_dist_th*0.1;
-        sort(lmatches.begin(), lmatches.end(), sort_descriptor_by_queryIdx());
+        sort(lmatches.begin(), lmatches.end(), LSDmatcher::sortByQueryIdx);
         for(int i=0; i<lmatches.size(); i++)
         {
             int qdx = lmatches[i][0].queryIdx;
             int tdx = lmatches[i][0].trainIdx;
-
             if (pKF1->GetMapLine(qdx) || pKF2->GetMapLine(tdx)) {
                 continue;
             }
-
             double dist_12 = lmatches[i][1].distance - lmatches[i][0].distance;
             if(dist_12>nn12_dist_th)
             {
@@ -469,10 +629,13 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
-    int LSDmatcher::Fuse(KeyFrame *pKF, const vector<MapLine *> &vpMapLines, const float th)
+    int LSDmatcher::Fuse(KeyFrame *pKF, const std::vector<MapLine *> &vpMapLines, const float th)
     {
-        cv::Mat Rcw = pKF->GetRotation();
-        cv::Mat tcw = pKF->GetTranslation();
+        Eigen::Matrix3f Rcw_eigen = pKF->GetRotation();
+        Eigen::Vector3f tcw_eigen = pKF->GetTranslation();
+
+        cv::Mat Rcw = Converter::toCvMat(Rcw_eigen);;
+        cv::Mat tcw = (Mat_<float>(3, 1) << tcw_eigen(0), tcw_eigen(1), tcw_eigen(2));
 
         const float &fx = pKF->fx;
         const float &fy = pKF->fy;
@@ -480,7 +643,8 @@ namespace ORB_SLAM3
         const float &cy = pKF->cy;
         const float &bf = pKF->mbf;
 
-        cv::Mat Ow = pKF->GetCameraCenter();
+        Eigen::Vector3f Ow_eigen = pKF->GetCameraCenter();
+        cv::Mat Ow = (Mat_<float>(3, 1) << Ow_eigen(0), Ow_eigen(1), Ow_eigen(2));
 
         int nFused=0;
 
@@ -495,10 +659,11 @@ namespace ORB_SLAM3
             if(!pML || pML->isBad())
                 continue;
 
-            Vector6d P = pML->GetWorldPos();
+            //Vector6d P = pML->GetWorldPos();
+            std::pair<Eigen::Vector3f, Eigen::Vector3f> lineWorldPosition = pML->GetLineWorldPos();
 
-            cv::Mat SP = (Mat_<float>(3, 1) << P(0), P(1), P(2));
-            cv::Mat EP = (Mat_<float>(3, 1) << P(3), P(4), P(5));
+            cv::Mat SP = (Mat_<float>(3, 1) << lineWorldPosition.first(0), lineWorldPosition.first(1), lineWorldPosition.first(2));
+            cv::Mat EP = (Mat_<float>(3, 1) << lineWorldPosition.second(0), lineWorldPosition.second(1), lineWorldPosition.second(2));
 
             const cv::Mat SPc = Rcw * SP + tcw;
             const auto &SPcX = SPc.at<float>(0);
@@ -540,22 +705,21 @@ namespace ORB_SLAM3
             if (dist < minDistance || dist > maxDistance)
                 continue;
 
-            Vector3d Pn = pML->GetNormal();
+            // Check viewing angle 这个LineNormal是啥意思？
+            Eigen::Vector3f Pn = pML->GetLineNormalVector();
             cv::Mat pn = (Mat_<float>(3, 1) << Pn(0), Pn(1), Pn(2));
 
             if(OM.dot(pn)<0.5*dist)
                 continue;
 
-            const int nPredictedLevel = pML->PredictScale(dist, pKF->mfLogScaleFactor);
-
+            const int nPredictedLevel = pML->PredictScale(dist, pKF);
             const float radius = th*pKF->mvScaleFactors[nPredictedLevel];
-
-            const vector<size_t> vIndices = pKF->GetLinesInArea(u1,v1, u2, v2, radius);
+            const std::vector<std::size_t> vIndices = pKF->GetLinesInArea(u1,v1, u2, v2, radius);
 
             if(vIndices.empty())
                 continue;
 
-            const cv::Mat dML = pML->GetDescriptor();
+            const cv::Mat dML = pML->GetLineDescriptor();
 
             int bestDist=INT_MAX;
             int bestIdx =-1 ;
@@ -592,7 +756,7 @@ namespace ORB_SLAM3
                 }
                 else
                 {
-                    pML->AddObservation(pKF,bestIdx);
+                    pML->AddLineObservation(pKF,bestIdx);
                     pKF->AddMapLine(pML,bestIdx);
                 }
                 nFused++;
@@ -602,6 +766,7 @@ namespace ORB_SLAM3
         return nFused;
     }
 
+
     float LSDmatcher::RadiusByViewingCos(const float &viewCos)
     {
         if(viewCos>0.998)
@@ -610,6 +775,42 @@ namespace ORB_SLAM3
             return 8.0;
     }
 
+#if 0   //to do next...
+
+    
+    
+
+    int LSDmatcher::SerachForInitialize(Frame &InitialFrame, Frame &CurrentFrame, vector<pair<int, int>> &LineMatches)
+    {
+        LineMatches.clear();
+        int nmatches = 0;
+        BFMatcher* bfm = new BFMatcher(NORM_HAMMING, false);
+        Mat ldesc1, ldesc2;
+        vector<vector<DMatch>> lmatches;
+        ldesc1 = InitialFrame.mLdesc;
+        ldesc2 = CurrentFrame.mLdesc;
+        bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
+
+        double nn_dist_th, nn12_dist_th;
+        CurrentFrame.lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
+        nn12_dist_th = nn12_dist_th*0.5;
+        sort(lmatches.begin(), lmatches.end(), sort_descriptor_by_queryIdx());
+        for(int i=0; i<lmatches.size(); i++)
+        {
+            int qdx = lmatches[i][0].queryIdx;
+            int tdx = lmatches[i][0].trainIdx;
+            double dist_12 = lmatches[i][1].distance - lmatches[i][0].distance;
+            if(dist_12>nn12_dist_th)
+            {
+                LineMatches.push_back(make_pair(qdx, tdx));
+                nmatches++;
+            }
+        }
+        return nmatches;
+    }
+
+    
+   
     int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector<MapLine *> &vpLines,
                                        std::vector<MapLine *> &vpMatched, int th) {
         // Get Calibration Parameters for later projection

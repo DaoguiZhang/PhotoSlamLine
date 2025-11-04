@@ -97,7 +97,7 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Ma
     //SetLineColorRGB(LsColor, LeColor);
 
     Eigen::Vector3f Ow;
-    if(pFrame -> Nleft == -1 || idxF < pFrame -> Nleft){
+    if(pFrame -> NLleft == -1 || idxF < pFrame -> NLleft){
         Ow = pFrame->GetCameraCenter();
     }
     else{
@@ -113,9 +113,9 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Ma
 
     Eigen::Vector3f PC = LmPos - Ow;
     const float dist = PC.norm();
-    const int level = (pFrame -> Nleft == -1) ? pFrame->mvKeysUn[idxF].octave
-                                              : (idxF < pFrame -> Nleft) ? pFrame->mvKeys[idxF].octave
-                                                                         : pFrame -> mvKeysRight[idxF].octave;
+    const int level = (pFrame -> NLleft == -1) ? pFrame->mvKeyLinesUn[idxF].octave
+                                              : (idxF < pFrame -> NLleft) ? pFrame->mvKeyLines[idxF].octave
+                                                                         : pFrame -> mvKeyLinesRight[idxF].octave;
     const float levelScaleFactor =  pFrame->mvScaleFactors[level];
     const int nLevels = pFrame->mnScaleLevels;
 
@@ -175,6 +175,12 @@ std::pair<Eigen::Vector3f, Eigen::Vector3f> MapLine::GetLineNormal() {
     return std::make_pair(mLineNormalVector, mLineNormalVector);
 }
 
+Eigen::Vector3f MapLine::GetLineNormalVector()
+{
+    unique_lock<mutex> lock(mMutexPos);
+    return mLineNormalVector;
+}
+
 
 KeyFrame* MapLine::GetReferenceKeyFrame()
 {
@@ -192,14 +198,14 @@ void MapLine::AddLineObservation(KeyFrame* pKF, int idx)
     else{
         indexes = tuple<int,int>(-1,-1);
     }
-    if(pKF -> NLeft != -1 && idx >= pKF -> NLeft){
+    if(pKF -> NLleft != -1 && idx >= pKF -> NLleft){
         get<1>(indexes) = idx;
     }
     else{
         get<0>(indexes) = idx;
     }
     mLineObservations[pKF]=indexes;
-    if(!pKF->mpCamera2 && pKF->mvuRight[idx]>=0)
+    if(!pKF->mpCamera2 && pKF->mvuLineRight[idx].first>=0 && pKF->mvuLineRight[idx].second>=0)
         nObs+=2;
     else
         nObs++;
@@ -215,7 +221,7 @@ void MapLine::EraseLineObservation(KeyFrame* pKF)
             tuple<int,int> indexes = mLineObservations[pKF];
             int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
             if(leftIndex != -1){
-                if(!pKF->mpCamera2 && pKF->mvuRight[leftIndex]>=0)
+                if(!pKF->mpCamera2 && pKF->mvuLineRight[leftIndex].first>=0 && pKF->mvuLineRight[leftIndex].second>=0)
                     nObs-=2;
                 else
                     nObs--;
@@ -247,7 +253,6 @@ int MapLine::Observations()
     unique_lock<mutex> lock(mMutexFeatures);
     return nObs;
 }
-
 
 
 void MapLine::SetBadFlag()
@@ -343,7 +348,7 @@ void MapLine::PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsig
     mpRefKF = mpKFid[mBackupRefKFId];
     if(!mpRefKF)
     {
-        cout << "ERROR: MP without KF reference " << mBackupRefKFId << "; Num obs: " << nObs << endl;
+        cout << "ERROR: ML without KF reference " << mBackupRefKFId << "; Num obs: " << nObs << endl;
     }
     mpLineReplaced = static_cast<MapLine*>(NULL);
     if(mLineBackupReplacedId>=0)
@@ -368,19 +373,28 @@ void MapLine::PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsig
     mLineBackupObservationsId2.clear();
 }
 
-
-#if 0
-
-MapLine* MapLine::GetReplaced()
+bool MapLine::isBad()
 {
-    unique_lock<mutex> lock1(mMutexFeatures);
-    unique_lock<mutex> lock2(mMutexPos);
-    return mpLineReplaced;
+    unique_lock<mutex> lock1(mMutexFeatures,std::defer_lock);
+    unique_lock<mutex> lock2(mMutexPos,std::defer_lock);
+    lock(lock1, lock2);
+
+    return mbLineBad;
 }
 
-void MapLine::Replace(MapLine* pMP)
+
+tuple<int,int> MapLine::GetIndexInKeyFrame(KeyFrame *pKF)
 {
-    if(pMP->mnId==this->mnId)
+    unique_lock<mutex> lock(mMutexFeatures);
+    if(mLineObservations.count(pKF))
+        return mLineObservations[pKF];
+    else
+        return tuple<int,int>(-1,-1);
+}
+
+void MapLine::Replace(MapLine* pML)
+{
+    if(pML->mnId==this->mnId)
         return;
 
     int nvisible, nfound;
@@ -390,10 +404,10 @@ void MapLine::Replace(MapLine* pMP)
         unique_lock<mutex> lock2(mMutexPos);
         obs=mLineObservations;
         mLineObservations.clear();
-        mbBad=true;
-        nvisible = mnVisible;
-        nfound = mnFound;
-        mpReplaced = pMP;
+        mbLineBad=true;
+        nvisible = mnLineVisible;
+        nfound = mnLineFound;
+        mpLineReplaced = pML;
     }
 
     for(map<KeyFrame*,tuple<int,int>>::iterator mit=obs.begin(), mend=obs.end(); mit!=mend; mit++)
@@ -404,41 +418,38 @@ void MapLine::Replace(MapLine* pMP)
         tuple<int,int> indexes = mit -> second;
         int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
 
-        if(!pMP->IsInKeyFrame(pKF))
+        if(!pML->IsInKeyFrame(pKF))
         {
             if(leftIndex != -1){
-                pKF->ReplaceMapPointMatch(leftIndex, pMP);
-                pMP->AddObservation(pKF,leftIndex);
+                pKF->ReplaceMapLineMatch(leftIndex, pML);
+                pML->AddLineObservation(pKF,leftIndex);
             }
             if(rightIndex != -1){
-                pKF->ReplaceMapPointMatch(rightIndex, pMP);
-                pMP->AddObservation(pKF,rightIndex);
+                pKF->ReplaceMapLineMatch(rightIndex, pML);
+                pML->AddLineObservation(pKF,rightIndex);
             }
         }
         else
         {
             if(leftIndex != -1){
-                pKF->EraseMapPointMatch(leftIndex);
+                pKF->EraseMapLineMatch(leftIndex);
             }
             if(rightIndex != -1){
-                pKF->EraseMapPointMatch(rightIndex);
+                pKF->EraseMapLineMatch(rightIndex);
             }
         }
     }
-    pMP->IncreaseFound(nfound);
-    pMP->IncreaseVisible(nvisible);
-    pMP->ComputeDistinctiveDescriptors();
+    pML->IncreaseFound(nfound);
+    pML->IncreaseVisible(nvisible);
+    pML->ComputeDistinctiveDescriptors();
 
-    mpMap->EraseMapPoint(this);
+    mpMap->EraseMapLine(this);
 }
 
-bool MapLine::isBad()
+bool MapLine::IsInKeyFrame(KeyFrame *pKF)
 {
-    unique_lock<mutex> lock1(mMutexFeatures,std::defer_lock);
-    unique_lock<mutex> lock2(mMutexPos,std::defer_lock);
-    lock(lock1, lock2);
-
-    return mbLineBad;
+    unique_lock<mutex> lock(mMutexFeatures);
+    return (mLineObservations.count(pKF));
 }
 
 void MapLine::IncreaseVisible(int n)
@@ -450,13 +461,7 @@ void MapLine::IncreaseVisible(int n)
 void MapLine::IncreaseFound(int n)
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    mnFound+=n;
-}
-
-float MapLine::GetFoundRatio()
-{
-    unique_lock<mutex> lock(mMutexFeatures);
-    return static_cast<float>(mnFound)/mnVisible;
+    mnLineFound+=n;
 }
 
 void MapLine::ComputeDistinctiveDescriptors()
@@ -487,10 +492,10 @@ void MapLine::ComputeDistinctiveDescriptors()
             int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
 
             if(leftIndex != -1){
-                vDescriptors.push_back(pKF->mDescriptors.row(leftIndex));
+                vDescriptors.push_back(pKF->mLineDescriptors.row(leftIndex));
             }
             if(rightIndex != -1){
-                vDescriptors.push_back(pKF->mDescriptors.row(rightIndex));
+                vDescriptors.push_back(pKF->mLineDescriptors.row(rightIndex));
             }
         }
     }
@@ -507,7 +512,8 @@ void MapLine::ComputeDistinctiveDescriptors()
         Distances[i][i]=0;
         for(size_t j=i+1;j<N;j++)
         {
-            int distij = ORBmatcher::DescriptorDistance(vDescriptors[i],vDescriptors[j]);
+            //int distij = ORBmatcher::DescriptorDistance(vDescriptors[i],vDescriptors[j]);
+            int distij = LSDmatcher::DescriptorDistance(vDescriptors[i],vDescriptors[j]);   //to do next...(Line feature descriptor)
             Distances[i][j]=distij;
             Distances[j][i]=distij;
         }
@@ -531,52 +537,75 @@ void MapLine::ComputeDistinctiveDescriptors()
 
     {
         unique_lock<mutex> lock(mMutexFeatures);
-        mDescriptor = vDescriptors[BestIdx].clone();
+        mLineDescriptor = vDescriptors[BestIdx].clone();
     }
 }
 
-cv::Mat MapLine::GetDescriptor()
+Map* MapLine::GetMap()
 {
-    unique_lock<mutex> lock(mMutexFeatures);
-    return mDescriptor.clone();
+    unique_lock<mutex> lock(mMutexMap);
+    return mpMap;
 }
 
-tuple<int,int> MapLine::GetIndexInKeyFrame(KeyFrame *pKF)
+void MapLine::UpdateMap(Map* pMap)
 {
-    unique_lock<mutex> lock(mMutexFeatures);
-    if(mObservations.count(pKF))
-        return mObservations[pKF];
-    else
-        return tuple<int,int>(-1,-1);
+    unique_lock<mutex> lock(mMutexMap);
+    mpMap = pMap;
 }
 
-bool MapLine::IsInKeyFrame(KeyFrame *pKF)
+cv::Mat MapLine::GetLineDescriptor()
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    return (mObservations.count(pKF));
+    return mLineDescriptor.clone();
 }
 
+MapLine* MapLine::GetReplaced()
+{
+    unique_lock<mutex> lock1(mMutexFeatures);
+    unique_lock<mutex> lock2(mMutexPos);
+    return mpLineReplaced;
+}
+
+void MapLine::SetLineNormalVector(const Eigen::Vector3f& normal)
+{
+    unique_lock<mutex> lock3(mMutexPos);
+    mLineNormalVector = normal;
+}
+
+void MapLine::PrintObservations()
+{
+    std::cout << "ML_OBS: ML " << mnId << std::endl;
+    for(map<KeyFrame*,tuple<int,int>>::iterator mit=mLineObservations.begin(), mend=mLineObservations.end(); mit!=mend; mit++)
+    {
+        KeyFrame* pKFi = mit->first;
+        tuple<int,int> indexes = mit->second;
+        int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
+        std::cout << "--OBS in KF " << pKFi->mnId << " in map " << pKFi->GetMap()->GetId() << std::endl;
+    }
+}
+
+//to check the bug
 void MapLine::UpdateNormalAndDepth()
 {
-    map<KeyFrame*,tuple<int,int>> observations;
+    map<KeyFrame*,tuple<int,int> > observations;
     KeyFrame* pRefKF;
-    Eigen::Vector3f Pos;
+    Eigen::Matrix<float,6,1> LineEndPos;
     {
         unique_lock<mutex> lock1(mMutexFeatures);
         unique_lock<mutex> lock2(mMutexPos);
-        if(mbBad)
+        if(mbLineBad)
             return;
-        observations = mObservations;
+        observations = mLineObservations;
         pRefKF = mpRefKF;
-        Pos = mWorldPos;
+        LineEndPos = mLineWorldPos;
     }
-
+    //to do next...(Line feature descriptor)
     if(observations.empty())
         return;
-
     Eigen::Vector3f normal;
     normal.setZero();
     int n=0;
+    Eigen::Vector3f Pos = (LineEndPos.head<3>() + LineEndPos.tail<3>()) / 2.0f;
     for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
@@ -597,24 +626,20 @@ void MapLine::UpdateNormalAndDepth()
             n++;
         }
     }
-
     Eigen::Vector3f PC = Pos - pRefKF->GetCameraCenter();
     const float dist = PC.norm();
-
     tuple<int ,int> indexes = observations[pRefKF];
     int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
     int level;
-    if(pRefKF -> NLeft == -1){
-        level = pRefKF->mvKeysUn[leftIndex].octave;
+    if(pRefKF -> NLleft == -1){
+        level = pRefKF->mvKeyLinesUn[leftIndex].octave;
     }
     else if(leftIndex != -1){
-        level = pRefKF -> mvKeys[leftIndex].octave;
+        level = pRefKF -> mvKeyLines[leftIndex].octave;
     }
     else{
-        level = pRefKF -> mvKeysRight[rightIndex - pRefKF -> NLeft].octave;
+        level = pRefKF -> mvKeyLinesRight[rightIndex - pRefKF -> NLleft].octave;
     }
-
-    //const int level = pRefKF->mvKeysUn[observations[pRefKF]].octave;
     const float levelScaleFactor =  pRefKF->mvScaleFactors[level];
     const int nLevels = pRefKF->mnScaleLevels;
 
@@ -622,15 +647,10 @@ void MapLine::UpdateNormalAndDepth()
         unique_lock<mutex> lock3(mMutexPos);
         mfMaxDistance = dist*levelScaleFactor;
         mfMinDistance = mfMaxDistance/pRefKF->mvScaleFactors[nLevels-1];
-        mNormalVector = normal/n;
+        mLineNormalVector = normal/n;
     }
 }
 
-void MapLine::SetNormalVector(const Eigen::Vector3f& normal)
-{
-    unique_lock<mutex> lock3(mMutexPos);
-    mNormalVector = normal;
-}
 
 float MapLine::GetMinDistanceInvariance()
 {
@@ -646,29 +666,25 @@ float MapLine::GetMaxDistanceInvariance()
 
 
 
-void MapLine::PrintObservations()
+#if 0
+
+
+
+
+float MapLine::GetFoundRatio()
 {
-    cout << "MP_OBS: MP " << mnId << endl;
-    for(map<KeyFrame*,tuple<int,int>>::iterator mit=mObservations.begin(), mend=mObservations.end(); mit!=mend; mit++)
-    {
-        KeyFrame* pKFi = mit->first;
-        tuple<int,int> indexes = mit->second;
-        int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
-        cout << "--OBS in KF " << pKFi->mnId << " in map " << pKFi->GetMap()->GetId() << endl;
-    }
+    unique_lock<mutex> lock(mMutexFeatures);
+    return static_cast<float>(mnFound)/mnVisible;
 }
 
-Map* MapLine::GetMap()
+
+cv::Mat MapLine::GetDescriptor()
 {
-    unique_lock<mutex> lock(mMutexMap);
-    return mpMap;
+    unique_lock<mutex> lock(mMutexFeatures);
+    return mDescriptor.clone();
 }
 
-void MapLine::UpdateMap(Map* pMap)
-{
-    unique_lock<mutex> lock(mMutexMap);
-    mpMap = pMap;
-}
+
 
 
 #endif

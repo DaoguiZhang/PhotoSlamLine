@@ -39,7 +39,7 @@ KeyFrame::KeyFrame():
         mfLogScaleFactor(0), mvScaleFactors(0), mvLevelSigma2(0), mvInvLevelSigma2(0), mnMinX(0), mnMinY(0), mnMaxX(0),
         mnMaxY(0), mPrevKF(static_cast<KeyFrame*>(NULL)), mNextKF(static_cast<KeyFrame*>(NULL)), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
         mbToBeErased(false), mbBad(false), mHalfBaseline(0), mbCurrentPlaceRecognition(false), mnMergeCorrectedForKF(0),
-        NLeft(0),NRight(0), mnNumberOfOpt(0), mbHasVelocity(false)
+        NLeft(0),NRight(0), NLleft(0), NLright(0), mnNumberOfOpt(0), mbHasVelocity(false)
 {
     //mLineDescriptors(static_cast<cv::Mat>(NULL)),
 }
@@ -64,7 +64,7 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap), mbCurrentPlaceRecognition(false), mNameFile(F.mNameFile), mnMergeCorrectedForKF(0),
     mpCamera(F.mpCamera), mpCamera2(F.mpCamera2),
     mvLeftToRightMatch(F.mvLeftToRightMatch),mvRightToLeftMatch(F.mvRightToLeftMatch), mTlr(F.GetRelativePoseTlr()),
-    mvKeysRight(F.mvKeysRight), NLeft(F.Nleft), NRight(F.Nright), mTrl(F.GetRelativePoseTrl()), mnNumberOfOpt(0), mbHasVelocity(false)
+    mvKeysRight(F.mvKeysRight), NLeft(F.Nleft), NRight(F.Nright), NLleft(F.NLleft), NLright(0), mTrl(F.GetRelativePoseTrl()), mnNumberOfOpt(0), mbHasVelocity(false)
 {
     mnId=nNextId++;
 
@@ -576,6 +576,69 @@ MapLine* KeyFrame::GetMapLine(const size_t &idx)
     return mvpMapLines[idx];
 }
 
+void KeyFrame::lineDescriptorMAD(const std::vector<std::vector<cv::DMatch>>& matches, double &nn_mad, double &nn12_mad) const
+{
+    if (matches.empty()) {
+        nn_mad = 0;
+        nn12_mad = 0;
+        return;
+    }
+
+    std::vector<std::vector<cv::DMatch>> matches_nn = matches;
+    std::vector<std::vector<cv::DMatch>> matches_12 = matches;
+    //cout << "Frame::lineDescriptorMAD——matches_nn = "<<matches_nn.size() << endl;
+
+    // NN距离的MAD
+    std::sort(matches_nn.begin(), matches_nn.end(), KeyFrame::compare_descriptor_by_NN_dist);
+    double nn_dist_median = matches_nn[matches_nn.size()/2][0].distance;
+
+    for (auto &m : matches_nn)
+        m[0].distance = std::fabs(m[0].distance - nn_dist_median);
+
+    std::sort(matches_nn.begin(), matches_nn.end(), KeyFrame::compare_descriptor_by_NN_dist);
+    nn_mad = 1.4826 * matches_nn[matches_nn.size()/2][0].distance;
+
+    // NN-12距离差的MAD
+    std::sort(matches_12.begin(), matches_12.end(), KeyFrame::compare_descriptor_by_NN_dist);
+    double nn12_dist_median = matches_12[matches_12.size()/2][1].distance -
+                              matches_12[matches_12.size()/2][0].distance;
+
+    for (auto &m : matches_12)
+        m[0].distance = std::fabs((m[1].distance - m[0].distance) - nn12_dist_median);
+
+    std::sort(matches_12.begin(), matches_12.end(), KeyFrame::compare_descriptor_by_NN_dist);
+    nn12_mad = 1.4826 * matches_12[matches_12.size()/2][0].distance;
+}
+
+// void KeyFrame::lineDescriptorMAD(const std::vector<std::vector<cv::DMatch>>& matches, double &nn_mad, double &nn12_mad) const
+// {
+//     std::vector<double> nn_dists;
+//     std::vector<double> nn12_dists;
+//     for (const auto& match_pair : matches) {
+//         if (match_pair.size() >= 1) {
+//             nn_dists.push_back(static_cast<double>(match_pair[0].distance));
+//         }
+//         if (match_pair.size() >= 2) {
+//             nn12_dists.push_back(static_cast<double>(match_pair[1].distance) - static_cast<double>(match_pair[0].distance));
+//         }
+//     }
+//     auto compute_mad = [](std::vector<double>& dists) -> double {
+//         if (dists.empty()) return 0.0;
+//         std::vector<double> abs_devs;
+//         double median;
+//         size_t size = dists.size();
+//         std::nth_element(dists.begin(), dists.begin() + size / 2, dists.end());
+//         median = dists[size / 2];
+//         for (double dist : dists) {
+//             abs_devs.push_back(std::abs(dist - median));
+//         }
+//         std::nth_element(abs_devs.begin(), abs_devs.begin() + size / 2, abs_devs.end());
+//         return abs_devs[size / 2];
+//     };
+//     nn_mad = compute_mad(nn_dists);
+//     nn12_mad = compute_mad(nn12_dists);
+// }
+
 void KeyFrame::AddChild(KeyFrame *pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
@@ -991,6 +1054,95 @@ void KeyFrame::UpdateMap(Map* pMap)
     mpMap = pMap;
 }
 
+void KeyFrame::PreSaveWithMapLines(set<KeyFrame*>& spKF,set<MapPoint*>& spMP, set<MapLine*>& spML, set<GeometricCamera*>& spCam)
+{
+    // Save the id of each MapPoint in this KF, there can be null pointer in the vector
+    mvBackupMapPointsId.clear();
+    mvBackupMapPointsId.reserve(N);
+    for(int i = 0; i < N; ++i)
+    {
+
+        if(mvpMapPoints[i] && spMP.find(mvpMapPoints[i]) != spMP.end()) // Checks if the element is not null
+            mvBackupMapPointsId.push_back(mvpMapPoints[i]->mnId);
+        else // If the element is null his value is -1 because all the id are positives
+            mvBackupMapPointsId.push_back(-1);
+    }
+
+    //Save the id of each MapLine in this KF, there can be null pointer in the vector
+    mvBackupMapLinesId.clear();
+    mvBackupMapLinesId.reserve(NL);
+    for(int i = 0; i < NL; ++i)
+    {
+        if(mvpMapLines[i] && spML.find(mvpMapLines[i]) != spML.end()) // Checks if the element is not null
+            mvBackupMapLinesId.push_back(mvpMapLines[i]->mnId);
+        else // If the element is null his value is -1 because all the id are positives
+            mvBackupMapLinesId.push_back(-1);   
+    }
+
+    // Save the id of each connected KF with it weight
+    mBackupConnectedKeyFrameIdWeights.clear();
+    for(std::map<KeyFrame*,int>::const_iterator it = mConnectedKeyFrameWeights.begin(), end = mConnectedKeyFrameWeights.end(); it != end; ++it)
+    {
+        if(spKF.find(it->first) != spKF.end())
+            mBackupConnectedKeyFrameIdWeights[it->first->mnId] = it->second;
+    }
+
+    // Save the parent id
+    mBackupParentId = -1;
+    if(mpParent && spKF.find(mpParent) != spKF.end())
+        mBackupParentId = mpParent->mnId;
+
+    // Save the id of the childrens KF
+    mvBackupChildrensId.clear();
+    mvBackupChildrensId.reserve(mspChildrens.size());
+    for(KeyFrame* pKFi : mspChildrens)
+    {
+        if(spKF.find(pKFi) != spKF.end())
+            mvBackupChildrensId.push_back(pKFi->mnId);
+    }
+
+    // Save the id of the loop edge KF
+    mvBackupLoopEdgesId.clear();
+    mvBackupLoopEdgesId.reserve(mspLoopEdges.size());
+    for(KeyFrame* pKFi : mspLoopEdges)
+    {
+        if(spKF.find(pKFi) != spKF.end())
+            mvBackupLoopEdgesId.push_back(pKFi->mnId);
+    }
+
+    // Save the id of the merge edge KF
+    mvBackupMergeEdgesId.clear();
+    mvBackupMergeEdgesId.reserve(mspMergeEdges.size());
+    for(KeyFrame* pKFi : mspMergeEdges)
+    {
+        if(spKF.find(pKFi) != spKF.end())
+            mvBackupMergeEdgesId.push_back(pKFi->mnId);
+    }
+
+    //Camera data
+    mnBackupIdCamera = -1;
+    if(mpCamera && spCam.find(mpCamera) != spCam.end())
+        mnBackupIdCamera = mpCamera->GetId();
+
+    mnBackupIdCamera2 = -1;
+    if(mpCamera2 && spCam.find(mpCamera2) != spCam.end())
+        mnBackupIdCamera2 = mpCamera2->GetId();
+
+    //Inertial data
+    mBackupPrevKFId = -1;
+    if(mPrevKF && spKF.find(mPrevKF) != spKF.end())
+        mBackupPrevKFId = mPrevKF->mnId;
+
+    mBackupNextKFId = -1;
+    if(mNextKF && spKF.find(mNextKF) != spKF.end())
+        mBackupNextKFId = mNextKF->mnId;
+
+    if(mpImuPreintegrated)
+        mBackupImuPreintegrated.CopyFrom(mpImuPreintegrated);
+}
+
+
+
 void KeyFrame::PreSave(set<KeyFrame*>& spKF,set<MapPoint*>& spMP, set<GeometricCamera*>& spCam)
 {
     // Save the id of each MapPoint in this KF, there can be null pointer in the vector
@@ -1065,6 +1217,111 @@ void KeyFrame::PreSave(set<KeyFrame*>& spKF,set<MapPoint*>& spMP, set<GeometricC
     if(mpImuPreintegrated)
         mBackupImuPreintegrated.CopyFrom(mpImuPreintegrated);
 }
+
+void KeyFrame::PostLoadWithMapLines(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapPoint*>& mpMPid, map<long unsigned int, MapLine*>& mpMLid, map<unsigned int, GeometricCamera*>& mpCamId)
+{
+    // Rebuild the empty variables
+
+    // Pose
+    SetPose(mTcw);
+
+    mTrl = mTlr.inverse();
+
+    // Reference reconstruction
+    // Each MapPoint sight from this KeyFrame
+    mvpMapPoints.clear();
+    mvpMapPoints.resize(N);
+    for(int i=0; i<N; ++i)
+    {
+        if(mvBackupMapPointsId[i] != -1)
+            mvpMapPoints[i] = mpMPid[mvBackupMapPointsId[i]];
+        else
+            mvpMapPoints[i] = static_cast<MapPoint*>(NULL);
+    }
+
+    // Each MapLine sight from this KeyFrame
+    mvpMapLines.clear();
+    mvpMapLines.resize(NL);
+    for(int i=0; i<NL; ++i)
+    {
+        if(mvBackupMapLinesId[i] != -1)
+            mvpMapLines[i] = mpMLid[mvBackupMapLinesId[i]];
+        else
+            mvpMapLines[i] = static_cast<MapLine*>(NULL);
+    }
+
+    // Conected KeyFrames with him weight
+    mConnectedKeyFrameWeights.clear();
+    for(map<long unsigned int, int>::const_iterator it = mBackupConnectedKeyFrameIdWeights.begin(), end = mBackupConnectedKeyFrameIdWeights.end();
+        it != end; ++it)
+    {
+        KeyFrame* pKFi = mpKFid[it->first];
+        mConnectedKeyFrameWeights[pKFi] = it->second;
+    }
+
+    // Restore parent KeyFrame
+    if(mBackupParentId>=0)
+        mpParent = mpKFid[mBackupParentId];
+
+    // KeyFrame childrens
+    mspChildrens.clear();
+    for(vector<long unsigned int>::const_iterator it = mvBackupChildrensId.begin(), end = mvBackupChildrensId.end(); it!=end; ++it)
+    {
+        mspChildrens.insert(mpKFid[*it]);
+    }
+
+    // Loop edge KeyFrame
+    mspLoopEdges.clear();
+    for(vector<long unsigned int>::const_iterator it = mvBackupLoopEdgesId.begin(), end = mvBackupLoopEdgesId.end(); it != end; ++it)
+    {
+        mspLoopEdges.insert(mpKFid[*it]);
+    }
+
+    // Merge edge KeyFrame
+    mspMergeEdges.clear();
+    for(vector<long unsigned int>::const_iterator it = mvBackupMergeEdgesId.begin(), end = mvBackupMergeEdgesId.end(); it != end; ++it)
+    {
+        mspMergeEdges.insert(mpKFid[*it]);
+    }
+
+    //Camera data
+    if(mnBackupIdCamera >= 0)
+    {
+        mpCamera = mpCamId[mnBackupIdCamera];
+    }
+    else
+    {
+        cout << "ERROR: There is not a main camera in KF " << mnId << endl;
+    }
+    if(mnBackupIdCamera2 >= 0)
+    {
+        mpCamera2 = mpCamId[mnBackupIdCamera2];
+    }
+
+    //Inertial data
+    if(mBackupPrevKFId != -1)
+    {
+        mPrevKF = mpKFid[mBackupPrevKFId];
+    }
+    if(mBackupNextKFId != -1)
+    {
+        mNextKF = mpKFid[mBackupNextKFId];
+    }
+    mpImuPreintegrated = &mBackupImuPreintegrated;
+
+
+    // Remove all backup container
+    mvBackupMapPointsId.clear();
+    mBackupConnectedKeyFrameIdWeights.clear();
+    mvBackupChildrensId.clear();
+    mvBackupLoopEdgesId.clear();
+
+    // Remove MapLine backup container
+    mvBackupMapLinesId.clear();
+
+    UpdateBestCovisibles();
+}
+
 
 void KeyFrame::PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapPoint*>& mpMPid, map<unsigned int, GeometricCamera*>& mpCamId){
     // Rebuild the empty variables

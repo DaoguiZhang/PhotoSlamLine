@@ -264,6 +264,8 @@ public:
     int TrackedMapLines(const int &minObs);
     MapLine* GetMapLine(const size_t &idx);
 
+    void lineDescriptorMAD(const std::vector<std::vector<cv::DMatch>>& matches, double &nn_mad, double &nn12_mad) const;
+
     // KeyPoint functions
     std::vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r, const bool bRight = false) const;
     bool UnprojectStereo(int i, Eigen::Vector3f &x3D, Eigen::Vector3f &colorRGB);
@@ -312,6 +314,8 @@ public:
 
     void PreSave(set<KeyFrame*>& spKF,set<MapPoint*>& spMP, set<GeometricCamera*>& spCam);
     void PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapPoint*>& mpMPid, map<unsigned int, GeometricCamera*>& mpCamId);
+    void PreSaveWithMapLines(set<KeyFrame*>& spKF,set<MapPoint*>& spMP, set<MapLine*>& spML, set<GeometricCamera*>& spCam);
+    void PostLoadWithMapLines(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapPoint*>& mpMPid, map<long unsigned int, MapLine*>& mpMLid, map<unsigned int, GeometricCamera*>& mpCamId);
 
 
     void SetORBVocabulary(ORBVocabulary* pORBVoc);
@@ -406,7 +410,7 @@ public:
     const std::vector<cv::line_descriptor::KeyLine> mvKeyLinesUn;
     const std::vector<std::pair<float, float> > mvuLineRight; // negative value for monocular lines
     const std::vector<std::pair<float,float> > mvLineDepth; // negative value for monocular lines
-    const cv::Mat mLineDescriptors;
+    const cv::Mat mLineDescriptors, mLineDescriptorsRight;
     std::vector<Eigen::Vector3f> mvKeyLineFunctions; // Key lines functions in the keyframe
 
     //BoW
@@ -550,6 +554,9 @@ public:
 
     const int NLeft, NRight;
 
+    //Number of line extracted in the left and right images
+    const int NLleft, NLright;
+
     std::vector< std::vector <std::vector<size_t> > > mGridRight;
 
     Sophus::SE3<float> GetRightPose();
@@ -571,6 +578,12 @@ public:
         cout << "Point distribution in KeyFrame: left-> " << left << " --- right-> " << right << endl;
     }
 
+    // === 内部比较器 ===
+    static bool compare_descriptor_by_NN_dist(const std::vector<cv::DMatch>& a,
+                                              const std::vector<cv::DMatch>& b)
+    {
+        return a[0].distance < b[0].distance;
+    }
 
 };
 

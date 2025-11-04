@@ -157,7 +157,7 @@ void ImGuiViewer::run()
     // Create window with graphics context
     GLFWwindow* window =
         glfwCreateWindow(glfw_window_width_, glfw_window_height_,
-                         "Photo-SLAM", nullptr, nullptr);
+                         "Photo-SLAM-LINE", nullptr, nullptr);
     if (window == nullptr)
         throw std::runtime_error("[ImGuiViewer]Fails to create window!");
     glfwMakeContextCurrent(window);

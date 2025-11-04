@@ -50,9 +50,14 @@ public:
     //LSDextractor(int nfeatures, float scaleFactor, int nlevels,
     //             int iniThFAST, int minThFAST);
 
-    LSDextractor(float minLen = 15.0f)
-        : minLineLength(minLen) 
+    LSDextractor(float minLen = 15.0f, int levels = 1)
+        : minLineLength(minLen), nlevels(levels)
     {
+        mvImagePyramid.resize(levels);
+        mvInvScaleFactor = std::vector<float>(levels);
+        for (int i = 0; i < levels; ++i) {
+            mvInvScaleFactor[i] = 1.0f / std::pow(1.2f, i);
+        }
         lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV);
         lld = cv::line_descriptor::BinaryDescriptor::createBinaryDescriptor();
     }
@@ -90,6 +95,11 @@ public:
 
 private:
 
+    void ComputeImagePyramid(const cv::Mat& image);
+    
+    int nlevels;
+    // float scaleFactor = 1.2f;
+    std::vector<float> mvInvScaleFactor;
     cv::Ptr<cv::LineSegmentDetector> lsd;
     cv::Ptr<cv::line_descriptor::BinaryDescriptor> lld;
     float minLineLength;

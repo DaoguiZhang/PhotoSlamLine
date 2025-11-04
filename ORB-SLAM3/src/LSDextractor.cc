@@ -8,6 +8,7 @@ namespace ORB_SLAM3
                     cv::OutputArray _descriptors, std::vector<int> &vLappingArea)
     {
         cv::Mat img = _image.getMat();
+        ComputeImagePyramid(img);   //compute image pyramid, to do next...
         detectAndCompute(img, keylines, _descriptors.getMatRef());
         return 0;
     }
@@ -21,7 +22,7 @@ namespace ORB_SLAM3
         }
         cv::Mat gray;
         if (img.channels() == 3)
-            cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+            cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
         else
             gray = img.clone();
 
@@ -42,4 +43,16 @@ namespace ORB_SLAM3
 
         lld->compute(gray, keylines, descriptors);
     }
+
+    void LSDextractor::ComputeImagePyramid(const cv::Mat& image)
+    {
+        mvImagePyramid.resize(nlevels);
+        mvImagePyramid[0] = image.clone();
+        for (int level = 1; level < nlevels; ++level) {
+            float scale = mvInvScaleFactor[level];
+            cv::Size sz(cvRound(image.cols * scale), cvRound(image.rows * scale));
+            cv::resize(image, mvImagePyramid[level], sz, 0, 0, cv::INTER_AREA);
+        }
+    }
+
 }
