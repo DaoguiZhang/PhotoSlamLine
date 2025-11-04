@@ -161,6 +161,7 @@ chmod +x ./*.sh
     # no_viewer 
 ```
 
+
 2. We also provide scripts to conduct experiments on all benchmark datasets mentioned in our paper. We ran each sequence five times to lower the effect of the nondeterministic nature of the system. You need to change the dataset root lines in scripts/*.sh then run:
 ```
 cd scripts
@@ -173,6 +174,7 @@ chmod +x ./*.sh
 # etc.
 ```
 
+3. We can run the project using the command lines in the replica_rgbd.sh script(important)
 
 
 ## Photo-SLAM Evaluation

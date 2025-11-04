@@ -5,6 +5,7 @@ IF(NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE Release)
 ENDIF()
 # SET(CMAKE_BUILD_TYPE Debug)
+add_compile_options(-w)
 
 MESSAGE("Build type: " ${CMAKE_BUILD_TYPE})
 
@@ -54,6 +55,8 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 
 add_library(${PROJECT_NAME} SHARED
 src/LineExtractor.cc
+src/LSDextractor.cc
+src/LSDVisualizer.cc
 src/System.cc
 src/Tracking.cc
 src/LocalMapping.cc
@@ -87,6 +90,8 @@ src/Settings.cc
 include/CommonTypeORB.h
 #include/levmar.h
 include/LineExtractor.h
+include/LSDextractor.h
+include/LSDVisualizer.h
 include/System.h
 include/Tracking.h
 include/LocalMapping.h
