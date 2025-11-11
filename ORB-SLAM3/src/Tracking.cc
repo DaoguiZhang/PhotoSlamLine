@@ -2892,11 +2892,11 @@ void Tracking::TrackWithLine()
                     // In last frame we tracked enough MapPoints in the map
                     if(mbVelocity)
                     {
-                        bOK = TrackWithMotionModel();
+                        bOK = TrackWithMotionModelWithLine();
                     }
                     else
                     {
-                        bOK = TrackReferenceKeyFrame();
+                        bOK = TrackReferenceKeyFrameWithLine();
                     }
                 }
                 else
@@ -3103,7 +3103,6 @@ void Tracking::TrackWithLine()
 #endif
             //bool bNeedKF = NeedNewKeyFrame();
             bool bNeedKF = NeedNewKeyFrameWithLine();   //to do next...
-
             // Check if we need to insert a new keyframe
             // if(bNeedKF && bOK)
             if(bNeedKF && (bOK || (mInsertKFsLost && mState==RECENTLY_LOST &&
@@ -4479,7 +4478,7 @@ bool Tracking::TrackWithMotionModelWithLine()
         //     return false;
     }
     ////debug draw
-    //std::cerr << "TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
+    std::cerr << "TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
     //line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
 
     // Optimize frame pose with all matches
@@ -6475,6 +6474,11 @@ void Tracking::ResetActiveMap(bool bLocMap)
 vector<MapPoint*> Tracking::GetLocalMapMPS()
 {
     return mvpLocalMapPoints;
+}
+
+std::vector<MapLine*> Tracking::GetLocalMapLines()
+{
+    return mvpLocalMapLines;
 }
 
 void Tracking::ChangeCalibration(const string &strSettingPath)

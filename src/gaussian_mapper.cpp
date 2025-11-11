@@ -1020,7 +1020,8 @@ void GaussianMapper::handleNewKeyframe(
                 cv::Mat/*auxiliaryImage*/,
                 std::vector<float>,
                 std::vector<float>,
-                std::string> &kf)
+                std::string,
+                std::vector<float>> &kf)
 {
     std::shared_ptr<GaussianKeyframe> pkf =
         std::make_shared<GaussianKeyframe>(std::get<0>(kf), getIteration());

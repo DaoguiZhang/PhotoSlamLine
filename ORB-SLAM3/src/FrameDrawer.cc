@@ -200,7 +200,6 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
                 }
             }
         }
-        
         // Draw line features
         int m = vCurrentKeysLine.size();
         for(int i=0; i<m; i++)

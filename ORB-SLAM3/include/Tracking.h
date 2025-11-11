@@ -180,7 +180,8 @@ public:
 
 
     vector<MapPoint*> GetLocalMapMPS();
-
+    std::vector<MapLine*> GetLocalMapLines();
+    
     bool mbWriteStats;
 
 #ifdef REGISTER_TIMES
@@ -229,6 +230,7 @@ protected:
     void UpdateLastFrameWithLine();
     bool TrackWithMotionModelWithLine();
     bool Relocalization();
+    bool RelocalizationWithLine();  //added for line feature
 
     void UpdateLocalMap();
     void UpdateLocalPoints();

@@ -28,7 +28,7 @@
 #include"MapPoint.h"
 #include"KeyFrame.h"
 #include"Frame.h"
-#include <pangolin/pangolin.h>
+//#include <pangolin/pangolin.h>
 
 
 namespace ORB_SLAM3

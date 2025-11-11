@@ -179,7 +179,8 @@ protected:
                                       cv::Mat,
                                       std::vector<float>,
                                       std::vector<float>,
-                                      std::string> &kf);
+                                      std::string,
+                                      std::vector<float>> &kf);
     void generateKfidRandomShuffle();
     std::shared_ptr<GaussianKeyframe> useOneRandomSlidingWindowKeyframe();
     std::shared_ptr<GaussianKeyframe> useOneRandomKeyframe();
