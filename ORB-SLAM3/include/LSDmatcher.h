@@ -49,16 +49,21 @@ namespace ORB_SLAM3
         ~LSDmatcher(){}
 
         // 匹配 keylines + descriptors
-    void match(const std::vector<cv::line_descriptor::KeyLine>& keylines1, const cv::Mat& desc1,
+        void match(const std::vector<cv::line_descriptor::KeyLine>& keylines1, const cv::Mat& desc1,
                const std::vector<cv::line_descriptor::KeyLine>& keylines2, const cv::Mat& desc2,
                std::vector<cv::DMatch>& good_matches); 
 
         int SearchByDescriptor(KeyFrame* pKF, Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
         int SearchByDescriptor(KeyFrame* pKF, KeyFrame *pKF2, std::vector<MapLine*> &vpMapLineMatches);
-        int SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono);
-        int MatchLinesByProjection(Frame &currentFrame, const Frame &lastFrame, const float threshold, const bool isMono);
+        int SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool Mono);
+        //int MatchLinesByProjection(Frame &currentFrame, const Frame &lastFrame, const float threshold, const bool isMono);
+        int SearchByProjectionNew(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool isMono);
+        void DebugDrawLineMatches(const Frame &lastFrame, const Frame &currentFrame);
         int SearchByProjection(KeyFrame* pKF,Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
+        void DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame);
         int SearchByProjection(Frame &F, const std::vector<MapLine*> &vpMapLines, const float th=3);
+        void DebugLineMatchSearchbyProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th);
+        void DebugLineProjectionNew(Frame &F, const std::vector<MapLine*> &vpMapLines, const std::string &winName = "Line Projection Debug");
         int SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const std::vector<MapLine*> &vpLines, std::vector<MapLine*> &vpMatched, int th);
         int SearchBySim3(KeyFrame* pKF1, KeyFrame* pKF2, std::vector<MapLine *> &vpMatches12, const float &s12, const cv::Mat &R12, const cv::Mat &t12, const float th);
         int SerachForInitialize(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int,int>> &LineMatches);

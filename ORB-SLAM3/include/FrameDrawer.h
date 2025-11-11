@@ -59,12 +59,15 @@ protected:
 
     // Info of the frame to be drawn
     cv::Mat mIm, mImRight;
-    int N;
+    int N, NL;
     vector<cv::KeyPoint> mvCurrentKeys,mvCurrentKeysRight;
+    std::vector<cv::line_descriptor::KeyLine> mvCurrentKeysLine; //added for line feature
+    //cv::Mat mCurrentDescriptors,mCurrentDescriptorsRight;
     vector<bool> mvbMap, mvbVO;
     bool mbOnlyTracking;
     int mnTracked, mnTrackedVO;
     vector<cv::KeyPoint> mvIniKeys;
+    std::vector<cv::line_descriptor::KeyLine> mvIniKeysLine; //added for line feature
     vector<int> mvIniMatches;
     int mState;
     std::vector<float> mvCurrentDepth;
@@ -77,16 +80,19 @@ protected:
 
     Frame mCurrentFrame;
     vector<MapPoint*> mvpLocalMap;
+    std::vector<MapLine*> mvpLocalMapLines; //added for MapLine visualization
     vector<cv::KeyPoint> mvMatchedKeys;
+    std::vector<cv::line_descriptor::KeyLine> mvMatchedKeysLine; //added for line feature
     vector<MapPoint*> mvpMatchedMPs;
+    std::vector<MapLine*> mvpMatchedMLs; //added for line feature
     vector<cv::KeyPoint> mvOutlierKeys;
+    std::vector<cv::line_descriptor::KeyLine> mvOutlierKeysLine; //added for line feature
     vector<MapPoint*> mvpOutlierMPs;
+    std::vector<MapLine*> mvpOutlierMLs; //added for line feature
 
     map<long unsigned int, cv::Point2f> mmProjectPoints;
+    std::map<long unsigned int, std::pair<cv::Point2f,cv::Point2f> > mmProjectLines; //added for line feature
     map<long unsigned int, cv::Point2f> mmMatchedInImage;
-
-    std::vector<MapLine*> mvpLocalMapLines; //added for MapLine visualization
-    //std::vector<>
 
 };
 

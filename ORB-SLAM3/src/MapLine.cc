@@ -50,7 +50,7 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos, con
     mbRetrived(false)
 {
     //set line position and color
-    SetLineWorldPos(LsPos, LeColor);
+    SetLineWorldPos(LsPos, LePos);
     SetLineColorRGB(LsColor, LeColor);
 
     mLineNormalVector.setZero();
@@ -200,8 +200,10 @@ void MapLine::AddLineObservation(KeyFrame* pKF, int idx)
     }
     if(pKF -> NLleft != -1 && idx >= pKF -> NLleft){
         get<1>(indexes) = idx;
+        //std::cerr << "MapLine 1->idx: " << idx << std::endl;
     }
     else{
+        //std::cerr << "MapLine 0->idx: " << idx <<std::endl;
         get<0>(indexes) = idx;
     }
     mLineObservations[pKF]=indexes;
@@ -630,6 +632,7 @@ void MapLine::UpdateNormalAndDepth()
     const float dist = PC.norm();
     tuple<int ,int> indexes = observations[pRefKF];
     int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
+    //std::cerr << "leftIndex: " << leftIndex << std::endl;
     int level;
     if(pRefKF -> NLleft == -1){
         level = pRefKF->mvKeyLinesUn[leftIndex].octave;
@@ -640,8 +643,10 @@ void MapLine::UpdateNormalAndDepth()
     else{
         level = pRefKF -> mvKeyLinesRight[rightIndex - pRefKF -> NLleft].octave;
     }
+    //std::cerr << "MapLine: Level: " << level << std::endl;
     const float levelScaleFactor =  pRefKF->mvScaleFactors[level];
     const int nLevels = pRefKF->mnScaleLevels;
+    //std::cerr << "MapLine: nLevels: " << nLevels << std::endl;
 
     {
         unique_lock<mutex> lock3(mMutexPos);
@@ -664,6 +669,11 @@ float MapLine::GetMaxDistanceInvariance()
     return 1.2f * mfMaxDistance;
 }
 
+float MapLine::GetFoundRatio()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    return static_cast<float>(mnLineFound)/mnLineVisible;
+}
 
 
 #if 0
@@ -671,11 +681,7 @@ float MapLine::GetMaxDistanceInvariance()
 
 
 
-float MapLine::GetFoundRatio()
-{
-    unique_lock<mutex> lock(mMutexFeatures);
-    return static_cast<float>(mnFound)/mnVisible;
-}
+
 
 
 cv::Mat MapLine::GetDescriptor()

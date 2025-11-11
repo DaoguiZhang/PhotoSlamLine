@@ -212,6 +212,94 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    void ORBmatcher::DebugPointProjectionDual(
+        Frame &F,
+        const std::vector<MapPoint*> &vpMapPoints,
+        const std::string &winName2D,
+        const std::string &winName3D)
+    {
+        // ================================================================
+        // [1] OpenCV 窗口：显示投影匹配结果
+        // ================================================================
+        cv::Mat imDebug;
+        F.imgLeftRGB.copyTo(imDebug);
+        // 当前帧关键点（蓝色）
+        for (size_t i = 0; i < F.mvKeysUn.size(); i++)
+        {
+            const cv::KeyPoint &kp = F.mvKeysUn[i];
+            cv::circle(imDebug, kp.pt, 2, cv::Scalar(255, 0, 0), -1);
+        }
+        // MapPoint 投影位置（绿色）
+        for (auto pMP : vpMapPoints)
+        {
+            if (!pMP || pMP->isBad() || !pMP->mbTrackInView)
+                continue;
+            cv::Point2f uv(pMP->mTrackProjX, pMP->mTrackProjY);
+            cv::circle(imDebug, uv, 3, cv::Scalar(0, 255, 0), -1);
+            cv::putText(imDebug, std::to_string(pMP->mnId), uv + cv::Point2f(4, -4),
+                    cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(0, 255, 0), 1);
+        }
+        // 匹配成功的关键点（红色）
+        for (size_t i = 0; i < F.mvpMapPoints.size(); i++)
+        {
+            if (F.mvpMapPoints[i])
+            {
+                const cv::KeyPoint &kp = F.mvKeysUn[i];
+                cv::circle(imDebug, kp.pt, 3, cv::Scalar(0, 0, 255), -1);
+            }
+        }
+        cv::imshow(winName2D, imDebug);
+        cv::waitKey(1);
+        // ================================================================
+        // [2] Pangolin 可视化：3D 空间中点分布
+        // ================================================================
+        static bool bPangolinInitialized = false;
+        static pangolin::OpenGlRenderState s_cam;
+        static pangolin::View* d_cam = nullptr;
+        if (!bPangolinInitialized)
+        {
+            pangolin::CreateWindowAndBind(winName3D, 1024, 768);
+            glEnable(GL_DEPTH_TEST);
+            s_cam = pangolin::OpenGlRenderState(
+                pangolin::ProjectionMatrix(1024, 768, 500, 500, 512, 389, 0.1, 1000),
+                pangolin::ModelViewLookAt(0, -2, -10, 0, 0, 0, pangolin::AxisY));
+            d_cam = &pangolin::CreateDisplay().SetBounds(0.0, 1.0, 0.0, 1.0, -1024.0f / 768.0f).SetHandler(new pangolin::Handler3D(s_cam));
+            bPangolinInitialized = true;
+        }
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        d_cam->Activate(s_cam);
+        // --- 相机坐标轴 ---
+        glLineWidth(2);
+        glBegin(GL_LINES);
+        glColor3f(1.0, 0.0, 0.0); glVertex3f(0, 0, 0); glVertex3f(0.2, 0, 0);
+        glColor3f(0.0, 1.0, 0.0); glVertex3f(0, 0, 0); glVertex3f(0, 0.2, 0);
+        glColor3f(0.0, 0.0, 1.0); glVertex3f(0, 0, 0); glVertex3f(0, 0, 0.2);
+        glEnd();
+        // --- 绘制 MapPoints ---
+        glPointSize(4.0f);
+        glBegin(GL_POINTS);
+        for (auto pMP : vpMapPoints)
+        {
+            if (!pMP || pMP->isBad()) continue;
+            Eigen::Vector3f Pw = pMP->GetWorldPos();
+            Eigen::Vector3f Pc = F.GetRcw() * Pw + F.Gettcw();
+            if (Pc(2) > 0)
+                glColor3f(0.0, 1.0, 0.0);  // 前方（绿色）
+            else
+                glColor3f(1.0, 0.0, 0.0);  // 后方（红色）
+            glVertex3f(Pc(0), Pc(1), Pc(2));
+        }
+        glEnd();
+        // --- 相机中心 ---
+        glPointSize(6.0f);
+        glColor3f(1.0, 1.0, 0.0);
+        glBegin(GL_POINTS);
+        glVertex3f(0, 0, 0);
+        glEnd();
+        pangolin::FinishFrame();
+    }
+
     float ORBmatcher::RadiusByViewingCos(const float &viewCos)
     {
         if(viewCos>0.998)
@@ -1697,6 +1785,7 @@ namespace ORB_SLAM3
             MapPoint* pMP = LastFrame.mvpMapPoints[i];
             if(pMP)
             {
+                //std::cerr << "i" << i <<  "; ORB->SearchByProjection pMP is not null" << std::endl;
                 if(!LastFrame.mvbOutlier[i])
                 {
                     // Project

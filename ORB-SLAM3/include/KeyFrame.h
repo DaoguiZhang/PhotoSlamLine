@@ -271,6 +271,7 @@ public:
     bool UnprojectStereo(int i, Eigen::Vector3f &x3D, Eigen::Vector3f &colorRGB);
 
     void GetKeypointInfo(std::vector<float> &pixelsUndist, std::vector<float> &pointsLocal);
+    void GetKeyLineInfo(std::vector<float> &pixelsUndist,std::vector<float> &pointsLocal);
 
     //keyLine functions(modified by zdg)
     std::vector<size_t> GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 

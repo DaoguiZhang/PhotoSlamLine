@@ -66,7 +66,7 @@ void Atlas::CreateNewMap()
         mpCurrentMap->SetStoredMap();
         cout << "Stored map with ID: " << mpCurrentMap->GetId() << endl;
     }
-    cout << "Creation of new map with last KF id: " << mnLastInitKFidMap << endl;
+    std::cout << "Creation of new map with last KF id: " << mnLastInitKFidMap << endl;
 
     mpCurrentMap = new Map(mnLastInitKFidMap);
     mpCurrentMap->SetCurrentMap();
@@ -107,6 +107,12 @@ void Atlas::AddMapPoint(MapPoint* pMP)
 {
     Map* pMapMP = pMP->GetMap();
     pMapMP->AddMapPoint(pMP);
+}
+
+void Atlas::AddMapLine(MapLine* pML)
+{
+    Map* pMapML = pML->GetMap();
+    pMapML->AddMapLine(pML);
 }
 
 GeometricCamera* Atlas::AddCamera(GeometricCamera* pCam)
@@ -161,6 +167,12 @@ void Atlas::SetReferenceMapPoints(const std::vector<MapPoint*> &vpMPs)
     mpCurrentMap->SetReferenceMapPoints(vpMPs);
 }
 
+void Atlas::SetReferenceMapLines(const std::vector<MapLine*> &vpMLs)
+{
+    unique_lock<mutex> lock(mMutexAtlas);
+    mpCurrentMap->SetReferenceMapLines(vpMLs);
+}
+
 void Atlas::InformNewBigChange()
 {
     unique_lock<mutex> lock(mMutexAtlas);
@@ -177,6 +189,12 @@ long unsigned int Atlas::MapPointsInMap()
 {
     unique_lock<mutex> lock(mMutexAtlas);
     return mpCurrentMap->MapPointsInMap();
+}
+
+long unsigned int Atlas::MapLinesInMap()
+{
+    unique_lock<mutex> lock(mMutexAtlas);
+    return mpCurrentMap->MapLinesInMap();
 }
 
 long unsigned Atlas::KeyFramesInMap()
@@ -197,10 +215,22 @@ std::vector<MapPoint*> Atlas::GetAllMapPoints()
     return mpCurrentMap->GetAllMapPoints();
 }
 
+std::vector<MapLine*> Atlas::GetAllMapLines()
+{
+    unique_lock<mutex> lock(mMutexAtlas);
+    return mpCurrentMap->GetAllMapLines();
+}
+
 std::vector<MapPoint*> Atlas::GetReferenceMapPoints()
 {
     unique_lock<mutex> lock(mMutexAtlas);
     return mpCurrentMap->GetReferenceMapPoints();
+}
+
+std::vector<MapLine*> Atlas::GetReferenceMapLines()
+{
+    unique_lock<mutex> lock(mMutexAtlas);
+    return mpCurrentMap->GetReferenceMapLines();
 }
 
 std::unordered_set<unsigned long> Atlas::GetCurrentKeyFrameIds()

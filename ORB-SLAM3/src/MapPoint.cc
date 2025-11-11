@@ -179,8 +179,10 @@ void MapPoint::AddObservation(KeyFrame* pKF, int idx)
 
     if(pKF -> NLeft != -1 && idx >= pKF -> NLeft){
         get<1>(indexes) = idx;
+        //std::cerr << "MapPoint 1->idx: " << idx << std::endl;
     }
     else{
+        //std::cerr << "MapPoint 0->idx: " << idx << std::endl;
         get<0>(indexes) = idx;
     }
 

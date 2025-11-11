@@ -87,7 +87,7 @@ public:
     void ExtractORB(int flag, const cv::Mat &im, const int x0, const int x1);
 
     // extract line feature, 自己添加的
-    void ExtractLSD(const cv::Mat &im);
+    void ExtractLSD(int flag, const cv::Mat &im);
 
     //点线特征选择
     void featureSelect(const cv::Mat &im);
@@ -128,7 +128,8 @@ public:
 
     // Check if a MapLine is in the frustum of the camera
     // and fill variables of the MapPoint to be used by the tracking
-    bool isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight=false);
+    //bool isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight=false);
+    bool isLineInFrustum(MapLine* pML, float viewingCosLimit);
 
     bool ProjectPointDistort(MapPoint* pMP, cv::Point2f &kp, float &u, float &v);
 
@@ -141,6 +142,12 @@ public:
 
     std::vector<size_t> GetLinesInArea(const float &x1, const float  &y1, const float &x2, const float &y2, const float  &r, const int minLevel=-1, const int maxLevel=-1, const bool bRight = false) const;
 
+    std::vector<size_t> GetLinesInAreaMean(
+        const float &u, const float &v,
+        const float r,
+        const int minLevel = -1,
+        const int maxLevel = -1) const;
+    
     // Search a match for each keypoint in the left image to a keypoint in the right image.
     // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
     void ComputeStereoMatches();
@@ -155,9 +162,13 @@ public:
     void ComputeStereoFromRGBD(const cv::Mat &imDepth);
     // Associate a "right" coordinate to a keyline if there is valid depth in the depthmap.
     void ComputeLineStereoFromRGBD(const cv::Mat &imDepth);
+    void ExportRGBDDepthAndLinesToOBJ(const cv::Mat &imDepth, const std::string &filename);
 
     // Backprojects a keypoint (if stereo/depth info available) into 3D world coordinates.
     bool UnprojectStereo(const int &i, Eigen::Vector3f &x3D, Eigen::Vector3f &colorRGB);
+
+    //Backprojects a line segments(if stereo/depth info available) into 3D world coordinates
+    bool UnprojectStereoLineSeg(const int &i, std::pair<Eigen::Vector3f, Eigen::Vector3f>& xLine3D, std::pair<Eigen::Vector3f, Eigen::Vector3f>& colorLine3DRGB);
 
     ConstraintPoseImu* mpcpi;
 
@@ -190,6 +201,14 @@ public:
 
     inline Eigen::Vector3f GetOw() const {
         return mOw;
+    }
+
+    inline Eigen::Matrix3f GetRcw() const {
+        return mRcw;
+    }
+
+    inline Eigen::Vector3f Gettcw() const {
+        return mtcw;
     }
 
     inline bool HasPose() const {
@@ -298,12 +317,12 @@ public:
     std::vector<float> mvuRight;
     std::vector<float> mvDepth;
     std::vector<std::pair<float,float> > mvuLineRight; // "Mon
-    std::vector<std::pair<float,float> > mvLineDepth;
+    std::vector<std::pair<float,float> > mvLineDepth;   // First:depth from left keyline, second:depth from right keyline
     std::vector<float> mvLineDepthConfidence;
 
     //Corresonding stereo coordinate and depth for each line keypoint
     std::vector<MapLine*> mvpMapLines;
-    std::vector<Eigen::Vector2f> mvDepthLines; // First:depth from left keypoint, second:depth from right keypoint
+    //std::vector<Eigen::Vector2f> mvDepthLines; // First:depth from left keypoint, second:depth from right keypoint
 
     // Bag of Words Vector structures.
     DBoW2::BowVector mBowVec;
@@ -395,6 +414,9 @@ public:
     map<long unsigned int, cv::Point2f> mmProjectPoints;
     map<long unsigned int, cv::Point2f> mmMatchedInImage;
 
+    std::map<long unsigned int, std::pair<cv::Point2f, cv::Point2f>> mmProjectLines;
+    std::map<long unsigned int, std::pair<cv::Point2f, cv::Point2f>> mmMatchedLineInImage;
+
     string mNameFile;
 
     int mnDataset;
@@ -410,6 +432,7 @@ private:
     // Only for the RGB-D case. Stereo must be already rectified!
     // (called in the constructor).
     void UndistortKeyPoints();
+    void UndistortKeyLines();
 
     // Computes image bounds for the undistorted image (called in the constructor).
     void ComputeImageBounds(const cv::Mat &imLeft);
@@ -433,6 +456,8 @@ public:
 
     //Number of line extracted in the left and right images
     int NLleft, NLright;
+    //Number of Non Lapping KeyLines
+    int monoLineLeft, monoLineRight;
 
     //For stereo matching
     std::vector<int> mvLeftToRightMatch, mvRightToLeftMatch;
@@ -458,6 +483,8 @@ public:
 
     cv::Mat imgLeft, imgRight;
     cv::Mat imgLeftRGB, imgAuxiliary;
+    //cv::Mat gray_u;
+    //gray.convertTo(gray_u, CV_8UC1, 255.0);
 
     void PrintPointDistribution(){
         int left = 0, right = 0;

@@ -44,7 +44,7 @@ class Frame;
 class MapLine
 {
 
-/*  
+
     friend class boost::serialization::access;  //to do serialization next
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
@@ -82,22 +82,25 @@ class MapLine
         //serializeMatrix(ar,mNormalVectorMerge,version);
 
         // Protected variables
-        ar & boost::serialization::make_array(mWorldPos.data(), mWorldPos.size());
-        ar & boost::serialization::make_array(mNormalVector.data(), mNormalVector.size());
+        ar & boost::serialization::make_array(mLineWorldPos.data(), mLineWorldPos.size());
+        ar & boost::serialization::make_array(mLsWorldPos.data(), mLsWorldPos.size());
+        ar & boost::serialization::make_array(mLeWorldPos.data(), mLeWorldPos.size());
+        ar & boost::serialization::make_array(mLineNormalVector.data(), mLineNormalVector.size());
         //ar & BOOST_SERIALIZATION_NVP(mBackupObservationsId);
         //ar & mObservations;
-        ar & mBackupObservationsId1;
-        ar & mBackupObservationsId2;
-        serializeMatrix(ar,mDescriptor,version);
+        ar & mLineBackupObservationsId1;
+        ar & mLineBackupObservationsId2;
+        //serializeMatrix(ar,mDescriptor,version);
+        serializeMatrix(ar,mLineDescriptor,version);
         ar & mBackupRefKFId;
-        //ar & mnVisible;
-        //ar & mnFound;
-        ar & mbBad;
-        ar & mBackupReplacedId;
+        ar & mnLineVisible;
+        ar & mnLineFound;
+        ar & mbLineBad;
+        ar & mLineBackupReplacedId;
         ar & mfMinDistance;
         ar & mfMaxDistance;
     }
-*/
+
 
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
@@ -164,6 +167,7 @@ public:
     void UpdateMap(Map* pMap);
 
     void PrintObservations();
+    //float MapLine::GetFoundRatio()
 
     void PreSave(set<KeyFrame*>& spKF,set<MapLine*>& spMP);
     void PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapLine*>& mpMPid);
@@ -255,7 +259,7 @@ protected:
      std::map<long unsigned int, int> mLineBackupObservationsId1;
      std::map<long unsigned int, int> mLineBackupObservationsId2;
 
-     // Mean viewing direction(to do nnext)
+     // Mean viewing direction(done)
      Eigen::Vector3f mLineNormalVector;
 
      // Best descriptor to fast matching

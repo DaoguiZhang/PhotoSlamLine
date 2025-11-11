@@ -57,8 +57,8 @@ Frame::Frame(const Frame &frame)
      mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mK_(Converter::toMatrix3f(frame.mK)), mDistCoef(frame.mDistCoef.clone()),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), NL(frame.NL), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), mvKeysUn(frame.mvKeysUn), mvuRight(frame.mvuRight),
-     mvKeyLines(frame.mvKeyLines), mvKeyLinesRight(frame.mvKeyLinesRight), mvKeyLinesUn(frame.mvKeyLinesUn),
-     mvuLineRight(frame.mvuLineRight),mvLineDepth(frame.mvLineDepth),mvDepthLines(frame.mvDepthLines),mpLineExtractorLeft(frame.mpLineExtractorLeft), mpLineExtractorRight(frame.mpLineExtractorRight),
+     mvKeyLines(frame.mvKeyLines), mvKeyLinesRight(frame.mvKeyLinesRight), mvKeyLinesUn(frame.mvKeyLinesUn),mvpMapLines(frame.mvpMapLines),
+     mvuLineRight(frame.mvuLineRight),mvLineDepth(frame.mvLineDepth), mpLineExtractorLeft(frame.mpLineExtractorLeft), mpLineExtractorRight(frame.mpLineExtractorRight),
      mvDepth(frame.mvDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec), mLineDescriptors(frame.mLineDescriptors.clone()),
      mDescriptors(frame.mDescriptors.clone()), mDescriptorsRight(frame.mDescriptorsRight.clone()), mvpMapPoints(frame.mvpMapPoints), mvbOutlier(frame.mvbOutlier), mImuCalib(frame.mImuCalib), mnCloseMPs(frame.mnCloseMPs),
      mpImuPreintegrated(frame.mpImuPreintegrated), mpImuPreintegratedFrame(frame.mpImuPreintegratedFrame), mImuBias(frame.mImuBias),
@@ -91,6 +91,8 @@ Frame::Frame(const Frame &frame)
 
     mmProjectPoints = frame.mmProjectPoints;
     mmMatchedInImage = frame.mmMatchedInImage;
+    mmProjectLines = frame.mmProjectLines;
+    mmMatchedLineInImage = frame.mmMatchedLineInImage;
 
     imgLeftRGB = frame.imgLeftRGB;
     imgAuxiliary = frame.imgAuxiliary;
@@ -157,6 +159,8 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const cv::Mat &imRGB
     mvbOutlier = vector<bool>(N,false);
     mmProjectPoints.clear();
     mmMatchedInImage.clear();
+    mmProjectLines.clear();
+    mmMatchedLineInImage.clear();
 
 
     // This is done only for the first Frame (or after a change in the calibration)
@@ -252,6 +256,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
 
     mmProjectPoints.clear();
     mmMatchedInImage.clear();
+    mmProjectLines.clear();
+    mmMatchedLineInImage.clear();
 
     mvbOutlier = vector<bool>(N,false);
 
@@ -299,7 +305,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
 
 
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF, const IMU::Calib &ImuCalib)
-    :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor), mpLineExtractorLeft(lsd_extractor), ORBextractorRight(static_cast<ORBextractor*>(NULL)),
+    :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),  mpORBextractorRight(static_cast<ORBextractor*>(NULL)), mpLineExtractorLeft(lsd_extractor), mpLineExtractorRight(static_cast<LSDextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
      mpCamera(pCamera),mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
@@ -324,7 +330,10 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
 #ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
 #endif
+
     ExtractORB(0,imGray,0,0);
+    ExtractLSD(0, this->imgLeftRGB);   //
+
 #ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
 
@@ -341,12 +350,27 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
 
     ComputeStereoFromRGBD(imDepth);
 
-    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
+    mvpMapPoints = std::vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
 
     mmProjectPoints.clear();
     mmMatchedInImage.clear();
+    mmProjectLines.clear();
+    mmMatchedLineInImage.clear();
 
     mvbOutlier = vector<bool>(N,false);
+
+    //store line features
+    NL = static_cast<int> (mvKeyLines.size());
+    //std::cerr <<"NL: " << NL << std::endl;
+    if(!mvKeyLines.empty())
+    {
+        UndistortKeyLines();
+        ComputeLineStereoFromRGBD(imDepth);
+        mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
+
+        mvbLineOutlier = std::vector<bool>(NL, false);
+    }
+
 
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
@@ -386,6 +410,11 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
     monoLeft = -1;
     monoRight = -1;
+    monoLineLeft = -1;
+    monoLineRight = -1;
+
+    NLleft = -1;
+    NLright = -1;
 
     AssignFeaturesToGrid();
 }
@@ -439,6 +468,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
 
     mmProjectPoints.clear();// = map<long unsigned int, cv::Point2f>(N, static_cast<cv::Point2f>(NULL));
     mmMatchedInImage.clear();
+    mmProjectLines.clear();
+    mmMatchedLineInImage.clear();
 
     mvbOutlier = vector<bool>(N,false);
 
@@ -490,7 +521,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
 }
 
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF, const IMU::Calib &ImuCalib)
-    :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor), mpLineExtractorLeft(lsd_extractor), mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
+    :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor), mpORBextractorRight(static_cast<ORBextractor*>(NULL)), mpLineExtractorLeft(lsd_extractor), mpLineExtractorRight(static_cast<LSDextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(static_cast<Pinhole*>(pCamera)->toK()), mK_(static_cast<Pinhole*>(pCamera)->toK_()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL),mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false), mpCamera(pCamera),
      mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
@@ -515,6 +546,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
 #endif
     ExtractORB(0,imGray,0,1000);
+    ExtractLSD(0, this->imgLeftRGB);
 #ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
 
@@ -537,8 +569,28 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
 
     mmProjectPoints.clear();// = map<long unsigned int, cv::Point2f>(N, static_cast<cv::Point2f>(NULL));
     mmMatchedInImage.clear();
+    mmProjectLines.clear();
+    mmMatchedLineInImage.clear();
 
     mvbOutlier = vector<bool>(N,false);
+
+     //store line features
+    NL = static_cast<int> (mvKeyLines.size());
+    if(!mvKeyLines.empty())
+    {
+        UndistortKeyLines();
+        // Set no stereo information
+        mvuLineRight.clear();
+        mvLineDepth.clear();
+        for(int i = 0; i < NL; ++i)
+        {
+            mvuLineRight.emplace_back(std::make_pair(-1,-1));
+            mvLineDepth.emplace_back(std::make_pair(-1,-1));
+        }
+        mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
+
+        mvbLineOutlier = std::vector<bool>(NL, false);
+    }
 
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
@@ -630,9 +682,14 @@ void Frame::ExtractORB(int flag, const cv::Mat &im, const int x0, const int x1)
         monoRight = (*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight,vLapping);
 }
 
-void Frame::ExtractLSD(const cv::Mat &im)
+void Frame::ExtractLSD(int flag, const cv::Mat &im)
 {
     // TO DO: Implement line extraction if needed
+    vector<int> vLapping = {0,0};
+    if(flag == 0)
+        (*mpLineExtractorLeft)(im, cv::Mat(), mvKeyLines, mLineDescriptors, vLapping);
+    else
+        (*mpLineExtractorRight)(im, cv::Mat(), mvKeyLinesRight, mLineDescriptorsRight, vLapping);
 }
 
 void Frame::featureSelect(const cv::Mat &im)
@@ -807,70 +864,180 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
     }
 }
 
-bool Frame::isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight)
+// bool Frame::isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight)
+// {
+//     if(Nleft == -1){
+//         pML->mbLineTrackInView = false;
+//         pML->mLsTrackProjX = -1;
+//         pML->mLsTrackProjY = -1;
+//         pML->mLeTrackProjX = -1;
+//         pML->mLeTrackProjY = -1;
+//         Eigen::Vector3f P1 = pML->GetLineWorldPos().first;
+//         Eigen::Vector3f P2 = pML->GetLineWorldPos().second;
+//         // 3D in camera coordinates
+//         const Eigen::Matrix<float,3,1> Pc1 = mRcw * P1 + mtcw;
+//         const Eigen::Matrix<float,3,1> Pc2 = mRcw * P2 + mtcw;
+//         // 深度检查
+//         if(Pc1(2) <= 0 || Pc2(2) <= 0)
+//             return false;
+//         // 投影到图像
+//         Eigen::Vector2f uv1 = mpCamera->project(Pc1);
+//         Eigen::Vector2f uv2 = mpCamera->project(Pc2);
+//         // 裁剪到图像边界
+//         Eigen::Vector2f uv1_clip = uv1;
+//         Eigen::Vector2f uv2_clip = uv2;
+//         uv1_clip(0) = std::min(std::max(uv1(0), mnMinX), mnMaxX);
+//         uv1_clip(1) = std::min(std::max(uv1(1), mnMinY), mnMaxY);
+//         uv2_clip(0) = std::min(std::max(uv2(0), mnMinX), mnMaxX);
+//         uv2_clip(1) = std::min(std::max(uv2(1), mnMinY), mnMaxY);
+//         // 投影长度判断
+//         float lenImg = (uv2_clip - uv1_clip).norm();
+//         if(lenImg < minLengthPixels)
+//             return false;
+//         // 预测尺度
+//         Eigen::Vector3f PcCenter = (Pc1 + Pc2) * 0.5f;
+//         float dist = (PcCenter - mOw).norm();
+//         int nPredictedLevel = pML->PredictScale(dist, this);
+//          // Data used by the tracking
+//         pML->mbLineTrackInView = true;
+//         pML->mLsTrackProjX = uv1(0);
+//         pML->mLsTrackProjY = uv1(1);
+//         pML->mLeTrackProjX = uv2(0);
+//         pML->mLeTrackProjY = uv2(1);
+//         //pMP->mTrackProjXR = uv(0) - mbf*invz;
+//         pML->mLineTrackDepth = dist;    //MEAN point
+//         pML->mnLineTrackScaleLevel= nPredictedLevel;
+//         return true;
+//     }
+//     else
+//     {
+//         //TO DO next...
+//     }
+//     return true;
+// }
+
+
+bool Frame::isLineInFrustum(MapLine* pML, float viewingCosLimit)
 {
-    if(Nleft == -1){
-        pML->mbLineTrackInView = false;
-        pML->mLsTrackProjX = -1;
-        pML->mLsTrackProjY = -1;
-        pML->mLeTrackProjX = -1;
-        pML->mLeTrackProjY = -1;
+    pML->mbLineTrackInView = false;
+    pML->mLsTrackProjX = -1;
+    pML->mLsTrackProjY = -1;
+    pML->mLeTrackProjX = -1;
+    pML->mLeTrackProjY = -1;
 
-        Eigen::Vector3f P1 = pML->GetLineWorldPos().first;
-        Eigen::Vector3f P2 = pML->GetLineWorldPos().second;
+    // --- 获取线端点 ---
+    Eigen::Vector3f P1w = pML->GetLineWorldPos().first;
+    Eigen::Vector3f P2w = pML->GetLineWorldPos().second;
 
-        // 3D in camera coordinates
-        const Eigen::Matrix<float,3,1> Pc1 = mRcw * P1 + mtcw;
-        const Eigen::Matrix<float,3,1> Pc2 = mRcw * P2 + mtcw;
+    // --- 转到相机坐标系 ---
+    Eigen::Vector3f P1c = mRcw * P1w + mtcw;
+    Eigen::Vector3f P2c = mRcw * P2w + mtcw;
+    float Z1c = P1c(2), Z2c = P2c(2);
 
-        // 深度检查
-        if(Pc1(2) <= 0 || Pc2(2) <= 0)
-            return false;
+    if (Z1c <= 0.0f && Z2c <= 0.0f)
+        return false;
 
-        // 投影到图像
-        Eigen::Vector2f uv1 = mpCamera->project(Pc1);
-        Eigen::Vector2f uv2 = mpCamera->project(Pc2);
+    // --- 投影到像素平面 ---
+    Eigen::Vector2f uv1 = mpCamera->project(P1c);
+    Eigen::Vector2f uv2 = mpCamera->project(P2c);
 
-        // 裁剪到图像边界
-        Eigen::Vector2f uv1_clip = uv1;
-        Eigen::Vector2f uv2_clip = uv2;
-        uv1_clip(0) = std::min(std::max(uv1(0), mnMinX), mnMaxX);
-        uv1_clip(1) = std::min(std::max(uv1(1), mnMinY), mnMaxY);
-        uv2_clip(0) = std::min(std::max(uv2(0), mnMinX), mnMaxX);
-        uv2_clip(1) = std::min(std::max(uv2(1), mnMinY), mnMaxY);
+    // --- 判断是否部分在图像内 ---
+    bool in1 = (uv1(0) >= mnMinX && uv1(0) <= mnMaxX &&
+                uv1(1) >= mnMinY && uv1(1) <= mnMaxY);
+    bool in2 = (uv2(0) >= mnMinX && uv2(0) <= mnMaxX &&
+                uv2(1) >= mnMinY && uv2(1) <= mnMaxY);
 
-        // 投影长度判断
-        float lenImg = (uv2_clip - uv1_clip).norm();
-        if(lenImg < minLengthPixels)
-            return false;
+    if (!in1 && !in2) {
+        // 两端都在外侧，进一步检查是否穿过图像边界
+        // 使用线段与矩形相交测试（快速近似）
+        float minX = std::min(uv1(0), uv2(0));
+        float maxX = std::max(uv1(0), uv2(0));
+        float minY = std::min(uv1(1), uv2(1));
+        float maxY = std::max(uv1(1), uv2(1));
 
-        // 预测尺度
-        Eigen::Vector3f PcCenter = (Pc1 + Pc2) * 0.5f;
-        float dist = (PcCenter - mOw).norm();
-        int nPredictedLevel = pML->PredictScale(dist, this);
-
-         // Data used by the tracking
-        pML->mbLineTrackInView = true;
-        pML->mLsTrackProjX = uv1(0);
-        pML->mLsTrackProjY = uv1(1);
-        pML->mLeTrackProjX = uv2(0);
-        pML->mLeTrackProjY = uv2(1);
-        //pMP->mTrackProjXR = uv(0) - mbf*invz;
-        pML->mLineTrackDepth = dist;    //MEAN point
-        pML->mnLineTrackScaleLevel= nPredictedLevel;
-
-        return true;
-    }
-    else
-    {
-        //TO DO next...
+        if (maxX < mnMinX || minX > mnMaxX ||
+            maxY < mnMinY || minY > mnMaxY)
+            return false; // 整条线在外侧
     }
 
-    
+    // --- 视角一致性 ---
+    Eigen::Vector3f lineDir = P2w - P1w;
+    Eigen::Vector3f lineCenter = 0.5f * (P1w + P2w);
+    Eigen::Vector3f normal = lineCenter - mOw;
+    float dist = normal.norm();
+    normal /= dist;
+    float viewCos = normal.dot(lineDir.normalized());
+    if (std::fabs(viewCos) < viewingCosLimit)
+        return false;
 
-    
+    int nPredictedLevel = pML->PredictScale(dist, this);
+
+    // --- 存储结果 ---
+    pML->mbLineTrackInView = true;
+    pML->mLsTrackProjX = uv1(0);
+    pML->mLsTrackProjY = uv1(1);
+    pML->mLeTrackProjX = uv2(0);
+    pML->mLeTrackProjY = uv2(1);
+    pML->mLineTrackDepth = 0.5f * (Z1c + Z2c);
+    pML->mLineTrackViewCos = viewCos;
+    pML->mnLineTrackScaleLevel = nPredictedLevel;
+
     return true;
 }
+
+
+// bool Frame::isLineInFrustum(MapLine* pML, float viewingCosLimit)
+// {
+//     pML->mbLineTrackInView = false;
+//     pML->mLsTrackProjX = -1;
+//     pML->mLsTrackProjY = -1;
+//     pML->mLeTrackProjX = -1;
+//     pML->mLeTrackProjY = -1;
+//     // 获取线段的两个世界端点
+//     Eigen::Vector3f P1w = pML->GetLineWorldPos().first;;
+//     Eigen::Vector3f P2w = pML->GetLineWorldPos().second;
+//     // ========== [1] 变换到相机坐标系 ==========
+//     Eigen::Vector3f P1c = mRcw * P1w + mtcw;
+//     Eigen::Vector3f P2c = mRcw * P2w + mtcw;
+//     const float Z1c = P1c(2);
+//     const float Z2c = P2c(2);
+//     // 必须在相机前方
+//     if (Z1c <= 0.0f || Z2c <= 0.0f)
+//         return false;
+//     // ========== [2] 投影到像素坐标 ==========
+//     Eigen::Vector2f uv1 = mpCamera->project(P1c);
+//     Eigen::Vector2f uv2 = mpCamera->project(P2c);
+//     // ========== [3] 检查是否在图像边界 ==========
+//     if (uv1(0) < mnMinX || uv1(0) > mnMaxX || uv1(1) < mnMinY || uv1(1) > mnMaxY ||
+//         uv2(0) < mnMinX || uv2(0) > mnMaxX || uv2(1) < mnMinY || uv2(1) > mnMaxY)
+//         return false;
+//     // ========== [5] 检查视角一致性 ==========
+//     Eigen::Vector3f lineDir = P2w - P1w; // 世界坐标下的线方向
+//     Eigen::Vector3f lineCenter = 0.5f * (P1w + P2w); // 中点
+//     Eigen::Vector3f normal = lineCenter - mOw; // 从相机光心指向线中心的向量
+//     float dist = normal.norm();
+//     normal /= dist;
+//     Eigen::Vector3f lineNormal = lineDir / lineDir.norm();
+//     float viewCos = normal.dot(lineNormal);
+//     // // Check distance is in the scale invariance region of the MapPoint
+//     // const float maxDistance = pML->GetMaxDistanceInvariance();
+//     // const float minDistance = pML->GetMinDistanceInvariance();
+//     // if(dist<minDistance || dist>maxDistance)
+//     //         return false;
+//     int nPredictedLevel = pML->PredictScale(dist, this);
+//     if (std::fabs(viewCos) < viewingCosLimit)
+//         return false;
+//     // ========== [6] 保存投影信息到 MapLine ==========
+//     pML->mbLineTrackInView = true;
+//     pML->mLsTrackProjX = uv1(0);
+//     pML->mLsTrackProjY = uv1(1);
+//     pML->mLeTrackProjX   = uv2(0);
+//     pML->mLeTrackProjY   = uv2(1);
+//     pML->mLineTrackDepth  = 0.5f * (Z1c + Z2c);
+//     pML->mLineTrackViewCos = viewCos;
+//     pML->mnLineTrackScaleLevel = nPredictedLevel;
+//     return true;
+// }
 
 
 bool Frame::ProjectPointDistort(MapPoint* pMP, cv::Point2f &kp, float &u, float &v)
@@ -1046,6 +1213,59 @@ std::vector<size_t> Frame::GetLinesInArea(const float &x1, const float  &y1, con
     return vIndices;
 }
 
+std::vector<size_t> Frame::GetLinesInAreaMean(
+        const float &u, const float &v,
+        const float r,
+        const int minLevel,
+        const int maxLevel) const
+{
+    std::vector<size_t> vIndices;
+    vIndices.reserve(64);
+
+    const float r2 = r * r;
+    const float minX = u - r;
+    const float maxX = u + r;
+    const float minY = v - r;
+    const float maxY = v + r;
+
+    int nMinLevel = (minLevel < 0) ? 0 : minLevel;
+    int nMaxLevel = (maxLevel >= mnScaleLevels) ? mnScaleLevels - 1 : maxLevel;
+
+    const int N = mvKeyLinesUn.size();
+    for (int i = 0; i < N; i++)
+    {
+        const cv::line_descriptor::KeyLine &kl = mvKeyLinesUn[i];
+        const int octave = kl.octave;
+        if (octave < nMinLevel || octave > nMaxLevel)
+            continue;
+
+        const float u1 = kl.startPointX;
+        const float v1 = kl.startPointY;
+        const float u2 = kl.endPointX;
+        const float v2 = kl.endPointY;
+
+        // 端点落入矩形判断
+        bool inArea =
+            (u1 >= minX && u1 <= maxX && v1 >= minY && v1 <= maxY) ||
+            (u2 >= minX && u2 <= maxX && v2 >= minY && v2 <= maxY);
+
+        if (!inArea)
+            continue;
+
+        // 最近点距离判断
+        const float du1 = u1 - u;
+        const float dv1 = v1 - v;
+        const float du2 = u2 - u;
+        const float dv2 = v2 - v;
+
+        if ((du1 * du1 + dv1 * dv1 < r2) || (du2 * du2 + dv2 * dv2 < r2))
+            vIndices.push_back(i);
+    }
+
+    return vIndices;
+}
+
+
 bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 {
     posX = round((kp.pt.x-mnMinX)*mfGridElementWidthInv);
@@ -1163,6 +1383,52 @@ void Frame::UndistortKeyPoints()
     }
 
 }
+
+void Frame::UndistortKeyLines()
+{
+    //line not undistorted
+    if (true)
+    {
+        mvKeyLinesUn = mvKeyLines;
+        return;
+    }
+    // if (mDistCoef.at<float>(0) == 0.0)
+    // {
+    //     mvKeyLinesUn = mvKeyLines;
+    //     return;
+    // }
+    // const int N = mvKeyLines.size();
+    // if (N == 0)
+    //     return;
+    // // 准备 Nx2x2 矩阵（每条线两个端点）
+    // cv::Mat mat(2*N, 2, CV_32F);
+    // for (int i = 0; i < N; i++)
+    // {
+    //     mat.at<float>(2*i, 0)   = mvKeyLines[i].startPointX;
+    //     mat.at<float>(2*i, 1)   = mvKeyLines[i].startPointY;
+    //     mat.at<float>(2*i+1, 0) = mvKeyLines[i].endPointX;
+    //     mat.at<float>(2*i+1, 1) = mvKeyLines[i].endPointY;
+    // }
+    // // reshape为 (N*2,1,2)，便于undistort
+    // mat = mat.reshape(2);
+    // cv::undistortPoints(mat, mat, static_cast<Pinhole*>(mpCamera)->toK(), mDistCoef, cv::Mat(), mK);
+    // mat = mat.reshape(1);
+    // // 填充校正后的线段
+    // mvKeyLinesUn.resize(N);
+    // for (int i = 0; i < N; i++)
+    // {
+    //     cv::line_descriptor::KeyLine kl = mvKeyLines[i];
+    //     kl.startPointX = mat.at<float>(2*i, 0);
+    //     kl.startPointY = mat.at<float>(2*i, 1);
+    //     kl.endPointX   = mat.at<float>(2*i+1, 0);
+    //     kl.endPointY   = mat.at<float>(2*i+1, 1);
+    //     // 更新线段中心点
+    //     kl.pt.x = 0.5f * (kl.startPointX + kl.endPointX);
+    //     kl.pt.y = 0.5f * (kl.startPointY + kl.endPointY);
+    //     mvKeyLinesUn[i] = kl;
+    // }
+}
+
 
 void Frame::ComputeImageBounds(const cv::Mat &imLeft)
 {
@@ -1711,7 +1977,6 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
 {
     const int rows = imDepth.rows;
     const int cols = imDepth.cols;
-
     // 初始化存储
     mvuLineRight = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
     mvLineDepth  = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
@@ -1726,38 +1991,29 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
     for (int i = 0; i < NL; i++)
     {
         const cv::line_descriptor::KeyLine &kl = mvKeyLinesUn[i];
-
         float u1 = kl.startPointX;
         float v1 = kl.startPointY;
         float u2 = kl.endPointX;
         float v2 = kl.endPointY;
-
         // 边界检查
         if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
             u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
             continue;
-
         // 读取两端深度
         float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
         float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
-
         bool valid1 = (d1 > minDepth && d1 < maxDepth);
         bool valid2 = (d2 > minDepth && d2 < maxDepth);
-
         if (!valid1 && !valid2) continue; // 两端都无效
-
         float Z1 = valid1 ? d1 : -1.0f;
         float Z2 = valid2 ? d2 : -1.0f;
-
         float conf1 = valid1 ? 1.0f : 0.0f;
         float conf2 = valid2 ? 1.0f : 0.0f;
-
         // --- 深度一致性判断 ---
         if (valid1 && valid2)
         {
             float diff = std::abs(d1 - d2);
             float avg = 0.5f * (d1 + d2);
-
             if (diff / avg > maxDepthDiffRatio)
             {
                 // 不一致时降低置信度
@@ -1766,7 +2022,6 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
                 conf2 *= ratio;
             }
         }
-
         // --- 单端点有效时，用该端点近似整条线 ---
         if (!valid1 && valid2)
         {
@@ -1780,7 +2035,6 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
             u2 = u1;
             conf2 = conf1 * 0.8f;
         }
-
         // --- 根据置信度剔除异常端点 ---
         if(conf1 < thConf){ Z1=-1.0f; u1=-1.0f; conf1=0.0f; }
         if(conf2 < thConf){ Z2=-1.0f; u2=-1.0f; conf2=0.0f; }
@@ -1831,7 +2085,6 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
 //         {
 //             float diff = std::abs(d1 - d2);
 //             float avg = 0.5f * (d1 + d2);
-
 //             if (diff / avg < maxDepthDiffRatio)
 //                 d = avg;   // 两端深度接近，取平均
 //             else
@@ -1841,7 +2094,6 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
 //             d = d1;
 //         else if (valid2)
 //             d = d2;
-
 //         // --- 4. 计算右图x坐标 ---
 //         if (d > 0)
 //         {
@@ -1853,6 +2105,98 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
 //         }
 //     }
 // }
+
+void Frame::ExportRGBDDepthAndLinesToOBJ(const cv::Mat &imDepth, const std::string &filename)
+{
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "[ExportRGBDDepthAndLinesToOBJ] Error: cannot open file " 
+                  << filename << std::endl;
+        return;
+    }
+    file << "# RGBD depth cloud + line endpoints in world coordinates\n";
+    // -------------------------------
+    // 相机参数与位姿
+    // -------------------------------
+    const float minDepth = 0.1f;
+    const float maxDepth = 10.0f;
+    // 世界坐标变换
+    Eigen::Matrix3f Rcw = GetRcw();
+    Eigen::Matrix3f Rwc = Rcw.transpose();
+    Eigen::Vector3f tcw = Gettcw();
+    Eigen::Vector3f twc = -Rwc * tcw; // 相机中心
+    int vertexCount = 0;
+    int lineCount = 0;
+    // -------------------------------
+    // 1️⃣ 输出 imDepth 点云
+    // -------------------------------
+    const int rows = imDepth.rows;
+    const int cols = imDepth.cols;
+
+    for (int v = 0; v < rows; v += 2) {         // 可适当下采样（步长 2）
+        for (int u = 0; u < cols; u += 2) {
+            float d = imDepth.at<float>(v, u);
+            if (d <= minDepth || d >= maxDepth || std::isnan(d))
+                continue;
+            // 相机坐标系下
+            Eigen::Vector3f Pc;
+            Pc << (u - cx) * d / fx,
+                   (v - cy) * d / fy,
+                   d;
+            // 转到世界坐标
+            Eigen::Vector3f Pw = Rwc * Pc + twc;
+            file << "v " << Pw.x() << " " << Pw.y() << " " << Pw.z()
+                 << " 0.7 0.7 0.7\n";  // 灰色点云
+            vertexCount++;
+        }
+    }
+    // -------------------------------
+    // 2️⃣ 输出线段端点（mvLineDepth）
+    // -------------------------------
+    for (size_t i = 0; i < mvKeyLinesUn.size(); ++i)
+    {
+        float u1 = mvKeyLinesUn[i].startPointX;
+        float v1 = mvKeyLinesUn[i].startPointY;
+        float u2 = mvKeyLinesUn[i].endPointX;
+        float v2 = mvKeyLinesUn[i].endPointY;
+        float Z1 = mvLineDepth[i].first;
+        float Z2 = mvLineDepth[i].second;
+        if (Z1 <= 0 && Z2 <= 0) continue;
+        // 反投影两个端点
+        Eigen::Vector3f P1c, P2c;
+        P1c << (u1 - cx) * Z1 / fx, (v1 - cy) * Z1 / fy, Z1;
+        P2c << (u2 - cx) * Z2 / fx, (v2 - cy) * Z2 / fy, Z2;
+        // 转到世界坐标
+        Eigen::Vector3f P1w = Rwc * P1c + twc;
+        Eigen::Vector3f P2w = Rwc * P2c + twc;
+        file << "v " << P1w.x() << " " << P1w.y() << " " << P1w.z()
+             << " 1 0 0\n";  // 红色端点
+        file << "v " << P2w.x() << " " << P2w.y() << " " << P2w.z()
+             << " 1 0 0\n";
+        file << "l " << vertexCount + 1 << " " << vertexCount + 2 << "\n";
+        vertexCount += 2;
+        lineCount++;
+    }
+    // -------------------------------
+    // 3️⃣ 相机坐标轴可视化
+    // -------------------------------
+    float axisLength = 0.2f;
+    Eigen::Vector3f X = twc + axisLength * Rwc.col(0);
+    Eigen::Vector3f Y = twc + axisLength * Rwc.col(1);
+    Eigen::Vector3f Z = twc + axisLength * Rwc.col(2);
+    file << "v " << twc.x() << " " << twc.y() << " " << twc.z() << " 0 0 0\n";
+    int camIdx = ++vertexCount;
+    file << "v " << X.x() << " " << X.y() << " " << X.z() << " 1 0 0\n";
+    file << "l " << camIdx << " " << camIdx + 1 << "\n"; vertexCount++;
+    file << "v " << Y.x() << " " << Y.y() << " " << Y.z() << " 0 1 0\n";
+    file << "l " << camIdx << " " << camIdx + 2 << "\n"; vertexCount++;
+    file << "v " << Z.x() << " " << Z.y() << " " << Z.z() << " 0 0 1\n";
+    file << "l " << camIdx << " " << camIdx + 3 << "\n"; vertexCount++;
+    file.close();
+    std::cout << "[ExportRGBDDepthAndLinesToOBJ] Exported " << vertexCount
+              << " vertices, " << lineCount << " lines to "
+              << filename << std::endl;
+}
 
 
 bool Frame::UnprojectStereo(const int &i, Eigen::Vector3f &x3D, Eigen::Vector3f &colorRGB)
@@ -1879,6 +2223,61 @@ bool Frame::UnprojectStereo(const int &i, Eigen::Vector3f &x3D, Eigen::Vector3f 
     } else
         return false;
 }
+
+bool Frame::UnprojectStereoLineSeg(
+    const int &i,
+    std::pair<Eigen::Vector3f, Eigen::Vector3f> &xLine3D,
+    std::pair<Eigen::Vector3f, Eigen::Vector3f> &colorLine3DRGB)
+{
+    // 获取端点深度
+    const float z1 = mvLineDepth[i].first;   // 左端点深度
+    const float z2 = mvLineDepth[i].second;  // 右端点深度
+
+    // 深度有效性检查
+    if (z1 <= 0 || z2 <= 0)
+        return false;
+
+    // ==== 获取未畸变线段两个端点 ====
+    const cv::line_descriptor::KeyLine &klUn = mvKeyLinesUn[i];
+    cv::Point2f p1u = klUn.getStartPoint();
+    cv::Point2f p2u = klUn.getEndPoint();
+
+    // ==== 像素到相机坐标（分别使用端点各自深度） ====
+    const float x1 = (p1u.x - cx) * z1 * invfx;
+    const float y1 = (p1u.y - cy) * z1 * invfy;
+    const float x2 = (p2u.x - cx) * z2 * invfx;
+    const float y2 = (p2u.y - cy) * z2 * invfy;
+
+    Eigen::Vector3f Xc1(x1, y1, z1);
+    Eigen::Vector3f Xc2(x2, y2, z2);
+
+    // ==== 相机坐标系 -> 世界坐标系 ====
+    xLine3D.first  = mRwc * Xc1 + mOw;
+    xLine3D.second = mRwc * Xc2 + mOw;
+
+    // ==== 获取颜色信息（原图端点处） ====
+    const cv::line_descriptor::KeyLine &kl = mvKeyLines[i];
+    cv::Point2f p1 = kl.getStartPoint();
+    cv::Point2f p2 = kl.getEndPoint();
+
+    int u1 = static_cast<int>(std::round(p1.x));
+    int v1 = static_cast<int>(std::round(p1.y));
+    int u2 = static_cast<int>(std::round(p2.x));
+    int v2 = static_cast<int>(std::round(p2.y));
+
+    if (u1 < 0 || u1 >= imgLeftRGB.cols || v1 < 0 || v1 >= imgLeftRGB.rows ||
+        u2 < 0 || u2 >= imgLeftRGB.cols || v2 < 0 || v2 >= imgLeftRGB.rows)
+        return false;
+
+    const cv::Vec3f &color1 = imgLeftRGB.at<cv::Vec3f>(v1, u1);
+    const cv::Vec3f &color2 = imgLeftRGB.at<cv::Vec3f>(v2, u2);
+
+    colorLine3DRGB.first  = Eigen::Vector3f(color1[0], color1[1], color1[2]);
+    colorLine3DRGB.second = Eigen::Vector3f(color2[0], color2[1], color2[2]);
+
+    return true;
+}
+
 
 bool Frame::imuIsPreintegrated()
 {

@@ -37,6 +37,7 @@
 #include "System.h"
 #include "ImuTypes.h"
 #include "Settings.h"
+#include "LSDextractor.h"
 
 #include "GeometricCamera.h"
 
@@ -208,29 +209,45 @@ protected:
 
     // Map initialization for stereo and RGB-D
     void StereoInitialization();
+    //Map initializatin with lines for stereo and RGB-D
+    void StereoInitializationWithLine();
 
     // Map initialization for monocular
     void MonocularInitialization();
+    void MonocularInitializationWithLine();
     //void CreateNewMapPoints();
     void CreateInitialMapMonocular();
 
     void CheckReplacedInLastFrame();
+    void CheckReplacedInLastFrameWithLines();
     bool TrackReferenceKeyFrame();
+    bool TrackReferenceKeyFrameWithLine();
     void UpdateLastFrame();
     bool TrackWithMotionModel();
     bool PredictStateIMU();
-
+    //added for line feature
+    void UpdateLastFrameWithLine();
+    bool TrackWithMotionModelWithLine();
     bool Relocalization();
 
     void UpdateLocalMap();
     void UpdateLocalPoints();
     void UpdateLocalKeyFrames();
 
+    void UpdateLocalMapWithLine();  //added for line feature
+    void UpdateLocalPointsAndLine();    //added for line feature
+    void UpdateLocalKeyFramesWithLine();    //added for line feature
+
     bool TrackLocalMap();
+    bool TrackLocalMapWithLine();
     void SearchLocalPoints();
+    void SearchLocalPointsAndLine();
 
     bool NeedNewKeyFrame();
     void CreateNewKeyFrame();
+
+    bool NeedNewKeyFrameWithLine(); //added for line feature
+    void CreateNewKeyFrameWithLine();   //added for line feature
 
     // Perform preintegration from last frame
     void PreintegrateIMU();
@@ -270,6 +287,10 @@ protected:
     ORBextractor* mpORBextractorLeft, *mpORBextractorRight;
     ORBextractor* mpIniORBextractor;
 
+    //LSD
+    LSDextractor* mpLSDextractorLeft, *mpLSDextractorRight;
+    LSDextractor* mpIniLSDextractor;
+
     //BoW
     ORBVocabulary* mpORBVocabulary;
     KeyFrameDatabase* mpKeyFrameDB;
@@ -282,6 +303,7 @@ protected:
     KeyFrame* mpReferenceKF;
     std::vector<KeyFrame*> mvpLocalKeyFrames;
     std::vector<MapPoint*> mvpLocalMapPoints;
+    std::vector<MapLine*> mvpLocalMapLines;
     
     // System
     System* mpSystem;
@@ -323,6 +345,8 @@ protected:
 
     //Current matches in frame
     int mnMatchesInliers;
+    //Current matches in frame with line
+    int mnMatchesInliersLine;
 
     //Last Frame, KeyFrame and Relocalisation Info
     KeyFrame* mpLastKeyFrame;
@@ -345,6 +369,7 @@ protected:
     bool mbRGB;
 
     list<MapPoint*> mlpTemporalPoints;
+    list<MapLine*> mlpTemporalLines;
 
     //int nMapChangeIndex;
 

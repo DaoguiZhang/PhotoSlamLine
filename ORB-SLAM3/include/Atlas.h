@@ -64,9 +64,11 @@ private:
     MappingOperation(
         const MappingOperation &opr,
         const std::lock_guard<std::mutex> &,
+        const std::lock_guard<std::mutex> &,
         const std::lock_guard<std::mutex> &)
         : mvAssociatedKeyFrames(std::move(opr.mvAssociatedKeyFrames)),
           mvAssociatedMapPoints(std::move(opr.mvAssociatedMapPoints)),
+          mvAssociatedMapLines(std::move(opr.mvAssociatedMapLines)),
           meOperationType(opr.meOperationType),
           mfScale(opr.mfScale),
           mT(opr.mT)
@@ -93,7 +95,8 @@ public:
         : MappingOperation(
             opr,
             std::lock_guard<std::mutex>(opr.mMutexKeyFrames),
-            std::lock_guard<std::mutex>(opr.mMutexMapPoints))
+            std::lock_guard<std::mutex>(opr.mMutexMapPoints),
+            std::lock_guard<std::mutex>(opr.mMutexMapLines))
     {}
 
 public:
@@ -107,7 +110,10 @@ public:
         std::unique_lock<std::mutex> lock(mMutexKeyFrames);
         std::vector<float> pixels;
         std::vector<float> pointsLocal;
+        std::vector<float> keylinePixels; // added for keyline
+        std::vector<float> keylinePointsLocal; // added for keyline
         pKF->GetKeypointInfo(pixels, pointsLocal);
+        pKF->GetKeyLineInfo(keylinePixels, keylinePointsLocal); // added for keyline
         mvAssociatedKeyFrames.emplace_back(
             std::make_tuple(
                 pKF->mnId,
@@ -118,7 +124,8 @@ public:
                 pKF->imgAuxiliary,
                 pixels,
                 pointsLocal,
-                pKF->mNameFile));
+                pKF->mNameFile,
+                keylinePixels)); // added for keyline
     }
 
     std::vector<std::tuple<
@@ -130,7 +137,8 @@ public:
         cv::Mat,
         std::vector<float>,
         std::vector<float>,
-        std::string>>&
+        std::string,
+        std::vector<float>/*keyline pixel*/>>&
     associatedKeyFrames() { return mvAssociatedKeyFrames; }
 
     void reserveMapPoints(const std::size_t nMPs)
@@ -138,6 +146,13 @@ public:
         int length = nMPs * 3;
         std::get<0>(mvAssociatedMapPoints).reserve(length);
         std::get<1>(mvAssociatedMapPoints).reserve(length);
+    }
+
+    void reserveMapLines(const std::size_t nMLs) // added for MapLine
+    {
+        int length = nMLs * 6;
+        std::get<0>(mvAssociatedMapLines).reserve(length);
+        std::get<1>(mvAssociatedMapLines).reserve(length);
     }
 
     void addMapPoint(MapPoint* pMP)
@@ -153,8 +168,33 @@ public:
         std::get<1>(mvAssociatedMapPoints).emplace_back(color.z());
     }
 
+    void addMapLine(MapLine* pML) // added for MapLine
+    {
+        std::unique_lock<std::mutex> lock(mMutexMapLines);
+        auto pt1 = pML->GetLineWorldPos().first;
+        auto pt2 = pML->GetLineWorldPos().second;
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt1.x());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt1.y());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt1.z());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt2.x());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt2.y());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt2.z());
+        auto color1 = pML->GetLineColorRGB().first;
+        std::get<1>(mvAssociatedMapLines).emplace_back(color1.x());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color1.y());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color1.z());
+        auto color2 = pML->GetLineColorRGB().second;
+        std::get<1>(mvAssociatedMapLines).emplace_back(color2.x());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color2.y());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color2.z());
+    }   
+
+    //void 
     std::tuple<std::vector<float/*pos*/>, std::vector<float/*color*/>>&
     associatedMapPoints() { return mvAssociatedMapPoints; }
+
+    std::tuple<std::vector<float/*pos*/>, std::vector<float/*color*/>>&
+    associatedMapLines() { return mvAssociatedMapLines; } // added for MapLine
 
 public:
     // Type
@@ -168,6 +208,9 @@ protected:
     // Data
     std::tuple<std::vector<float/*pos*/>,
                std::vector<float/*color*/>> mvAssociatedMapPoints;
+    
+    std::tuple<std::vector<float/*pos*/>,
+               std::vector<float/*color*/>> mvAssociatedMapLines; // added for MapLine
 
     std::vector<std::tuple<
         unsigned long/*Id*/,
@@ -178,10 +221,12 @@ protected:
         cv::Mat/*auxiliaryImage*/,
         std::vector<float>/*keypoints pixel*/,
         std::vector<float>/*keypoints local 3D*/,
-        std::string/*main image file name*/>> mvAssociatedKeyFrames;
+        std::string/*main image file name*/,
+        std::vector<float>/*keyline pixel*/>> mvAssociatedKeyFrames;
 
     // Mutex
     mutable std::mutex mMutexMapPoints;
+    mutable std::mutex mMutexMapLines; // added for MapLine
     mutable std::mutex mMutexKeyFrames;
 };
 
@@ -225,6 +270,7 @@ public:
     // Method for change components in the current map
     void AddKeyFrame(KeyFrame* pKF);
     void AddMapPoint(MapPoint* pMP);
+    void AddMapLine(MapLine* pML);
     //void EraseMapPoint(MapPoint* pMP);
     //void EraseKeyFrame(KeyFrame* pKF);
 
@@ -236,8 +282,12 @@ public:
     void InformNewBigChange();
     int GetLastBigChangeIdx();
 
+    /*all maplines on current map*/
+    void SetReferenceMapLines(const std::vector<MapLine*> &vpMLs);
+
     long unsigned int MapPointsInMap();
     long unsigned KeyFramesInMap();
+    long unsigned int MapLinesInMap();
 
     // Method for get data in current map
     std::vector<KeyFrame*> GetAllKeyFrames();

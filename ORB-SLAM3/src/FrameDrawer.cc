@@ -40,6 +40,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
     vector<cv::KeyPoint> vIniKeys; // Initialization: KeyPoints in reference frame
     vector<int> vMatches; // Initialization: correspondeces with reference keypoints
     vector<cv::KeyPoint> vCurrentKeys; // KeyPoints in current frame
+    std::vector<cv::line_descriptor::KeyLine> vCurrentKeysLine; //added for line feature
     vector<bool> vbVO, vbMap; // Tracked MapPoints in current frame
     vector<pair<cv::Point2f, cv::Point2f> > vTracks;
     int state; // Tracking state
@@ -49,14 +50,17 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
     Frame currentFrame;
     vector<MapPoint*> vpLocalMap;
     vector<cv::KeyPoint> vMatchesKeys;
+    std::vector<cv::line_descriptor::KeyLine> vMatchesKeysLine; //added for line feature
     vector<MapPoint*> vpMatchedMPs;
     vector<cv::KeyPoint> vOutlierKeys;
     vector<MapPoint*> vpOutlierMPs;
     map<long unsigned int, cv::Point2f> mProjectPoints;
+    //map<long unsigned int, cv::Point2f> mMatchedInImage;
     map<long unsigned int, cv::Point2f> mMatchedInImage;
 
     cv::Scalar standardColor(0,255,0);
     cv::Scalar odometryColor(255,0,0);
+    cv::Scalar LineColor(255,0,255);
 
     //Copy variables within scoped mutex
     {
@@ -70,6 +74,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
         if(mState==Tracking::NOT_INITIALIZED)
         {
             vCurrentKeys = mvCurrentKeys;
+            vCurrentKeysLine = mvCurrentKeysLine; //added for line feature
             vIniKeys = mvIniKeys;
             vMatches = mvIniMatches;
             vTracks = mvTracks;
@@ -77,6 +82,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
         else if(mState==Tracking::OK)
         {
             vCurrentKeys = mvCurrentKeys;
+            vCurrentKeysLine = mvCurrentKeysLine; //added for line feature
             vbVO = mvbVO;
             vbMap = mvbMap;
 
@@ -96,6 +102,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
         else if(mState==Tracking::LOST)
         {
             vCurrentKeys = mvCurrentKeys;
+            vCurrentKeysLine = mvCurrentKeysLine; //added for line feature
         }
     }
 
@@ -191,6 +198,29 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
                     cv::circle(im,point,2,odometryColor,-1);
                     mnTrackedVO++;
                 }
+            }
+        }
+        
+        // Draw line features
+        int m = vCurrentKeysLine.size();
+        for(int i=0; i<m; i++)
+        {
+            cv::line_descriptor::KeyLine kl = vCurrentKeysLine[i];
+            cv::Point2f p1 = cv::Point2f(kl.startPointX, kl.startPointY);
+            cv::Point2f p2 = cv::Point2f(kl.endPointX, kl.endPointY);
+            if(imageScale != 1.f)
+            {
+                p1 /= imageScale;
+                p2 /= imageScale;
+                cv::circle(im, p1, 2, odometryColor, -1);
+                cv::circle(im, p2, 2, odometryColor, -1);
+                cv::line(im,p1,p2,LineColor, 4);
+            }
+            else
+            {
+                cv::circle(im, p1, 2, odometryColor, -1);
+                cv::circle(im, p2, 2, odometryColor, -1);
+                cv::line(im,p1,p2,LineColor, 4);
             }
         }
     }
@@ -372,6 +402,7 @@ void FrameDrawer::Update(Tracking *pTracker)
     unique_lock<mutex> lock(mMutex);
     pTracker->mImGray.copyTo(mIm);
     mvCurrentKeys=pTracker->mCurrentFrame.mvKeys;
+    mvCurrentKeysLine = pTracker->mCurrentFrame.mvKeyLines; //added for line feature
     mThDepth = pTracker->mCurrentFrame.mThDepth;
     mvCurrentDepth = pTracker->mCurrentFrame.mvDepth;
 
@@ -382,6 +413,7 @@ void FrameDrawer::Update(Tracking *pTracker)
     }
     else{
         N = mvCurrentKeys.size();
+        NL = mvCurrentKeysLine.size(); //added for line feature
     }
 
     mvbVO = vector<bool>(N,false);
@@ -402,10 +434,11 @@ void FrameDrawer::Update(Tracking *pTracker)
     mvOutlierKeys.reserve(N);
     mvpOutlierMPs.clear();
     mvpOutlierMPs.reserve(N);
-
+    
     if(pTracker->mLastProcessedState==Tracking::NOT_INITIALIZED)
     {
         mvIniKeys=pTracker->mInitialFrame.mvKeys;
+        mvIniKeysLine = pTracker->mInitialFrame.mvKeyLines; //added for line feature
         mvIniMatches=pTracker->mvIniMatches;
     }
     else if(pTracker->mLastProcessedState==Tracking::OK)

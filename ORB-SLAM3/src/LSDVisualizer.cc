@@ -64,4 +64,51 @@ namespace ORB_SLAM3
         return outImg;
     }
 
+    cv::Mat LSDVisualizer::DrawLineMatches(const cv::Mat &img1,
+                                           const std::vector<cv::line_descriptor::KeyLine> &keylines1,
+                                           const cv::Mat &img2,
+                                           const std::vector<cv::line_descriptor::KeyLine> &keylines2,
+                                           const std::vector<cv::DMatch> &matches,
+                                           const std::vector<char> &mask)
+    {
+        // 如果没有 mask 或长度不匹配则退化为无 mask 的版本
+        if (mask.size() != matches.size()) {
+            return DrawLineMatches(img1, keylines1, img2, keylines2, matches);
+        }
+
+        // 过滤出被选中的匹配后调用已有实现
+        std::vector<cv::DMatch> filtered;
+        filtered.reserve(matches.size());
+        for (size_t i = 0; i < matches.size(); ++i) {
+            if (mask[i]) filtered.push_back(matches[i]);
+        }
+        return DrawLineMatches(img1, keylines1, img2, keylines2, filtered);
+    }
+
+    cv::Mat LSDVisualizer::DrawKeylines(const cv::Mat &img,
+                                        const std::vector<cv::line_descriptor::KeyLine> &keylines)
+    {
+        // 复制并确保三通道输出
+        cv::Mat out;
+        if (img.empty()) return out;
+        if (img.channels() == 1) cv::cvtColor(img, out, cv::COLOR_GRAY2BGR);
+        else img.copyTo(out);
+
+        // 绘制每条线段
+        for (const auto &kl : keylines) {
+            cv::Point2f p0(kl.startPointX, kl.startPointY);
+            cv::Point2f p1(kl.endPointX, kl.endPointY);
+
+            // 使用与线段属性相关的确定性颜色（避免每次随机导致颜色跳动）
+            int r = (kl.octave * 53 + (int)kl.class_id * 97) % 256;
+            int g = ((int)(kl.angle * 10) + kl.octave * 71) % 256;
+            int b = ((int)(kl.response * 37)+ 11) % 256;
+            cv::Scalar col(b, g, r);
+
+            cv::line(out, p0, p1, col, 2, cv::LINE_AA);
+        }
+
+        return out;
+    }
+
 } // namespace ORB_SLAM3

@@ -1,4 +1,5 @@
 #include"LSDextractor.h"
+#include "LSDVisualizer.h"
 
 namespace ORB_SLAM3
 {
@@ -10,7 +11,8 @@ namespace ORB_SLAM3
         cv::Mat img = _image.getMat();
         ComputeImagePyramid(img);   //compute image pyramid, to do next...
         detectAndCompute(img, keylines, _descriptors.getMatRef());
-        return 0;
+        int line_number = static_cast<int>(keylines.size());
+        return line_number;
     }
 
     // 检测并提取描述符
@@ -26,13 +28,21 @@ namespace ORB_SLAM3
         else
             gray = img.clone();
 
+        //std::cerr <<"-------------------------" << std::endl;
+        //std::cerr << "gray: " << gray.type() << std::endl;
+        //std::cerr << "img: " << img.type() << std::endl;
+        cv::Mat gray_u;
+        gray.convertTo(gray_u, CV_8UC1, 255.0);
+
+        //5, 21: CV_32FC1, CV_32FC3
         // LSD 检测
         std::vector<cv::Vec4f> lines_raw;
-        lsd->detect(gray, lines_raw);
+        lsd->detect(gray_u, lines_raw);
+        //std::cerr << " lsd->detect end: " << std::endl;
 
         // LLD 描述符
         std::vector<cv::line_descriptor::KeyLine> tempKeylines;
-        lld->detect(gray, tempKeylines);
+        lld->detect(gray_u, tempKeylines);
 
         // 剔除短线段
         keylines.clear();
@@ -41,7 +51,16 @@ namespace ORB_SLAM3
                 keylines.push_back(kl);
         }
 
-        lld->compute(gray, keylines, descriptors);
+        lld->compute(gray_u, keylines, descriptors);
+
+#if 0   //test the line detect
+        cv::Mat out_img = LSDVisualizer::DrawKeylines(img, keylines);
+        
+        // ====== 4. 显示 ======
+        cv::imshow("LSD Lines", out_img);
+        cv::waitKey(0);
+#endif
+
     }
 
     void LSDextractor::ComputeImagePyramid(const cv::Mat& image)

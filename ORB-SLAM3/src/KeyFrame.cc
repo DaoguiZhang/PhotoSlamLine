@@ -60,11 +60,12 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mvInvLevelSigma2(F.mvInvLevelSigma2), mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX),
     mnMaxY(F.mnMaxY), mK_(F.mK_), mPrevKF(NULL), mNextKF(NULL), mpImuPreintegrated(F.mpImuPreintegrated),
     mImuCalib(F.mImuCalib), mvpMapPoints(F.mvpMapPoints), mpKeyFrameDB(pKFDB),
+    mvpMapLines(F.mvpMapLines),
     mpORBvocabulary(F.mpORBvocabulary), mbFirstConnection(true), mpParent(NULL), mDistCoef(F.mDistCoef), mbNotErase(false), mnDataset(F.mnDataset),
     mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap), mbCurrentPlaceRecognition(false), mNameFile(F.mNameFile), mnMergeCorrectedForKF(0),
     mpCamera(F.mpCamera), mpCamera2(F.mpCamera2),
     mvLeftToRightMatch(F.mvLeftToRightMatch),mvRightToLeftMatch(F.mvRightToLeftMatch), mTlr(F.GetRelativePoseTlr()),
-    mvKeysRight(F.mvKeysRight), NLeft(F.Nleft), NRight(F.Nright), NLleft(F.NLleft), NLright(0), mTrl(F.GetRelativePoseTrl()), mnNumberOfOpt(0), mbHasVelocity(false)
+    mvKeysRight(F.mvKeysRight), NLeft(F.Nleft), NRight(F.Nright), NLleft(F.NLleft), NLright(F.NLright), mTrl(F.GetRelativePoseTrl()), mnNumberOfOpt(0), mbHasVelocity(false)
 {
     mnId=nNextId++;
 
@@ -1584,6 +1585,46 @@ void KeyFrame::GetKeypointInfo(
         }
         else // If the element is null his value is -1 because all the id are positives
         {
+            pointsLocal.push_back(0.0f);
+            pointsLocal.push_back(0.0f);
+            pointsLocal.push_back(-1.0f);
+        }
+    }
+}
+
+void KeyFrame::GetKeyLineInfo(
+    std::vector<float> &pixelsUndist,
+    std::vector<float> &pointsLocal)
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+
+    // Save the id of each MapLine in this KF, there can be null pointer in the vector
+    pixelsUndist.clear();
+    pixelsUndist.reserve(NL * 4);
+    pointsLocal.clear();
+    pointsLocal.reserve(NL * 6);
+    for(int i = 0; i < NL; ++i)
+    {
+        pixelsUndist.push_back(mvKeyLines[i].startPointX);
+        pixelsUndist.push_back(mvKeyLines[i].startPointY);
+        pixelsUndist.push_back(mvKeyLines[i].endPointX);
+        pixelsUndist.push_back(mvKeyLines[i].endPointY);
+        if(mvpMapLines[i])
+        {
+            auto pos_local1 = this->GetPose() * mvpMapLines[i]->GetLineWorldPos().first;
+            pointsLocal.push_back(pos_local1.x());
+            pointsLocal.push_back(pos_local1.y());
+            pointsLocal.push_back(pos_local1.z());
+            auto pos_local2 = this->GetPose() * mvpMapLines[i]->GetLineWorldPos().second;
+            pointsLocal.push_back(pos_local2.x());
+            pointsLocal.push_back(pos_local2.y());
+            pointsLocal.push_back(pos_local2.z());
+        }
+        else // If the element is null his value is -1 because all the id are positives
+        {
+            pointsLocal.push_back(0.0f);
+            pointsLocal.push_back(0.0f);
+            pointsLocal.push_back(-1.0f);
             pointsLocal.push_back(0.0f);
             pointsLocal.push_back(0.0f);
             pointsLocal.push_back(-1.0f);

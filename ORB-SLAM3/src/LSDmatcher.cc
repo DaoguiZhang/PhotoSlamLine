@@ -16,7 +16,7 @@ using namespace Eigen;
 
 namespace ORB_SLAM3
 {
-    const int LSDmatcher::TH_HIGH = 100;
+    const int LSDmatcher::TH_HIGH = 60;
     const int LSDmatcher::TH_LOW = 50;
 
     void LSDmatcher::match(const std::vector<cv::line_descriptor::KeyLine>& keylines1, const cv::Mat& desc1,
@@ -192,11 +192,18 @@ namespace ORB_SLAM3
             vector<size_t> vIndices;
 
             if(bForward)
+            {
                 vIndices = CurrentFrame.GetLinesInArea(u1, v1, u2, v2, radius, nLastOctave);
+            }
             else if(bBackward)
+            {
                 vIndices = CurrentFrame.GetLinesInArea(u1, v1, u2, v2, radius, 0, nLastOctave);
+            }
             else
-                vIndices = CurrentFrame.GetLinesInArea(u1, v1, u2, v2,radius, nLastOctave-1, nLastOctave+1);
+            {   
+                vIndices = CurrentFrame.GetLinesInArea(u1, v1, u2, v2, radius, nLastOctave-1, nLastOctave+1);
+            }
+                
 
             if(vIndices.empty())
                 continue;
@@ -247,127 +254,361 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
-    int LSDmatcher::MatchLinesByProjection(Frame &currentFrame, const Frame &lastFrame, const float threshold, const bool isMono) {
-        int numMatches = 0;
+    // //C++17 version, CHECK NEXT
+    // int LSDmatcher::SearchByProjectionNew(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool isMono)
+    // {
+    //     int nMatches = 0;
+    //     //=== 1. 相对位姿: 从 Last -> Current
+    //     const Sophus::SE3f Tcw = CurrentFrame.GetPose();
+    //     const Sophus::SE3f Tlw = LastFrame.GetPose();
+    //     // 从上一帧到当前帧的变换（last → current）
+    //     const Sophus::SE3f Tcl = Tcw * Tlw.inverse();
+    //     const Eigen::Matrix3f Rcl = Tcl.rotationMatrix();
+    //     const Eigen::Vector3f tcl = Tcl.translation();
+    //     const float fx = CurrentFrame.fx;
+    //     const float fy = CurrentFrame.fy;
+    //     const float cx = CurrentFrame.cx;
+    //     const float cy = CurrentFrame.cy;
+    //     const float mb = CurrentFrame.mb;
+    //     const bool isForward = tcl(2) > mb && !isMono;
+    //     const bool isBackward = tcl(2) < -mb && !isMono;
+    //     const int nLastLines = LastFrame.NL;
+    //     //const int TH_HIGH = 60;
+    //     const float nn_ratio = 0.8f;
+    //     std::cerr << "CurrentFrame.mnMinX, CurrentFrame.mnMaxX: " << CurrentFrame.mnMinX << ", " << CurrentFrame.mnMaxX << std::endl;
+    //     std::cerr << "CurrentFrame.mnMinY, CurrentFrame.mnMaxY: " << CurrentFrame.mnMinY << ", " << CurrentFrame.mnMaxY << std::endl;
+    //     //=== 2. 遍历上一帧线段
+    //     for (int iL = 0; iL < nLastLines; iL++)
+    //     {
+    //         MapLine* pML = LastFrame.mvpMapLines[iL];
+    //         if (!pML || pML->isBad() || LastFrame.mvbLineOutlier[iL])
+    //         {
+    //             // if(!pML)
+    //             // {
+    //             //     std::cerr << "iL:" << iL << ";    LSDmatcher->SearchByProjection pML is null!" << std::endl;
+    //             //     continue;
+    //             // }
+    //             // if(pML->isBad())
+    //             // {
+    //             //     std::cerr << "iL:" << iL << ";    LSDmatcher->SearchByProjection pML is bad!" << std::endl;
+    //             //     continue;
+    //             // }
+    //             // if(LastFrame.mvbLineOutlier[iL])
+    //             // {
+    //             //     std::cerr << "iL:" << iL << ";    LSDmatcher->SearchByProjection LastFrame.mvbLineOutlier[iL] is true!" << std::endl;
+    //             //     continue;
+    //             // }
+    //             continue;
+    //         }
+    //         //=== 3. 获取线段3D端点（世界坐标）
+    //         const auto line3D = pML->GetLineWorldPos();
+    //         const Eigen::Vector3f P1w = line3D.first;
+    //         const Eigen::Vector3f P2w = line3D.second;
+    //         //=== 4. 投影到当前帧相机坐标系
+    //         const Eigen::Vector3f P1c = Tcw * P1w;
+    //         const Eigen::Vector3f P2c = Tcw * P2w;
+    //         if (P1c(2) <= 0 || P2c(2) <= 0)
+    //             continue;
+    //         const float invz1 = 1.0f / P1c(2);
+    //         const float invz2 = 1.0f / P2c(2);
+    //         const float u1 = fx * P1c(0) * invz1 + cx;
+    //         const float v1 = fy * P1c(1) * invz1 + cy;
+    //         const float u2 = fx * P2c(0) * invz2 + cx;
+    //         const float v2 = fy * P2c(1) * invz2 + cy;
+    //         if (u1 < CurrentFrame.mnMinX || u1 > CurrentFrame.mnMaxX ||
+    //             v1 < CurrentFrame.mnMinY || v1 > CurrentFrame.mnMaxY ||
+    //             u2 < CurrentFrame.mnMinX || u2 > CurrentFrame.mnMaxX ||
+    //             v2 < CurrentFrame.mnMinY || v2 > CurrentFrame.mnMaxY)
+    //             continue;
+    //         //=== 5. 搜索中心为中点
+    //         const float um = 0.5f * (u1 + u2);
+    //         const float vm = 0.5f * (v1 + v2);
+    //         const int lastOctave = LastFrame.mvKeyLines[iL].octave;
+    //         const float searchRadius = th * CurrentFrame.mvScaleFactors[lastOctave];
+    //         std::cerr << "LSDmatcher->SearchByProjection um, vm, searchRadius: " << um << ", " << vm << ", " << searchRadius << std::endl;
+    //         std::cerr << "LSDmatcher->SearchByProjection CurrentFrame.mvScaleFactors[lastOctave], th: " << CurrentFrame.mvScaleFactors[lastOctave] << ", " << th << std::endl;
+    //         std::cerr << "LSDmatcher->SearchByProjection lastOctave, lastOctave: " << lastOctave << ", " << lastOctave << std::endl;
+    //         std::vector<std::size_t> vIndices;
+    //         if (isForward)
+    //             vIndices = CurrentFrame.GetLinesInAreaMean(um, vm, searchRadius, lastOctave, lastOctave);
+    //         else if (isBackward)
+    //             vIndices = CurrentFrame.GetLinesInAreaMean(um, vm, searchRadius, 0, lastOctave);
+    //         else
+    //             vIndices = CurrentFrame.GetLinesInAreaMean(um, vm, searchRadius, lastOctave - 1, lastOctave + 1);
+    //         if (vIndices.empty())
+    //             continue;
+    //         //=== 6. 方向一致性检测
+    //         const cv::Point2f dirLast(u2 - u1, v2 - v1);
+    //         const float normDirLast = cv::norm(dirLast);
+    //         if (normDirLast < 5.0f) continue;
+    //         const cv::Mat descLast = LastFrame.mLineDescriptors.row(iL);
+    //         int bestDist = 256;
+    //         int secondBestDist = 256;
+    //         int bestIdx = -1;
+    //         //=== 7. 遍历候选线段
+    //         for (size_t j : vIndices)
+    //         {
+    //             if( CurrentFrame.mvpMapLines[j])
+    //                 if( CurrentFrame.mvpMapLines[j]->Observations()>0)
+    //                     continue;
+    //             const cv::line_descriptor::KeyLine &kl = CurrentFrame.mvKeyLinesUn[j];
+    //             const cv::Point2f dirCur(kl.endPointX - kl.startPointX, kl.endPointY - kl.startPointY);
+    //             const float cosang = (dirLast.x * dirCur.x + dirLast.y * dirCur.y) /
+    //                              (normDirLast * cv::norm(dirCur) + 1e-6);
+    //             if (cosang < 0.9)
+    //                 continue;
+    //             if (CurrentFrame.mvpMapLines[j])
+    //                 continue;
+    //             const cv::Mat &descCur = CurrentFrame.mLineDescriptors.row(j);
+    //             const int dist = cv::norm(descLast, descCur, cv::NORM_HAMMING);
+    //             if (dist < bestDist)
+    //             {
+    //                 secondBestDist = bestDist;
+    //                 bestDist = dist;
+    //                 bestIdx = j;
+    //             }
+    //             else if (dist < secondBestDist)
+    //             {
+    //                 secondBestDist = dist;
+    //             }
+    //         }
+    //         //=== 8. 最近邻判定
+    //         if (bestDist < TH_HIGH && bestDist <= nn_ratio * secondBestDist)
+    //         {
+    //             CurrentFrame.mvpMapLines[bestIdx] = pML;
+    //             CurrentFrame.mvbLineOutlier[bestIdx] = false;
+    //             nMatches++;
+    //         }
+    //     }
+    //     return nMatches;
+    // }
 
-        Eigen::Matrix4f currentFramePose = currentFrame.GetPose().matrix();
-        const cv::Mat currentFramePoseMat = Converter::toCvMat(currentFramePose);
-
-        const cv::Mat rotationMatrixCurrent = currentFramePoseMat.rowRange(0, 3).colRange(0, 3);
-        const cv::Mat translationVectorCurrent = currentFramePoseMat.rowRange(0, 3).col(3);
-
-        const cv::Mat cameraToWorld = -rotationMatrixCurrent.t() * translationVectorCurrent;
-
-        Eigen::Matrix4f lastFramePose = lastFrame.GetPose().matrix();
-        const cv::Mat lastFramePoseMat = Converter::toCvMat(lastFramePose);
-        const cv::Mat rotationMatrixLast = lastFramePoseMat.rowRange(0, 3).colRange(0, 3);
-        const cv::Mat translationVectorLast = lastFramePoseMat.rowRange(0, 3).col(3);
-
-        const cv::Mat cameraToLastFrame = rotationMatrixLast * cameraToWorld + translationVectorLast;
-
-        const bool isForwardMatch = cameraToLastFrame.at<float>(2) > currentFrame.mb && !isMono;
-        const bool isBackwardMatch = -cameraToLastFrame.at<float>(2) > currentFrame.mb && !isMono;
-
-        for (int i = 0; i < lastFrame.NL; i++) {
-            MapLine *line = lastFrame.mvpMapLines[i];
-
-            if (!line || line->isBad() || lastFrame.mvbLineOutlier[i]) {
+    int LSDmatcher::SearchByProjectionNew(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool isMono)
+    {
+        int nMatches = 0;
+        //=== 1. 获取位姿
+        const Sophus::SE3f Tcw = CurrentFrame.GetPose();
+        const Sophus::SE3f Tlw = LastFrame.GetPose();
+        const Sophus::SE3f Tlc = Tcw.inverse() * Tlw; // Last -> Current
+        const auto &LastLines = LastFrame.mvKeyLines;
+        const auto &LastDescriptors = LastFrame.mLineDescriptors;
+        const int NL = LastLines.size();
+        std::vector<bool> vbAlreadyMatched(CurrentFrame.mvKeyLines.size(), false);
+        //=== 2. 遍历上一帧所有线特征
+        for (int i = 0; i < NL; i++)
+        {
+            MapLine* pML = LastFrame.mvpMapLines[i];
+            if (!pML || pML->isBad())
                 continue;
-            }
-
-            std::pair<Eigen::Vector3f, Eigen::Vector3f> lineWorldPosition = line->GetLineWorldPos();
-
-            cv::Mat startPointWorld = (cv::Mat_<float>(3, 1) << lineWorldPosition.first(0), lineWorldPosition.first(1), lineWorldPosition.first(2));
-            cv::Mat endPointWorld = (cv::Mat_<float>(3, 1) << lineWorldPosition.second(0), lineWorldPosition.second(1), lineWorldPosition.second(2));
-
-            const cv::Mat startPointCamera = rotationMatrixCurrent * startPointWorld + translationVectorCurrent;
-            const auto &startPointCameraX = startPointCamera.at<float>(0);
-            const auto &startPointCameraY = startPointCamera.at<float>(1);
-            const auto &startPointCameraZ = startPointCamera.at<float>(2);
-
-            const cv::Mat endPointCamera = rotationMatrixCurrent * endPointWorld + translationVectorCurrent;
-            const auto &endPointCameraX = endPointCamera.at<float>(0);
-            const auto &endPointCameraY = endPointCamera.at<float>(1);
-            const auto &endPointCameraZ = endPointCamera.at<float>(2);
-
-            if (startPointCameraZ < 0.0f || endPointCameraZ < 0.0f)
-                continue;
-
-            const float inverseStartPointZ = 1.0f / startPointCameraZ;
-            const float u1 = currentFrame.fx * startPointCameraX * inverseStartPointZ + currentFrame.cx;
-            const float v1 = currentFrame.fy * startPointCameraY * inverseStartPointZ + currentFrame.cy;
-
-            if (u1 < currentFrame.mnMinX || u1 > currentFrame.mnMaxX)
-                continue;
-            if (v1 < currentFrame.mnMinY || v1 > currentFrame.mnMaxY)
-                continue;
-
-            const float inverseEndPointZ = 1.0f / endPointCameraZ;
-            const float u2 = currentFrame.fx * endPointCameraX * inverseEndPointZ + currentFrame.cx;
-            const float v2 = currentFrame.fy * endPointCameraY * inverseEndPointZ + currentFrame.cy;
-
-            if (u2 < currentFrame.mnMinX || u2 > currentFrame.mnMaxX)
-                continue;
-            if (v2 < currentFrame.mnMinY || v2 > currentFrame.mnMaxY)
-                continue;
-
-            int lastFrameOctave = lastFrame.mvKeys[i].octave;
-
-            float searchRadius = threshold * currentFrame.mvScaleFactors[lastFrameOctave];
-
-            std::vector<size_t> candidateLineIndices;
-
-            if (isForwardMatch)
-                candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, lastFrameOctave);
-            else if (isBackwardMatch)
-                candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, 0, lastFrameOctave);
-            else
-                candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, lastFrameOctave - 1, lastFrameOctave + 1);
-
-            if (candidateLineIndices.empty())
-                continue;
-
-            const cv::Mat lineDescriptor = line->GetLineDescriptor();
-
-            int bestMatchDistance = 256;
-            int bestMatchLevel = -1;
-            int secondBestMatchDistance = 256;
-            int secondBestMatchLevel = -1;
-            int bestMatchedIndex = -1;
-
-            for (unsigned long index : candidateLineIndices) {
-                if (currentFrame.mvpMapLines[index]) {
-                    if (currentFrame.mvpMapLines[index]->Observations() > 0)
-                        continue;
-                }
-
-                const cv::Mat &descriptor = currentFrame.mLineDescriptors.row(index);
-
-                const int dist = DescriptorDistance(lineDescriptor, descriptor);
-
-                if (dist < bestMatchDistance) {
-                    secondBestMatchDistance = bestMatchDistance;
-                    bestMatchDistance = dist;
-                    secondBestMatchLevel = bestMatchLevel;
-                    bestMatchLevel = currentFrame.mvKeyLinesUn[index].octave;
-                    bestMatchedIndex = index;
-                } else if (dist < secondBestMatchDistance) {
-                    secondBestMatchLevel = currentFrame.mvKeyLinesUn[index].octave;
-                    secondBestMatchDistance = dist;
-                }
-            }
-
-            if (bestMatchDistance <= TH_HIGH) {
-                if (bestMatchLevel == secondBestMatchLevel && bestMatchDistance > mfNNratio * secondBestMatchDistance)
+            // 2.1 投影端点到当前帧
+            Eigen::Vector3f P1c = Tlc * pML->GetLineWorldPos().first;
+            Eigen::Vector3f P2c = Tlc * pML->GetLineWorldPos().second;
+            if (P1c[2] <= 0 || P2c[2] <= 0)
+                continue; // 深度检查
+            Eigen::Vector2f uv1 = CurrentFrame.mpCamera->project(P1c);
+            Eigen::Vector2f uv2 = CurrentFrame.mpCamera->project(P2c);
+            // 2.2 搜索矩形加大一定范围
+            float minX = std::min(uv1[0], uv2[0]) - th;
+            float maxX = std::max(uv1[0], uv2[0]) + th;
+            float minY = std::min(uv1[1], uv2[1]) - th;
+            float maxY = std::max(uv1[1], uv2[1]) + th;
+            //=== 3. 匹配当前帧线
+            int bestIdx = -1;
+            float bestScore = std::numeric_limits<float>::max();
+            for (int j = 0; j < CurrentFrame.mvKeyLines.size(); j++)
+            {
+                if (vbAlreadyMatched[j])
                     continue;
-
-                currentFrame.mvpMapLines[bestMatchedIndex] = line;
-                numMatches++;
+                const cv::line_descriptor::KeyLine &kl = CurrentFrame.mvKeyLines[j];
+                // 3.1 端点在搜索区域内
+                if (kl.startPointX < minX || kl.startPointX > maxX || kl.startPointY < minY || kl.startPointY > maxY)
+                    continue;
+                if (kl.endPointX < minX || kl.endPointX > maxX || kl.endPointY < minY || kl.endPointY > maxY)
+                    continue;
+                // 3.2 计算描述子距离
+                float descDist = DescriptorDistance(LastDescriptors.row(i), CurrentFrame.mLineDescriptors.row(j));
+                // 3.3 端点视差一致性约束
+                // 单目：端点投影距离差和线方向差
+                float dx1 = kl.startPointX - uv1[0];
+                float dy1 = kl.startPointY - uv1[1];
+                float dx2 = kl.endPointX - uv2[0];
+                float dy2 = kl.endPointY - uv2[1];
+                float endpointError = std::sqrt(dx1*dx1 + dy1*dy1) + std::sqrt(dx2*dx2 + dy2*dy2);
+                // 3.4 综合评分（描述子距离 + 端点误差）
+                float score = descDist + endpointError * 0.1f; // 权重可调
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestIdx = j;
+                }
+            }
+            //=== 4. 匹配成功条件
+            if (bestIdx >= 0 && bestScore <= th)
+            {
+                CurrentFrame.mvpMapLines[bestIdx] = pML;
+                vbAlreadyMatched[bestIdx] = true;
+                CurrentFrame.mvbLineOutlier[bestIdx] = false;
+                nMatches++;
             }
         }
-
-        return numMatches;
+        return nMatches;
     }
+
+
+    void LSDmatcher::DebugDrawLineMatches(const Frame &lastFrame, const Frame &currentFrame)
+    {
+        // 转灰度图（若原始是float图或三通道）
+        cv::Mat img1, img2;
+        if (lastFrame.imgLeftRGB.channels() == 3)
+            lastFrame.imgLeftRGB.convertTo(img1, CV_8UC3, 255.0);
+        else
+            cv::cvtColor(lastFrame.imgLeftRGB, img1, cv::COLOR_GRAY2BGR);
+        if (currentFrame.imgLeftRGB.channels() == 3)
+            currentFrame.imgLeftRGB.convertTo(img2, CV_8UC3, 255.0);
+        else
+            cv::cvtColor(currentFrame.imgLeftRGB, img2, cv::COLOR_GRAY2BGR);
+        // 拼接两张图
+        const int rows = std::max(img1.rows, img2.rows);
+        const int cols = img1.cols + img2.cols;
+        cv::Mat outImg(rows, cols, CV_8UC3, cv::Scalar(0, 0, 0));
+        img1.copyTo(outImg(cv::Rect(0, 0, img1.cols, img1.rows)));
+        img2.copyTo(outImg(cv::Rect(img1.cols, 0, img2.cols, img2.rows)));
+        const int offsetX = img1.cols;
+        // 绘制匹配线段
+        for (size_t i = 0; i < currentFrame.mvpMapLines.size(); i++)
+        {
+            MapLine *pML = currentFrame.mvpMapLines[i];
+            if (!pML || pML->isBad())
+                continue;
+            // 在上一帧中找到对应线段
+            bool found = false;
+            cv::line_descriptor::KeyLine kl1, kl2;
+            for (size_t j = 0; j < lastFrame.mvpMapLines.size(); j++)
+            {
+                if (lastFrame.mvpMapLines[j] == pML)
+                {
+                    kl1 = lastFrame.mvKeyLinesUn[j];
+                    kl2 = currentFrame.mvKeyLinesUn[i];
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                continue;
+            // 上一帧线段端点
+            cv::Point2f p1s(kl1.startPointX, kl1.startPointY);
+            cv::Point2f p1e(kl1.endPointX, kl1.endPointY);
+
+            // 当前帧线段端点（需要加上拼接偏移）
+            cv::Point2f p2s(kl2.startPointX + offsetX, kl2.startPointY);
+            cv::Point2f p2e(kl2.endPointX + offsetX, kl2.endPointY);
+
+            // 绘制线段
+            cv::Scalar color(0, 255, 0); // 绿色表示匹配成功
+            cv::line(outImg, p1s, p1e, color, 2);
+            cv::line(outImg, p2s, p2e, color, 2);
+
+            // 绘制连线（两帧间的匹配连线）
+            cv::Point2f mid1((p1s.x + p1e.x) / 2, (p1s.y + p1e.y) / 2);
+            cv::Point2f mid2((p2s.x + p2e.x) / 2, (p2s.y + p2e.y) / 2);
+            cv::line(outImg, mid1, mid2, cv::Scalar(255, 0, 0), 1); // 蓝色连接线
+        }
+
+        // 显示结果
+        cv::imshow("Line Matches", outImg);
+        cv::waitKey(0);
+    }
+
+    // int LSDmatcher::MatchLinesByProjection(Frame &currentFrame, const Frame &lastFrame, const float threshold, const bool isMono) {
+    //     int numMatches = 0;
+    //     Eigen::Matrix4f currentFramePose = currentFrame.GetPose().matrix();
+    //     const cv::Mat currentFramePoseMat = Converter::toCvMat(currentFramePose);
+    //     const cv::Mat rotationMatrixCurrent = currentFramePoseMat.rowRange(0, 3).colRange(0, 3);
+    //     const cv::Mat translationVectorCurrent = currentFramePoseMat.rowRange(0, 3).col(3);
+    //     const cv::Mat cameraToWorld = -rotationMatrixCurrent.t() * translationVectorCurrent;
+    //     Eigen::Matrix4f lastFramePose = lastFrame.GetPose().matrix();
+    //     const cv::Mat lastFramePoseMat = Converter::toCvMat(lastFramePose);
+    //     const cv::Mat rotationMatrixLast = lastFramePoseMat.rowRange(0, 3).colRange(0, 3);
+    //     const cv::Mat translationVectorLast = lastFramePoseMat.rowRange(0, 3).col(3);
+    //     const cv::Mat cameraToLastFrame = rotationMatrixLast * cameraToWorld + translationVectorLast;
+    //     const bool isForwardMatch = cameraToLastFrame.at<float>(2) > currentFrame.mb && !isMono;
+    //     const bool isBackwardMatch = -cameraToLastFrame.at<float>(2) > currentFrame.mb && !isMono;
+    //     for (int i = 0; i < lastFrame.NL; i++) {
+    //         MapLine *line = lastFrame.mvpMapLines[i];
+    //         if (!line || line->isBad() || lastFrame.mvbLineOutlier[i]) {
+    //             continue;
+    //         }
+    //         std::pair<Eigen::Vector3f, Eigen::Vector3f> lineWorldPosition = line->GetLineWorldPos();
+    //         cv::Mat startPointWorld = (cv::Mat_<float>(3, 1) << lineWorldPosition.first(0), lineWorldPosition.first(1), lineWorldPosition.first(2));
+    //         cv::Mat endPointWorld = (cv::Mat_<float>(3, 1) << lineWorldPosition.second(0), lineWorldPosition.second(1), lineWorldPosition.second(2));
+    //         const cv::Mat startPointCamera = rotationMatrixCurrent * startPointWorld + translationVectorCurrent;
+    //         const auto &startPointCameraX = startPointCamera.at<float>(0);
+    //         const auto &startPointCameraY = startPointCamera.at<float>(1);
+    //         const auto &startPointCameraZ = startPointCamera.at<float>(2);
+    //         const cv::Mat endPointCamera = rotationMatrixCurrent * endPointWorld + translationVectorCurrent;
+    //         const auto &endPointCameraX = endPointCamera.at<float>(0);
+    //         const auto &endPointCameraY = endPointCamera.at<float>(1);
+    //         const auto &endPointCameraZ = endPointCamera.at<float>(2);
+    //         if (startPointCameraZ < 0.0f || endPointCameraZ < 0.0f)
+    //             continue;
+    //         const float inverseStartPointZ = 1.0f / startPointCameraZ;
+    //         const float u1 = currentFrame.fx * startPointCameraX * inverseStartPointZ + currentFrame.cx;
+    //         const float v1 = currentFrame.fy * startPointCameraY * inverseStartPointZ + currentFrame.cy;
+    //         if (u1 < currentFrame.mnMinX || u1 > currentFrame.mnMaxX)
+    //             continue;
+    //         if (v1 < currentFrame.mnMinY || v1 > currentFrame.mnMaxY)
+    //             continue;
+    //         const float inverseEndPointZ = 1.0f / endPointCameraZ;
+    //         const float u2 = currentFrame.fx * endPointCameraX * inverseEndPointZ + currentFrame.cx;
+    //         const float v2 = currentFrame.fy * endPointCameraY * inverseEndPointZ + currentFrame.cy;
+    //         if (u2 < currentFrame.mnMinX || u2 > currentFrame.mnMaxX)
+    //             continue;
+    //         if (v2 < currentFrame.mnMinY || v2 > currentFrame.mnMaxY)
+    //             continue;
+    //         int lastFrameOctave = lastFrame.mvKeyLines[i].octave;
+    //         float searchRadius = threshold * currentFrame.mvScaleFactors[lastFrameOctave];
+    //         std::vector<size_t> candidateLineIndices;
+    //         if (isForwardMatch)
+    //             candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, lastFrameOctave);
+    //         else if (isBackwardMatch)
+    //             candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, 0, lastFrameOctave);
+    //         else
+    //             candidateLineIndices = currentFrame.GetLinesInArea(u1, v1, u2, v2, searchRadius, lastFrameOctave - 1, lastFrameOctave + 1);
+    //         if (candidateLineIndices.empty())
+    //             continue;
+    //         const cv::Mat lineDescriptor = line->GetLineDescriptor();
+    //         int bestMatchDistance = 256;
+    //         int bestMatchLevel = -1;
+    //         int secondBestMatchDistance = 256;
+    //         int secondBestMatchLevel = -1;
+    //         int bestMatchedIndex = -1;
+    //         for (unsigned long index : candidateLineIndices) {
+    //             if (currentFrame.mvpMapLines[index]) {
+    //                 if (currentFrame.mvpMapLines[index]->Observations() > 0)
+    //                     continue;
+    //             }
+    //             const cv::Mat &descriptor = currentFrame.mLineDescriptors.row(index);
+    //             const int dist = DescriptorDistance(lineDescriptor, descriptor);
+    //             if (dist < bestMatchDistance) {
+    //                 secondBestMatchDistance = bestMatchDistance;
+    //                 bestMatchDistance = dist;
+    //                 secondBestMatchLevel = bestMatchLevel;
+    //                 bestMatchLevel = currentFrame.mvKeyLinesUn[index].octave;
+    //                 bestMatchedIndex = index;
+    //             } else if (dist < secondBestMatchDistance) {
+    //                 secondBestMatchLevel = currentFrame.mvKeyLinesUn[index].octave;
+    //                 secondBestMatchDistance = dist;
+    //             }
+    //         }
+    //         if (bestMatchDistance <= TH_HIGH) {
+    //             if (bestMatchLevel == secondBestMatchLevel && bestMatchDistance > mfNNratio * secondBestMatchDistance)
+    //                 continue;
+    //             currentFrame.mvpMapLines[bestMatchedIndex] = line;
+    //             numMatches++;
+    //         }
+    //     }
+    //     return numMatches;
+    // }
 
 
     int LSDmatcher::SerachForInitializeCV(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int, int>> &LineMatches)
@@ -432,7 +673,6 @@ namespace ORB_SLAM3
             if(dist_12<minRatio)
             {
                 MapLine* mapLine = vpMapLinesKF[qdx];
-
                 if(mapLine)
                 {
                     //cout<<"qdx and tdx"<<qdx<<","<<tdx<<endl;
@@ -445,76 +685,327 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    void LSDmatcher::DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame)
+    {
+        if (!pKF)
+            return;
+        //=== 1. 转灰度图（若原始是 float 图或三通道）
+        cv::Mat img1, img2;
+        if (pKF->imgLeftRGB.channels() == 3)
+            pKF->imgLeftRGB.convertTo(img1, CV_8UC3, 255.0);
+        else
+            cv::cvtColor(pKF->imgLeftRGB, img1, cv::COLOR_GRAY2BGR);
+        if (currentFrame.imgLeftRGB.channels() == 3)
+            currentFrame.imgLeftRGB.convertTo(img2, CV_8UC3, 255.0);
+        else
+            cv::cvtColor(currentFrame.imgLeftRGB, img2, cv::COLOR_GRAY2BGR);
+        //=== 2. 拼接两张图
+        const int rows = std::max(img1.rows, img2.rows);
+        const int cols = img1.cols + img2.cols;
+        cv::Mat outImg(rows, cols, CV_8UC3, cv::Scalar(0, 0, 0));
+        img1.copyTo(outImg(cv::Rect(0, 0, img1.cols, img1.rows)));
+        img2.copyTo(outImg(cv::Rect(img1.cols, 0, img2.cols, img2.rows)));
+        const int offsetX = img1.cols;
+        //=== 3. 绘制匹配线段
+        for (size_t i = 0; i < currentFrame.mvpMapLines.size(); i++)
+        {
+            MapLine *pML = currentFrame.mvpMapLines[i];
+            if (!pML || pML->isBad())
+                continue;
+            // 在关键帧中找到对应线段
+            bool found = false;
+            cv::line_descriptor::KeyLine kl1, kl2;
+            for (size_t j = 0; j < pKF->GetMapLineMatches().size(); j++)
+            {
+                MapLine* pMLKF = pKF->GetMapLineMatches()[j];
+                if (pMLKF == pML)
+                {
+                    kl1 = pKF->mvKeyLinesUn[j];
+                    kl2 = currentFrame.mvKeyLinesUn[i];
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                continue;
+            //=== 4. 上一关键帧线段端点
+            cv::Point2f p1s(kl1.startPointX, kl1.startPointY);
+            cv::Point2f p1e(kl1.endPointX, kl1.endPointY);
+            //=== 5. 当前帧线段端点（加上拼接偏移）
+            cv::Point2f p2s(kl2.startPointX + offsetX, kl2.startPointY);
+            cv::Point2f p2e(kl2.endPointX + offsetX, kl2.endPointY);
+            //=== 6. 绘制线段
+            cv::Scalar color(0, 255, 0); // 绿色表示匹配成功
+            cv::line(outImg, p1s, p1e, color, 2);
+            cv::line(outImg, p2s, p2e, color, 2);
+            //=== 7. 绘制连线（两帧间的匹配连线）
+            cv::Point2f mid1((p1s.x + p1e.x) / 2, (p1s.y + p1e.y) / 2);
+            cv::Point2f mid2((p2s.x + p2e.x) / 2, (p2s.y + p2e.y) / 2);
+            cv::line(outImg, mid1, mid2, cv::Scalar(255, 0, 0), 1); // 蓝色连接线
+        }
+        //=== 8. 显示结果
+        cv::imshow("Line Matches", outImg);
+        cv::waitKey(0);
+    }
+
+
+    // int LSDmatcher::SearchByProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)
+    // {
+    //     int nmatches = 0;
+    //     const bool bFactor = th!=1.0;
+    //     for(auto pML : vpMapLines)
+    //     {
+    //         if(!pML || pML->isBad() || !pML->mbLineTrackInView)
+    //             continue;
+    //         const int &nPredictLevel = pML->mnLineTrackScaleLevel;
+    //         float r = RadiusByViewingCos(pML->mLineTrackViewCos);
+    //         if(bFactor)
+    //             r*=th;
+    //         vector<size_t> vIndices =
+    //                 F.GetLinesInArea(pML->mLsTrackProjX, pML->mLsTrackProjY, pML->mLeTrackProjX, pML->mLeTrackProjY,
+    //                                  r*F.mvScaleFactors[nPredictLevel], nPredictLevel-1, nPredictLevel);
+    //         if(vIndices.empty())
+    //             continue;
+    //         const cv::Mat MLdescriptor = pML->GetLineDescriptor();
+    //         int bestDist=256;
+    //         int bestLevel= -1;
+    //         int bestDist2=256;
+    //         int bestLevel2 = -1;
+    //         int bestIdx =-1 ;
+    //         for(unsigned long idx : vIndices)
+    //         {
+    //             if(F.mvpMapLines[idx])
+    //                 if(F.mvpMapLines[idx]->Observations()>0)
+    //                     continue;
+    //             const cv::Mat &d = F.mLineDescriptors.row(idx);
+    //             const int dist = DescriptorDistance(MLdescriptor, d);
+    //             // 根据描述子寻找描述子距离最小和次小的特征点
+    //             if(dist<bestDist)
+    //             {
+    //                 bestDist2 = bestDist;
+    //                 bestDist = dist;
+    //                 bestLevel2 = bestLevel;
+    //                 bestLevel = F.mvKeyLinesUn[idx].octave;
+    //                 bestIdx = idx;
+    //             }
+    //             else if(dist < bestDist2)
+    //             {
+    //                 bestLevel2 = F.mvKeyLinesUn[idx].octave;
+    //                 bestDist2 = dist;
+    //             }
+    //         }
+    //         // Apply ratio to second match (only if best and second are in the same scale level)
+    //         if(bestDist <= TH_HIGH)
+    //         {
+    //             if(bestLevel==bestLevel2 && bestDist>mfNNratio*bestDist2)
+    //                 continue;
+    //             F.mvpMapLines[bestIdx]=pML;
+    //             nmatches++;
+    //         }
+    //     }
+    //     return nmatches;
+    // }
+
     int LSDmatcher::SearchByProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)
     {
         int nmatches = 0;
+        const bool bFactor = (th != 1.0f);
 
-        const bool bFactor = th!=1.0;
-
-        for(auto pML : vpMapLines)
+        for (auto pML : vpMapLines)
         {
-            if(!pML || pML->isBad() || !pML->mbLineTrackInView)
+            if (!pML || pML->isBad() || !pML->mbLineTrackInView)
                 continue;
-
-            const int &nPredictLevel = pML->mnLineTrackScaleLevel;
-
+            //std::cerr << "LSDmatcher::SearchByProjection processing MapLine id: " << pML->mnId << std::endl;
+            //std::cerr << "  TrackProjStart: (" << pML->mLsTrackProjX << ", " << pML->mLsTrackProjY << ")" << std::endl;
+            //std::cerr << "  TrackProjEnd:   (" << pML->mLeTrackProjX << ", " << pML->mLeTrackProjY << ")" << std::endl;
+            //std::cerr << "  LineTrackViewCos: " << pML->mLineTrackViewCos << std::endl;
+            //std::cerr << "  LineTrackScaleLevel: " << pML->mnLineTrackScaleLevel << std::endl;
+            const int nPredictLevel = pML->mnLineTrackScaleLevel;
             float r = RadiusByViewingCos(pML->mLineTrackViewCos);
 
-            if(bFactor)
-                r*=th;
+            if (bFactor)
+                r *= th;
 
-            vector<size_t> vIndices =
-                    F.GetLinesInArea(pML->mLsTrackProjX, pML->mLsTrackProjY, pML->mLeTrackProjX, pML->mLeTrackProjY,
-                                     r*F.mvScaleFactors[nPredictLevel], nPredictLevel-1, nPredictLevel);
+            // 计算线段中心投影位置
+            const float u_mean = 0.5f * (pML->mLsTrackProjX + pML->mLeTrackProjX);
+            const float v_mean = 0.5f * (pML->mLsTrackProjY + pML->mLeTrackProjY);
 
-            if(vIndices.empty())
+            // 保护边界：确保金字塔层级不越界
+            const int minLevel = std::max(0, nPredictLevel - 1);
+            const int maxLevel = std::min(nPredictLevel + 1, F.mnScaleLevels - 1);
+            //std::cerr << "  Search Area Center: (" << u_mean << ", " << v_mean << "), Radius: " << r * F.mvScaleFactors[nPredictLevel] << std::endl;
+
+            std::vector<size_t> vIndices =
+                F.GetLinesInAreaMean(u_mean, v_mean, r * F.mvScaleFactors[nPredictLevel],
+                                minLevel, maxLevel);
+
+            if (vIndices.empty())
                 continue;
 
             const cv::Mat MLdescriptor = pML->GetLineDescriptor();
 
-            int bestDist=256;
-            int bestLevel= -1;
-            int bestDist2=256;
+            int bestDist = 256;
+            int bestDist2 = 256;
+            int bestIdx = -1;
+            int bestLevel = -1;
             int bestLevel2 = -1;
-            int bestIdx =-1 ;
 
-            for(unsigned long idx : vIndices)
+            for (size_t idx : vIndices)
             {
-                if(F.mvpMapLines[idx])
-                    if(F.mvpMapLines[idx]->Observations()>0)
-                        continue;
-
-                const cv::Mat &d = F.mLineDescriptors.row(idx);
-
-                const int dist = DescriptorDistance(MLdescriptor, d);
-
-                // 根据描述子寻找描述子距离最小和次小的特征点
-                if(dist<bestDist)
-                {
-                    bestDist2 = bestDist;
-                    bestDist = dist;
-                    bestLevel2 = bestLevel;
-                    bestLevel = F.mvKeyLinesUn[idx].octave;
-                    bestIdx = idx;
-                }
-                else if(dist < bestDist2)
-                {
-                    bestLevel2 = F.mvKeyLinesUn[idx].octave;
-                    bestDist2 = dist;
-                }
-            }
-
-            // Apply ratio to second match (only if best and second are in the same scale level)
-            if(bestDist <= TH_HIGH)
-            {
-                if(bestLevel==bestLevel2 && bestDist>mfNNratio*bestDist2)
+                if (idx >= F.mvKeyLinesUn.size()) // 防越界
                     continue;
 
-                F.mvpMapLines[bestIdx]=pML;
-                nmatches++;
+                if (F.mvpMapLines[idx] && F.mvpMapLines[idx]->Observations() > 0)
+                    continue;
+
+                const cv::Mat &d = F.mLineDescriptors.row(idx);
+                const int dist = DescriptorDistance(MLdescriptor, d);
+                if (dist < bestDist)
+                {
+                    bestDist2 = bestDist;
+                    bestLevel2 = bestLevel;
+                    bestDist = dist;
+                    bestIdx = idx;
+                    bestLevel = F.mvKeyLinesUn[idx].octave;
+                }
+                else if (dist < bestDist2)
+                {
+                    bestDist2 = dist;
+                    bestLevel2 = F.mvKeyLinesUn[idx].octave;
+                }
             }
+            // ====== 过滤劣质匹配 ======
+            const int TH_HIGH_NEW = 100;   // 建议阈值范围 [80,120]
+            const float NN_RATIO = mfNNratio; // 通常0.8
+            if (bestDist > TH_HIGH_NEW)
+                continue;
+            if (bestLevel == bestLevel2 && bestDist > NN_RATIO * bestDist2)
+                continue;
+            // ====== 成功匹配 ======
+            F.mvpMapLines[bestIdx] = pML;
+            pML->IncreaseFound();
+            nmatches++;
         }
         return nmatches;
+    }
+
+
+    //debug SearchByDescriptor(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)
+    void LSDmatcher::DebugLineMatchSearchbyProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)
+    {
+        cv::Mat imDebug;
+        
+        F.imgLeftRGB.copyTo(imDebug);
+
+        // 绘制投影的 MapLine
+        for (auto pML : vpMapLines)
+        {
+            if(!pML || pML->isBad() || !pML->mbLineTrackInView)
+                continue;
+            cv::Point2f p1(pML->mLsTrackProjX, pML->mLsTrackProjY);
+            cv::Point2f p2(pML->mLeTrackProjX, pML->mLeTrackProjY);
+            cv::line(imDebug, p1, p2, cv::Scalar(0,255,0), 2);  // 绿色线段表示MapLine投影
+        }
+        // 绘制当前帧检测到的线段
+        for (size_t i=0; i<F.mvKeyLinesUn.size(); i++)
+        {
+            const cv::line_descriptor::KeyLine &kl = F.mvKeyLinesUn[i];
+            cv::line(imDebug, cv::Point2f(kl.startPointX, kl.startPointY),
+                        cv::Point2f(kl.endPointX, kl.endPointY),
+                        cv::Scalar(255,0,0), 1); // 蓝色表示检测线段
+        }
+        // 绘制匹配成功的线段
+        for (size_t i=0; i<F.mvpMapLines.size(); i++)
+        {
+            if(F.mvpMapLines[i])
+            {
+                const cv::line_descriptor::KeyLine &kl = F.mvKeyLinesUn[i];
+                cv::line(imDebug, cv::Point2f(kl.startPointX, kl.startPointY),
+                            cv::Point2f(kl.endPointX, kl.endPointY),
+                            cv::Scalar(0,0,255), 2); // 红色表示匹配成功的线段
+            }
+        }
+        // 显示窗口
+        cv::imshow("Line Projection Debug", imDebug);
+        cv::waitKey(0);
+    }
+
+    void LSDmatcher::DebugLineProjectionNew(Frame &F, const std::vector<MapLine*> &vpMapLines, const std::string &winName)
+    {
+        // 拷贝彩色图像用于可视化
+        cv::Mat imDebug;
+        F.imgLeftRGB.copyTo(imDebug);
+
+        // 颜色定义
+        cv::Scalar colorDetected(255, 0, 0);   // 蓝色：检测到的线段
+        cv::Scalar colorProjected(0, 255, 0);  // 绿色：反投影线段
+        cv::Scalar colorLink(0, 255, 255);     // 黄色：连接线
+        cv::Scalar colorMatch(0, 0, 255);      // 红色：匹配成功
+        // ========== [1] 绘制当前帧检测的线段 ==========
+        for (size_t i = 0; i < F.mvKeyLinesUn.size(); i++)
+        {
+            const auto &kl = F.mvKeyLinesUn[i];
+            cv::line(imDebug,
+                    cv::Point2f(kl.startPointX, kl.startPointY),
+                    cv::Point2f(kl.endPointX, kl.endPointY),
+                    colorDetected, 1);
+        }
+        // ========== [2] 绘制 MapLine 的反投影线段 ==========
+        for (auto pML : vpMapLines)
+        {
+            if (!pML || pML->isBad() || !pML->mbLineTrackInView)
+                continue;
+
+            cv::Point2f p1(pML->mLsTrackProjX, pML->mLsTrackProjY);
+            cv::Point2f p2(pML->mLeTrackProjX, pML->mLeTrackProjY);
+
+            // 绘制绿色反投影线
+            cv::line(imDebug, p1, p2, colorProjected, 2);
+            // 绘制线段中点
+            cv::circle(imDebug, (p1 + p2) * 0.5f, 3, colorProjected, -1);
+            // 可选：显示线段ID
+            cv::putText(imDebug, std::to_string(pML->mnId),
+                        (p1 + p2) * 0.5f + cv::Point2f(5, 5),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.4, colorProjected, 1);
+        }
+
+        // ========== [3] 绘制匹配成功的线段 ==========
+        for (size_t i = 0; i < F.mvpMapLines.size(); i++)
+        {
+            if (F.mvpMapLines[i])
+            {
+                const auto &kl = F.mvKeyLinesUn[i];
+                cv::line(imDebug,
+                        cv::Point2f(kl.startPointX, kl.startPointY),
+                        cv::Point2f(kl.endPointX, kl.endPointY),
+                        colorMatch, 2);
+
+                // 在匹配线段与其投影之间画虚线连接
+                auto pML = F.mvpMapLines[i];
+                cv::Point2f projCenter((pML->mLsTrackProjX + pML->mLeTrackProjX) / 2,
+                                   (pML->mLsTrackProjY + pML->mLeTrackProjY) / 2);
+                cv::Point2f detCenter((kl.startPointX + kl.endPointX) / 2,
+                                  (kl.startPointY + kl.endPointY) / 2);
+                cv::line(imDebug, projCenter, detCenter, colorLink, 1, cv::LINE_AA);
+            }
+        }
+
+        // ========== [4] 输出投影调试信息 ==========
+        for (auto pML : vpMapLines)
+        {
+            if (!pML || pML->isBad() || !pML->mbLineTrackInView)
+                continue;
+
+            std::cout << "Line ID " << pML->mnId
+                    << " | P1_proj: (" << pML->mLsTrackProjX << ", " << pML->mLsTrackProjY << ")"
+                    << " | P2_proj: (" << pML->mLeTrackProjX << ", " << pML->mLeTrackProjY << ")"
+                    << " | Depth: " << pML->mLineTrackDepth
+                    << " | Cos(view): " << pML->mLineTrackViewCos << std::endl;
+        }
+
+        // ========== [5] 显示窗口 ==========
+        cv::imshow(winName, imDebug);
+        cv::waitKey(0);
     }
 
 

@@ -563,6 +563,7 @@ void Map::PostLoad(KeyFrameDatabase* pKFDB, ORBVocabulary* pORBVoc/*, map<long u
     }
 
     mvpBackupMapPoints.clear();
+    mvpBackupMapLines.clear();
 }
 
 
