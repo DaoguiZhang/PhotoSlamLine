@@ -58,7 +58,10 @@ namespace ORB_SLAM3
         int SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool Mono);
         //int MatchLinesByProjection(Frame &currentFrame, const Frame &lastFrame, const float threshold, const bool isMono);
         int SearchByProjectionNew(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool isMono);
+        void DebugSearchByProjectionNew(Frame &CurrentFrame,const Frame &LastFrame, const std::string &windowName);
         void DebugDrawLineMatches(const Frame &lastFrame, const Frame &currentFrame);
+        void DebugDrawLineMatchesFrame(Frame &CurrentFrame, std::string &windowName);
+        void DebugDrawProjectedLineFrame(Frame &CurrentFrame, std::string &windowName);
         int SearchByProjection(KeyFrame* pKF,Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
         void DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame);
         int SearchByProjection(Frame &F, const std::vector<MapLine*> &vpMapLines, const float th=3);

@@ -189,6 +189,10 @@ public:
     std::vector<MapPoint*> GetTrackedMapPoints();
     std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
 
+    // Information of tracked mapline
+    std::vector<MapLine*> GetTrackedMapline();
+    std::vector<cv::line_descriptor::KeyLine> GetTrackedKeylineUn();
+
     // For debugging
     double GetTimeFromIMUInit();
     bool isLost();
@@ -283,6 +287,11 @@ private:
     std::vector<MapPoint*> mTrackedMapPoints;
     std::vector<cv::KeyPoint> mTrackedKeyPointsUn;
     std::mutex mMutexState;
+
+    // Tracked mapline
+    std::vector<MapLine*> mTrackedMapline;
+    std::vector<cv::line_descriptor::KeyLine> mTrackedKeylineUn;
+    std::mutex mMutexLineState;
 
     //
     string mStrLoadAtlasFromFile;

@@ -1975,6 +1975,56 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    void ORBmatcher::DebugSearchByProjectionPoints(
+        Frame &CurrentFrame,
+        const Frame &LastFrame,
+        const std::string &windowName)
+    {
+        cv::Mat imgDraw = CurrentFrame.imgLeftRGB.clone();
+        if (imgDraw.channels() == 1)
+            cv::cvtColor(imgDraw, imgDraw, cv::COLOR_GRAY2BGR);
+
+        //=== 获取位姿
+        const Sophus::SE3f Tcw = CurrentFrame.GetPose();  // 当前帧
+        const Sophus::SE3f Tlw = LastFrame.GetPose();     // 上一帧
+        const Sophus::SE3f Tlc = Tcw.inverse() * Tlw;     // Last -> Current
+        int nValidProj = 0;
+        for (size_t i = 0; i < LastFrame.mvpMapPoints.size(); ++i)
+        {
+            MapPoint *pMP = LastFrame.mvpMapPoints[i];
+            if (!pMP || pMP->isBad())
+                continue;
+            //=== 世界坐标
+            Eigen::Vector3f Pw = pMP->GetWorldPos();
+            //=== 投影到当前帧坐标系
+            Eigen::Vector3f Pc = Tlc * Pw;
+            if (Pc[2] <= 0)
+                continue;  // 深度无效
+            //=== 投影到像素
+            Eigen::Vector2f uv = CurrentFrame.mpCamera->project(Pc);
+            if (uv[0] < 0 || uv[0] >= imgDraw.cols || uv[1] < 0 || uv[1] >= imgDraw.rows)
+                continue;
+            //=== 绘制点（红色）
+            cv::Point2f p(uv[0], uv[1]);
+            cv::circle(imgDraw, p, 3, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
+            //=== 写编号（方便对比）
+            cv::putText(imgDraw, std::to_string(i), p + cv::Point2f(2, -2),
+                        cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(255, 255, 255), 1);
+
+            nValidProj++;
+        }
+        //=== 当前帧的特征点（绿色，用于对比）
+        for (size_t i = 0; i < CurrentFrame.mvKeys.size(); ++i)
+        {
+            const cv::KeyPoint &kp = CurrentFrame.mvKeys[i];
+            cv::circle(imgDraw, kp.pt, 2, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+        }
+        std::cout << "[Debug] 投影到当前帧的有效 MapPoints 数量: "
+                << nValidProj << " / " << LastFrame.mvpMapPoints.size() << std::endl;
+        cv::imshow(windowName, imgDraw);
+        cv::waitKey(0);
+    }
+
     int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set<MapPoint*> &sAlreadyFound, const float th , const int ORBdist)
     {
         int nmatches = 0;

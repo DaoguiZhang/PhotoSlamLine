@@ -464,6 +464,8 @@ Sophus::SE3f System::TrackRGBDWithLine(const cv::Mat &im, const cv::Mat &depthma
     mTrackingState = mpTracker->mState;
     mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
+    mTrackedMapline = mpTracker->mCurrentFrame.mvpMapLines;
+    mTrackedKeylineUn = mpTracker->mCurrentFrame.mvKeyLinesUn;
     return Tcw;
 }
 
@@ -1398,10 +1400,22 @@ vector<MapPoint*> System::GetTrackedMapPoints()
     return mTrackedMapPoints;
 }
 
+std::vector<MapLine*> System::GetTrackedMapline()
+{
+    unique_lock<mutex> lock(mMutexState);
+    return mTrackedMapline;
+}
+
 vector<cv::KeyPoint> System::GetTrackedKeyPointsUn()
 {
     unique_lock<mutex> lock(mMutexState);
     return mTrackedKeyPointsUn;
+}
+
+std::vector<cv::line_descriptor::KeyLine> System::GetTrackedKeylineUn()
+{
+    unique_lock<mutex> lock(mMutexState);
+    return mTrackedKeylineUn;
 }
 
 double System::GetTimeFromIMUInit()

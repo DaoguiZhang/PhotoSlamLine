@@ -1797,13 +1797,16 @@ Sophus::SE3f Tracking::GrabImageRGBDWithLine(const cv::Mat &imRGB,const cv::Mat 
     mCurrentFrame.mNameFile = filename;
     mCurrentFrame.mnDataset = mnNumDataset;
     std::cerr << "Frame id: " << mCurrentFrame.mnId << std::endl;
-    std::cerr << "mCurrentFrame.mNameFile = filename: " << mCurrentFrame.mNameFile << std::endl;
+    std::cerr << "mCurrentFrame.mNameFile: " << mCurrentFrame.mNameFile << std::endl;
 
 #ifdef REGISTER_TIMES
     vdORBExtract_ms.push_back(mCurrentFrame.mTimeORB_Ext);
 #endif
 
     TrackWithLine();
+
+    //查看一下是否有很多Map,用于后续的优化
+    std::cerr <<"------------------------------------------------atlas map---------------------------------------- size: " << mpAtlas->CountMaps() << std::endl;
 
     return mCurrentFrame.GetPose();
 }
@@ -2738,7 +2741,7 @@ void Tracking::TrackWithLine()
         }
         else
         {
-            //std::cerr << "----------MonocularInitialization ---------- " << std::endl; NOT LOADED
+            std::cerr << "----------MonocularInitializationWithLine ---------- " << std::endl; //NOT LOADED
             MonocularInitializationWithLine();
         }
 
@@ -2790,14 +2793,13 @@ void Tracking::TrackWithLine()
                 {
                     Verbose::PrintMess("TRACK: Track with motion model With Line", Verbose::VERBOSITY_DEBUG);
                     bOK = TrackWithMotionModelWithLine();
-                    //std::cerr << "----------------------------------------TrackWithMotionModelWithLine----------------------------" << std::endl;
+                    //std::cerr << "----------------------------------------end TrackWithMotionModelWithLine----------------------------" << std::endl;
                     if(!bOK)
                     {
                         bOK = TrackReferenceKeyFrameWithLine();
-                        //std::cerr << "----------------------------------------TrackReferenceKeyFrameWithLine----------------------------" << std::endl;
+                        //std::cerr << "----------------------------------------end TrackReferenceKeyFrameWithLine----------------------------" << std::endl;
                     }                        
                 }
-
 
                 if (!bOK)
                 {
@@ -2967,8 +2969,8 @@ void Tracking::TrackWithLine()
         {
             if(bOK)
             {
-                std::cerr <<" --------- TrackLocalMapWithLine->TrackLocalMap()  -------------" << std::endl;
-                bOK = TrackLocalMapWithLine();
+                //std::cerr <<" --------- TrackLocalMapWithLine->TrackLocalMap()  -------------" << std::endl;
+                bOK = TrackLocalMapWithLine();  //有些边界条件没有弄好，需要改进一些
                 std::cerr <<" --------- TrackLocalMapWithLine->TrackLocalMap() end -------------" << std::endl;
             }
             if(!bOK)
@@ -3046,6 +3048,7 @@ void Tracking::TrackWithLine()
         if(mCurrentFrame.isSet())
             mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.GetPose());
 
+        //std::cerr << "-------------------end mpFrameDrawer---------------------- " << std::endl;
         if(bOK || mState==RECENTLY_LOST)
         {
             // Update motion model
@@ -3793,7 +3796,6 @@ void Tracking::CreateInitialMapMonocular()
     mLastFrame = Frame(mCurrentFrame);
 
     mpAtlas->SetReferenceMapPoints(mvpLocalMapPoints);
-
     mpMapDrawer->SetCurrentCameraPose(pKFcur->GetPose());
 
     mpAtlas->GetCurrentMap()->mvpKeyFrameOrigins.push_back(pKFini);
@@ -4001,6 +4003,7 @@ bool Tracking::TrackReferenceKeyFrameWithLine()
     // cout << " TrackReferenceKeyFrame mLastFrame.mTcw:  " << mLastFrame.mTcw << endl;
     //Optimizer::PoseOptimization(&mCurrentFrame);
     Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
+    //std::cerr << "After PoseOptimizationWithLine-> Line Matches: " << nline_matches << std::endl;
 
     // Discard outliers
     int nmatchesMap = 0;
@@ -4224,7 +4227,7 @@ void Tracking::UpdateLastFrameWithLine()
 
     if(vLineDepthIdx.empty())
         return;
-    std::sort(vLineDepthIdx.begin(),vLineDepthIdx.end());
+    //std::sort(vLineDepthIdx.begin(),vLineDepthIdx.end());
 
     // We insert all close Lines (depth<mThDepth)
     // If less than 100 close points, we insert the 100 closest ones.
@@ -4256,10 +4259,8 @@ void Tracking::UpdateLastFrameWithLine()
             else{
                 //x3D = mLastFrame.UnprojectStereoFishEye(i); //to do next...(对于鱼眼相机)
             }
-
             MapLine* pNewML = new MapLine(xLine3D.first, xLine3D.second, mpAtlas->GetCurrentMap(), &mLastFrame, i);
             mLastFrame.mvpMapLines[i]=pNewML;
-
             mlpTemporalLines.push_back(pNewML);
             nLines++;
         }
@@ -4267,9 +4268,8 @@ void Tracking::UpdateLastFrameWithLine()
         {
             nLines++;
         }
-
-        if(vLineDepthIdx[j].first>mThDepth && nLines>100)
-            break;
+        // if(vLineDepthIdx[j].first>mThDepth && nLines>100)
+        //     break;
 
     }
 
@@ -4409,30 +4409,10 @@ bool Tracking::TrackWithMotionModelWithLine()
     else
         th=15;
 
-    // if(mLastFrame.mvpMapLines[0])
+    // if(mCurrentFrame.mnId==10)
     // {
-    //     std::cerr << "2 mLastFrame.mvpMapLines[0] is not null, size: " << mLastFrame.mvpMapLines.size() << std::endl;
-    // }
-    // if(mLastFrame.mvpMapPoints[0])
-    // {
-    //     std::cerr << "2 mLastFrame.mvpMapPoints[0] is not null, size: " << mLastFrame.mvpMapPoints.size() << std::endl;
-    // }
-
-    // for(int i=0; i<mLastFrame.N; i++)
-    // {
-    //     MapPoint* pMP = mLastFrame.mvpMapPoints[i];
-    //     if(pMP)
-    //     {
-    //         std::cerr << "i->" << i <<  "; TrackWithMotionModelWithLine pMP is not null" << std::endl;
-    //     }
-    // }
-    // for(int i=0; i<mLastFrame.NL; i++)
-    // {
-    //     MapLine* pML = mLastFrame.mvpMapLines[i];
-    //     if(pML)
-    //     {
-    //         std::cerr << "i->" << i <<  "; TrackWithMotionModelWithLine pML is not null" << std::endl;
-    //     }
+    //     matcher.DebugSearchByProjectionPoints(mCurrentFrame, mLastFrame, "Debug_Point_MotionModel_Frame10");
+    //     line_matcher.DebugSearchByProjectionNew(mCurrentFrame, mLastFrame, "Debug_MotionModel_Frame10");
     // }
 
     int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
@@ -4478,13 +4458,37 @@ bool Tracking::TrackWithMotionModelWithLine()
         //     return false;
     }
     ////debug draw
-    std::cerr << "TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
-    //line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
+    std::cerr << "TrackWithMotionModelWithLine->Point Matches: " <<  nmatches  << ";   TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
+    
+    // line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
+    // std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+    // MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+    // std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+    // MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
+    // if(nLinematches<8)
+    // {
+    //     Verbose::PrintMess("Not enough Line matches after debug draw!!", Verbose::VERBOSITY_NORMAL); //TO DO NEXT
+    //     std::string last_win_proj_name = "LineProj_LastFrame_" + std::to_string(mLastFrame.mnId);
+    //     std::string current_win_proj_name = "LineProj_CurrentFrame_" + std::to_string(mCurrentFrame.mnId);
+    //     line_matcher.DebugDrawProjectedLineFrame(mLastFrame, last_win_proj_name);
+    //     line_matcher.DebugDrawProjectedLineFrame(mCurrentFrame, current_win_proj_name);
+    //     std::string last_win_name = "LineMatches_LastFrame_" + std::to_string(mLastFrame.mnId);
+    //     std::string current_win_name = "LineMatches_CurrentFrame_" + std::to_string(mCurrentFrame.mnId);
+    //     line_matcher.DebugDrawLineMatchesFrame(mLastFrame, last_win_name);
+    //     line_matcher.DebugDrawLineMatchesFrame(mCurrentFrame, current_win_name);
+    //     line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
+    //     line_matcher.DebugLineProjectionNew(mCurrentFrame, mLastFrame.mvpMapLines, "ProjectedLinesBeforeOpti");
+    //     std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+    //     MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+    //     std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+    //     MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
+    // }
+    
 
     // Optimize frame pose with all matches
     Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
     //Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
-
+    //std::cerr <<" After PoseOptimizationWithLine " << std::endl;
     // Discard outliers
     int nmatchesMap = 0;
     for(int i =0; i<mCurrentFrame.N; i++)
@@ -5624,7 +5628,7 @@ void Tracking::SearchLocalPointsAndLine()
                                cv::Point2f(pML->mLeTrackProjX, pML->mLeTrackProjY));
         }
     }
-    std::cerr << "After projection: To Match Points: " << nToMatchPoints << ", To Match Lines: " << nToMatchLines << std::endl;
+    //std::cerr << "After projection: To Match Points: " << nToMatchPoints << ", To Match Lines: " << nToMatchLines << std::endl;
     // ============ [4] 点匹配 ============
     if (nToMatchPoints > 0)
     {
@@ -5654,7 +5658,7 @@ void Tracking::SearchLocalPointsAndLine()
         
         //matcher.DebugPointProjectionDual(mCurrentFrame, mvpLocalMapPoints);
     }
-    std::cerr << "11111 After cleaning: Tracked Local Map Points: " << mvpLocalMapPoints.size() << ", Tracked Local Map Lines: " << mvpLocalMapLines.size() << std::endl;
+    std::cerr << "Tracked Local Map Points: " << mvpLocalMapPoints.size() << ", Tracked Local Map Lines: " << mvpLocalMapLines.size() << std::endl;
 
     //MapExporter::ExportFrameMapPoints("CurrentFrame_MapPoints_BeforeLineMatch.txt", mCurrentFrame, mpAtlas->GetCurrentMap());
     //MapExporter::ExportLocalMapWithCameraAxesOBJ(mCurrentFrame, mvpLocalMapPoints, mvpLocalMapLines);
@@ -5699,7 +5703,9 @@ void Tracking::UpdateLocalMapWithLine()
     mpAtlas->SetReferenceMapLines(mvpLocalMapLines);
 
     // Update
+    //std::cerr << "0UpdateLocalKeyFramesWithLine Local KeyFrames size: " << mvpLocalKeyFrames.size() << std::endl;
     UpdateLocalKeyFramesWithLine();
+    //std::cerr << "1UpdateLocalKeyFramesWithLine Local KeyFrames size: " << mvpLocalKeyFrames.size() << std::endl;
     UpdateLocalPointsAndLine();
 }
 

@@ -362,16 +362,13 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     //store line features
     NL = static_cast<int> (mvKeyLines.size());
     //std::cerr <<"NL: " << NL << std::endl;
-    if(!mvKeyLines.empty())
-    {
-        UndistortKeyLines();
-        ComputeLineStereoFromRGBD(imDepth);
-        mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
-
-        mvbLineOutlier = std::vector<bool>(NL, false);
-    }
-
-
+    UndistortKeyLines();
+    ComputeLineStereoFromRGBD(imDepth);
+    mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
+    mvbLineOutlier = std::vector<bool>(NL, false);
+    // if(!mvKeyLines.empty())
+    // {  
+    // }
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
     {
@@ -573,24 +570,20 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     mmMatchedLineInImage.clear();
 
     mvbOutlier = vector<bool>(N,false);
-
      //store line features
     NL = static_cast<int> (mvKeyLines.size());
-    if(!mvKeyLines.empty())
+    std::cerr << "NL: " << NL << std::endl;
+    UndistortKeyLines();
+    // Set no stereo information
+    mvuLineRight.clear();
+    mvLineDepth.clear();
+    for(int i = 0; i < NL; ++i)
     {
-        UndistortKeyLines();
-        // Set no stereo information
-        mvuLineRight.clear();
-        mvLineDepth.clear();
-        for(int i = 0; i < NL; ++i)
-        {
-            mvuLineRight.emplace_back(std::make_pair(-1,-1));
-            mvLineDepth.emplace_back(std::make_pair(-1,-1));
-        }
-        mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
-
-        mvbLineOutlier = std::vector<bool>(NL, false);
+        mvuLineRight.emplace_back(std::make_pair(-1,-1));
+        mvLineDepth.emplace_back(std::make_pair(-1,-1));
     }
+    mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
+    mvbLineOutlier = std::vector<bool>(NL, false);
 
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)

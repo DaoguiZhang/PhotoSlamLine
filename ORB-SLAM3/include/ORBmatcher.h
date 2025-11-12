@@ -53,6 +53,8 @@ namespace ORB_SLAM3
         // Used to track from previous frame (Tracking)
         int SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono);
 
+        void DebugSearchByProjectionPoints(Frame &CurrentFrame,const Frame &LastFrame,const std::string &windowName);
+
         // Project MapPoints seen in KeyFrame into the Frame and search matches.
         // Used in relocalisation (Tracking)
         int SearchByProjection(Frame &CurrentFrame, KeyFrame* pKF, const std::set<MapPoint*> &sAlreadyFound, const float th, const int ORBdist);

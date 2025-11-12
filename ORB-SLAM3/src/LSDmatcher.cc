@@ -427,15 +427,25 @@ namespace ORB_SLAM3
                     continue;
                 // 3.2 计算描述子距离
                 float descDist = DescriptorDistance(LastDescriptors.row(i), CurrentFrame.mLineDescriptors.row(j));
-                // 3.3 端点视差一致性约束
-                // 单目：端点投影距离差和线方向差
+                // 3.3 端点视差一致性约束（考虑方向不一致）
                 float dx1 = kl.startPointX - uv1[0];
                 float dy1 = kl.startPointY - uv1[1];
                 float dx2 = kl.endPointX - uv2[0];
                 float dy2 = kl.endPointY - uv2[1];
-                float endpointError = std::sqrt(dx1*dx1 + dy1*dy1) + std::sqrt(dx2*dx2 + dy2*dy2);
+                float err_forward = std::sqrt(dx1*dx1 + dy1*dy1) + std::sqrt(dx2*dx2 + dy2*dy2);
+
+                // 反向情况：当前帧线方向与上一帧相反
+                float dx1r = kl.startPointX - uv2[0];
+                float dy1r = kl.startPointY - uv2[1];
+                float dx2r = kl.endPointX - uv1[0];
+                float dy2r = kl.endPointY - uv1[1];
+                float err_reverse = std::sqrt(dx1r*dx1r + dy1r*dy1r) + std::sqrt(dx2r*dx2r + dy2r*dy2r);
+
+                // 取较小误差
+                float endpointError = std::min(err_forward, err_reverse);
+
                 // 3.4 综合评分（描述子距离 + 端点误差）
-                float score = descDist + endpointError * 0.1f; // 权重可调
+                float score = descDist + endpointError * 0.01f; // 权重可调
                 if (score < bestScore)
                 {
                     bestScore = score;
@@ -454,6 +464,114 @@ namespace ORB_SLAM3
         return nMatches;
     }
 
+    void LSDmatcher::DebugSearchByProjectionNew(
+        Frame &CurrentFrame,
+        const Frame &LastFrame,
+        const std::string &windowName)
+    {
+        cv::Mat imgDraw = CurrentFrame.imgLeftRGB.clone();
+        if (imgDraw.channels() == 1)
+            cv::cvtColor(imgDraw, imgDraw, cv::COLOR_GRAY2BGR);
+        //=== 获取位姿
+        const Sophus::SE3f Tcw = CurrentFrame.GetPose();  // 当前帧
+        const Sophus::SE3f Tlw = LastFrame.GetPose();     // 上一帧
+        const Sophus::SE3f Tlc = Tcw.inverse() * Tlw;     // Last -> Current
+        int nValidProj = 0;
+        for (size_t i = 0; i < LastFrame.mvpMapLines.size(); ++i)
+        {
+            MapLine *pML = LastFrame.mvpMapLines[i];
+            if (!pML || pML->isBad())
+                continue;
+            //=== 取世界坐标端点
+            const auto &P1w = pML->GetLineWorldPos().first;
+            const auto &P2w = pML->GetLineWorldPos().second;
+            //=== 投影到当前帧相机坐标
+            Eigen::Vector3f P1c = Tlc * P1w;
+            Eigen::Vector3f P2c = Tlc * P2w;
+            if (P1c[2] <= 0 || P2c[2] <= 0)
+                continue;  // 深度无效
+            //=== 投影到像素坐标
+            Eigen::Vector2f uv1 = CurrentFrame.mpCamera->project(P1c);
+            Eigen::Vector2f uv2 = CurrentFrame.mpCamera->project(P2c);
+            //=== 检查是否在图像范围内
+            if (uv1[0] < 0 || uv1[0] >= imgDraw.cols || uv1[1] < 0 || uv1[1] >= imgDraw.rows ||
+                uv2[0] < 0 || uv2[0] >= imgDraw.cols || uv2[1] < 0 || uv2[1] >= imgDraw.rows)
+                continue;
+            //=== 绘制红线（投影线）
+            cv::Point2f p1(uv1[0], uv1[1]);
+            cv::Point2f p2(uv2[0], uv2[1]);
+            cv::line(imgDraw, p1, p2, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+            cv::circle(imgDraw, p1, 3, cv::Scalar(0, 255, 0), -1);
+            cv::circle(imgDraw, p2, 3, cv::Scalar(0, 255, 0), -1);
+            //=== 写编号
+            cv::putText(imgDraw, std::to_string(i), p1, cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(255, 255, 255), 1);
+            nValidProj++;
+        }
+        //=== 绘制当前帧检测到的线（蓝色，用于对比）
+        for (size_t i = 0; i < CurrentFrame.mvKeyLines.size(); ++i)
+        {
+            const auto &kl = CurrentFrame.mvKeyLines[i];
+            cv::Point2f sp(kl.startPointX, kl.startPointY);
+            cv::Point2f ep(kl.endPointX, kl.endPointY);
+            cv::line(imgDraw, sp, ep, cv::Scalar(255, 0, 0), 1, cv::LINE_AA);
+        }
+        std::cout << "[Debug] 投影到当前帧的有效 MapLines 数量: " 
+                << nValidProj << " / " << LastFrame.mvpMapLines.size() << std::endl;
+
+        cv::imshow(windowName, imgDraw);
+        cv::waitKey(0);
+    }
+
+    void LSDmatcher::DebugDrawProjectedLineFrame(Frame &CurrentFrame, std::string &windowName)
+    {
+        cv::Mat imgDraw = CurrentFrame.imgLeftRGB.clone();
+        if (imgDraw.channels() == 1)
+            cv::cvtColor(imgDraw, imgDraw, cv::COLOR_GRAY2BGR);
+        //=== 当前帧的相机位姿
+        const Sophus::SE3f Tcw = CurrentFrame.GetPose();
+        for (size_t i = 0; i < CurrentFrame.mvKeyLines.size(); ++i)
+        {
+            const auto &kl = CurrentFrame.mvKeyLines[i];
+            cv::Point2f sp(kl.startPointX, kl.startPointY);
+            cv::Point2f ep(kl.endPointX, kl.endPointY);
+            //=== 蓝色线段：当前帧检测线
+            cv::line(imgDraw, sp, ep, cv::Scalar(255, 0, 0), 1, cv::LINE_AA);
+            cv::putText(imgDraw, std::to_string(i), sp, cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(255, 255, 255), 1);
+            //=== 匹配的地图线段
+            MapLine* pML = CurrentFrame.mvpMapLines[i];
+            if (pML && !pML->isBad())
+            {
+                // 取世界坐标的端点
+                const Eigen::Vector3f &P1w = pML->GetLineWorldPos().first;
+                const Eigen::Vector3f &P2w = pML->GetLineWorldPos().second;
+                //=== 投影到当前帧
+                Eigen::Vector3f P1c = Tcw * P1w;
+                Eigen::Vector3f P2c = Tcw * P2w;
+                // 跳过无效深度
+                if (P1c[2] <= 0 || P2c[2] <= 0)
+                    continue;
+
+                Eigen::Vector2f uv1 = CurrentFrame.mpCamera->project(P1c);
+                Eigen::Vector2f uv2 = CurrentFrame.mpCamera->project(P2c);
+                cv::Point2f p1_proj(uv1[0], uv1[1]);
+                cv::Point2f p2_proj(uv2[0], uv2[1]);
+
+                //=== 红线：投影线
+                cv::line(imgDraw, p1_proj, p2_proj, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+
+                //=== 绿色点：端点投影位置
+                cv::circle(imgDraw, p1_proj, 3, cv::Scalar(0, 255, 0), -1);
+                cv::circle(imgDraw, p2_proj, 3, cv::Scalar(0, 255, 0), -1);
+
+                //=== 浅蓝线：连接检测线和投影线端点（可视化偏差）
+                cv::line(imgDraw, sp, p1_proj, cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
+                cv::line(imgDraw, ep, p2_proj, cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
+            }
+        }
+
+        cv::imshow(windowName, imgDraw);
+        cv::waitKey(0);
+    }
 
     void LSDmatcher::DebugDrawLineMatches(const Frame &lastFrame, const Frame &currentFrame)
     {
@@ -647,6 +765,9 @@ namespace ORB_SLAM3
         vpMapLineMatches = std::vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
 
         int nmatches = 0;
+        if(currentF.NL==0 || pKF->NL==0)
+            return 0;
+
         cv::BFMatcher bfm(cv::NORM_HAMMING, false);
         cv::Mat ldesc1, ldesc2;
         std::vector<std::vector<cv::DMatch>> lmatches;
@@ -748,6 +869,38 @@ namespace ORB_SLAM3
         cv::waitKey(0);
     }
 
+    void LSDmatcher::DebugDrawLineMatchesFrame(Frame &CurrentFrame, std::string &windowName)
+    {
+        cv::Mat imgDraw = CurrentFrame.imgLeftRGB.clone();
+        if (imgDraw.channels() == 1)
+            cv::cvtColor(imgDraw, imgDraw, cv::COLOR_GRAY2BGR);
+        for (size_t i = 0; i < CurrentFrame.mvKeyLines.size(); ++i)
+        {
+            const auto &kl = CurrentFrame.mvKeyLines[i];
+            cv::Point2f sp(kl.startPointX, kl.startPointY);
+            cv::Point2f ep(kl.endPointX, kl.endPointY);
+            //=== 蓝色线段（当前帧检测线）
+            cv::line(imgDraw, sp, ep, cv::Scalar(255, 0, 0), 1, cv::LINE_AA);
+            cv::putText(imgDraw, std::to_string(i), sp, cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(255, 255, 255), 1);
+            //=== 如果有对应 MapLine，画红色投影线段
+            MapLine* pML = CurrentFrame.mvpMapLines[i];
+            if (pML && !pML->isBad())
+            {
+                cv::Point2f p1_proj(pML->mLsTrackProjX, pML->mLsTrackProjY);
+                cv::Point2f p2_proj(pML->mLeTrackProjX, pML->mLeTrackProjY);
+                // 红线：地图线投影位置
+                cv::line(imgDraw, p1_proj, p2_proj, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+                // 绿色点：端点投影位置
+                cv::circle(imgDraw, p1_proj, 3, cv::Scalar(0, 255, 0), -1);
+                cv::circle(imgDraw, p2_proj, 3, cv::Scalar(0, 255, 0), -1);
+                // 浅蓝线：连接检测线和投影线端点
+                cv::line(imgDraw, sp, p1_proj, cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
+                cv::line(imgDraw, ep, p2_proj, cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
+            }
+        }
+        cv::imshow(windowName, imgDraw);
+        cv::waitKey(0);
+    }
 
     // int LSDmatcher::SearchByProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)
     // {

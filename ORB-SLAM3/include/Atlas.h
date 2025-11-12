@@ -295,10 +295,10 @@ public:
     std::vector<MapPoint*> GetReferenceMapPoints();
     std::unordered_set<unsigned long> GetCurrentKeyFrameIds();
 
-    //Method for get all maps in the atlas
     std::vector<MapLine*> GetAllMapLines();  //added for MapLine
     std::vector<MapLine*> GetReferenceMapLines();  //added for MapLine
 
+    //Method for get all maps in the atlas
     vector<Map*> GetAllMaps();
 
     int CountMaps();

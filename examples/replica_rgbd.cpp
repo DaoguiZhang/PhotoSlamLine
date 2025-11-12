@@ -168,7 +168,8 @@ int main(int argc, char **argv)
             //set line flag
         }
          // Pass the image to the SLAM system
-        pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        //pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        pSLAM->TrackRGBDWithLine(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
        
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
