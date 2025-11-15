@@ -1,6 +1,9 @@
 # Photo-SLAM_LINE
 
 使用线段特征的Photo-slam,它更具有稳定性以及渲染效果更好。插入demo如下：
+![Demo](videos/output.gif)
+
+具体的视频demo，可以查看demo下文件，后续再考虑转化视频链接的方式。
 
 ## Prerequisites
 
