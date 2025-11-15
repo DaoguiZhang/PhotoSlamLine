@@ -237,18 +237,4 @@ Finally, you are supposed to get two files including `RESULTS_PATH/log.txt` and 
 </details>
 
 
-## Photo-SLAM Examples with Real Cameras
 
-We provide an example with the Intel RealSense D455 at `examples/realsense_rgbd.cpp`. Please see `scripts/realsense_d455.sh` for running it.
-
-
-
-
-
-<h3>Citation</h3>
-			<pre class="citation-code"><code><span>@inproceedings</span>{hhuang2024photoslam,
-	title = {Photo-SLAM: Real-time Simultaneous Localization and Photorealistic Mapping for Monocular, Stereo, and RGB-D Cameras},
-	author = {Huang, Huajian and Li, Longwei and Cheng Hui and Yeung, Sai-Kit},
-	booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-	year = {2024}
-}</code></pre>
