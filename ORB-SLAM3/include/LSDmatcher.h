@@ -61,6 +61,7 @@ namespace ORB_SLAM3
         void DebugSearchByProjectionNew(Frame &CurrentFrame,const Frame &LastFrame, const std::string &windowName);
         void DebugDrawLineMatches(const Frame &lastFrame, const Frame &currentFrame);
         void DebugDrawLineMatchesFrame(Frame &CurrentFrame, std::string &windowName);
+        void DebugSearchByProjectionLinesMatch(Frame &F, std::vector<MapLine*> &vpMapLines,const std::string &windowName);
         void DebugDrawProjectedLineFrame(Frame &CurrentFrame, std::string &windowName);
         int SearchByProjection(KeyFrame* pKF,Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
         void DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame);
@@ -71,7 +72,9 @@ namespace ORB_SLAM3
         int SearchBySim3(KeyFrame* pKF1, KeyFrame* pKF2, std::vector<MapLine *> &vpMatches12, const float &s12, const cv::Mat &R12, const cv::Mat &t12, const float th);
         int SerachForInitialize(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int,int>> &LineMatches);
         int SerachForInitializeCV(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int, int>> &LineMatches); //use OpenCV functions
-        int SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<size_t, size_t>> &vMatchedPairs);
+        int SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<int, int>> &vMatchedPairs);
+        void SearchForTriangulationLine(KeyFrame *pKF1, KeyFrame *pKF2,vector<pair<int,int>> &vMatchedIdx);
+        int SearchForTriangulationFused(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<int, int>> &vMatchedPairs);
 
         // Project MapLines into KeyFrame and search for duplicated MapLines
         int Fuse(KeyFrame* pKF, const std::vector<MapLine *> &vpMapLines, const float th=3.0);

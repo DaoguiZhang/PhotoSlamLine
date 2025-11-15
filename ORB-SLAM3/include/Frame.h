@@ -130,6 +130,7 @@ public:
     // and fill variables of the MapPoint to be used by the tracking
     //bool isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight=false);
     bool isLineInFrustum(MapLine* pML, float viewingCosLimit);
+    bool isLineInFrustumOld(MapLine* pML, float viewingCosLimit);
 
     bool ProjectPointDistort(MapPoint* pMP, cv::Point2f &kp, float &u, float &v);
 
@@ -162,6 +163,7 @@ public:
     void ComputeStereoFromRGBD(const cv::Mat &imDepth);
     // Associate a "right" coordinate to a keyline if there is valid depth in the depthmap.
     void ComputeLineStereoFromRGBD(const cv::Mat &imDepth);
+    void ComputeLineStereoFromRGBDNew(const cv::Mat &imDepth);
     void ExportRGBDDepthAndLinesToOBJ(const cv::Mat &imDepth, const std::string &filename);
 
     // Backprojects a keypoint (if stereo/depth info available) into 3D world coordinates.

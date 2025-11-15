@@ -47,6 +47,10 @@ namespace ORB_SLAM3
         // Used to track the local map (Tracking)
         int SearchByProjection(Frame &F, const std::vector<MapPoint*> &vpMapPoints, const float th=3, const bool bFarPoints = false, const float thFarPoints = 50.0f);
 
+        void DebugProjectMapPoints(Frame &F,const std::vector<MapPoint*> &vpMapPoints,const std::string &windowName);
+
+        void DebugSearchByProjectionPointsMatch(Frame &F,const std::vector<MapPoint*> &vpMapPoints,const std::string &windowName);
+
         void DebugPointProjectionDual(Frame &F, const std::vector<MapPoint*> &vpMapPoints, const std::string &winName2D = "Point Projection Debug", const std::string &winName3D = "3D Point View");
 
         // Project MapPoints tracked in last frame into the current frame and search matches.

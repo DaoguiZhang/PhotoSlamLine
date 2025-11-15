@@ -780,7 +780,6 @@ Eigen::Vector3f Frame::GetRelativePoseTlr_translation() {
     return mTlr.translation();
 }
 
-
 bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
 {
     if(Nleft == -1){
@@ -857,60 +856,100 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
     }
 }
 
-// bool Frame::isLineInFrustum(MapLine* pML, float minLengthPixels, bool bRight)
-// {
-//     if(Nleft == -1){
-//         pML->mbLineTrackInView = false;
-//         pML->mLsTrackProjX = -1;
-//         pML->mLsTrackProjY = -1;
-//         pML->mLeTrackProjX = -1;
-//         pML->mLeTrackProjY = -1;
-//         Eigen::Vector3f P1 = pML->GetLineWorldPos().first;
-//         Eigen::Vector3f P2 = pML->GetLineWorldPos().second;
-//         // 3D in camera coordinates
-//         const Eigen::Matrix<float,3,1> Pc1 = mRcw * P1 + mtcw;
-//         const Eigen::Matrix<float,3,1> Pc2 = mRcw * P2 + mtcw;
-//         // 深度检查
-//         if(Pc1(2) <= 0 || Pc2(2) <= 0)
-//             return false;
-//         // 投影到图像
-//         Eigen::Vector2f uv1 = mpCamera->project(Pc1);
-//         Eigen::Vector2f uv2 = mpCamera->project(Pc2);
-//         // 裁剪到图像边界
-//         Eigen::Vector2f uv1_clip = uv1;
-//         Eigen::Vector2f uv2_clip = uv2;
-//         uv1_clip(0) = std::min(std::max(uv1(0), mnMinX), mnMaxX);
-//         uv1_clip(1) = std::min(std::max(uv1(1), mnMinY), mnMaxY);
-//         uv2_clip(0) = std::min(std::max(uv2(0), mnMinX), mnMaxX);
-//         uv2_clip(1) = std::min(std::max(uv2(1), mnMinY), mnMaxY);
-//         // 投影长度判断
-//         float lenImg = (uv2_clip - uv1_clip).norm();
-//         if(lenImg < minLengthPixels)
-//             return false;
-//         // 预测尺度
-//         Eigen::Vector3f PcCenter = (Pc1 + Pc2) * 0.5f;
-//         float dist = (PcCenter - mOw).norm();
-//         int nPredictedLevel = pML->PredictScale(dist, this);
-//          // Data used by the tracking
-//         pML->mbLineTrackInView = true;
-//         pML->mLsTrackProjX = uv1(0);
-//         pML->mLsTrackProjY = uv1(1);
-//         pML->mLeTrackProjX = uv2(0);
-//         pML->mLeTrackProjY = uv2(1);
-//         //pMP->mTrackProjXR = uv(0) - mbf*invz;
-//         pML->mLineTrackDepth = dist;    //MEAN point
-//         pML->mnLineTrackScaleLevel= nPredictedLevel;
-//         return true;
-//     }
-//     else
-//     {
-//         //TO DO next...
-//     }
-//     return true;
-// }
-
 
 bool Frame::isLineInFrustum(MapLine* pML, float viewingCosLimit)
+{
+    // 初始化
+    pML->mbLineTrackInView = false;
+
+    // === 相机内参 ===
+    const Eigen::Matrix3f K = mpCamera->toK_();
+    const float fx = K(0,0), fy = K(1,1);
+    const float cx = K(0,2), cy = K(1,2);
+    const float xmin = mnMinX, xmax = mnMaxX;
+    const float ymin = mnMinY, ymax = mnMaxY;
+    const float EPS_Z = 1e-3f;
+
+    // === 世界坐标系下的端点 ===
+    const Eigen::Vector3f P1w = pML->GetLineWorldPos().first;
+    const Eigen::Vector3f P2w = pML->GetLineWorldPos().second;
+
+    // === 转换到相机坐标系 ===
+    Eigen::Vector3f P1c = mRcw * P1w + mtcw;
+    Eigen::Vector3f P2c = mRcw * P2w + mtcw;
+
+    // === 两端都在相机后方则不可见 ===
+    if (P1c.z() <= EPS_Z && P2c.z() <= EPS_Z)
+        return false;
+
+    Eigen::Vector3f d = P2c - P1c; // parametric direction
+    float t0 = 0.0f, t1 = 1.0f;
+
+    auto clipPlane = [&](float A, float B, float &t0, float &t1) -> bool {
+        // A * t + B >= 0
+        if (fabs(A) < 1e-9f) return B >= 0;
+        float t = -B / A;
+        if (A > 0) { // entering plane
+            if (t > t1) return false;
+            if (t > t0) t0 = t;
+        } else { // leaving plane
+            if (t < t0) return false;
+            if (t < t1) t1 = t;
+        }
+        return t0 <= t1;
+    };
+
+    auto makeAB = [&](float f, float c, float bound, float X1, float dX, float Z1, float dZ) {
+        float A = f * dX + (c - bound) * dZ;
+        float B = f * X1 + (c - bound) * Z1;
+        return std::pair<float,float>(A,B);
+    };
+
+    // --- 近平面 (Z >= EPS_Z)
+    if (!clipPlane(d.z(), P1c.z() - EPS_Z, t0, t1)) return false;
+
+    // --- 左边界 fx*X + cx*Z >= xmin*Z
+    { auto [A,B] = makeAB(fx, cx, xmin, P1c.x(), d.x(), P1c.z(), d.z());
+      if (!clipPlane(A,B,t0,t1)) return false; }
+
+    // --- 右边界 fx*X + cx*Z <= xmax*Z
+    { auto [A,B] = makeAB(fx, cx, xmax, P1c.x(), d.x(), P1c.z(), d.z());
+      if (!clipPlane(-A,-B,t0,t1)) return false; }
+
+    // --- 下边界 fy*Y + cy*Z >= ymin*Z
+    { auto [A,B] = makeAB(fy, cy, ymin, P1c.y(), d.y(), P1c.z(), d.z());
+      if (!clipPlane(A,B,t0,t1)) return false; }
+
+    // --- 上边界 fy*Y + cy*Z <= ymax*Z
+    { auto [A,B] = makeAB(fy, cy, ymax, P1c.y(), d.y(), P1c.z(), d.z());
+      if (!clipPlane(-A,-B,t0,t1)) return false; }
+
+    if (t0 > t1) return false;
+
+    // === 裁剪后端点 ===
+    Eigen::Vector3f Pc1 = P1c + t0 * d;
+    Eigen::Vector3f Pc2 = P1c + t1 * d;
+    if (Pc1.z() <= EPS_Z || Pc2.z() <= EPS_Z) return false;
+
+    // === 投影到像素坐标 ===
+    Eigen::Vector2f uv1 = mpCamera->project(Pc1);
+    Eigen::Vector2f uv2 = mpCamera->project(Pc2);
+
+    // === 存储结果 ===
+    pML->mbLineTrackInView = true;
+    pML->mLsTrackProjX = uv1.x();
+    pML->mLsTrackProjY = uv1.y();
+    pML->mLeTrackProjX = uv2.x();
+    pML->mLeTrackProjY = uv2.y();
+    pML->mLineTrackDepth = 0.5f * (Pc1.z() + Pc2.z());
+    pML->mnLineTrackScaleLevel = pML->PredictScale(pML->mLineTrackDepth, this);
+
+    return true;
+}
+
+
+// Original simpler version 没有裁剪
+bool Frame::isLineInFrustumOld(MapLine* pML, float viewingCosLimit)
 {
     pML->mbLineTrackInView = false;
     pML->mLsTrackProjX = -1;
@@ -953,15 +992,15 @@ bool Frame::isLineInFrustum(MapLine* pML, float viewingCosLimit)
             return false; // 整条线在外侧
     }
 
-    // --- 视角一致性 ---
+    // --- 视角一致性 ---(这个有问题，暂且不管它)
     Eigen::Vector3f lineDir = P2w - P1w;
     Eigen::Vector3f lineCenter = 0.5f * (P1w + P2w);
     Eigen::Vector3f normal = lineCenter - mOw;
     float dist = normal.norm();
     normal /= dist;
     float viewCos = normal.dot(lineDir.normalized());
-    if (std::fabs(viewCos) < viewingCosLimit)
-        return false;
+    // if (std::fabs(viewCos) < viewingCosLimit)
+    //     return false;
 
     int nPredictedLevel = pML->PredictScale(dist, this);
 
@@ -2042,6 +2081,241 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
         mvLineDepthConfidence[i] = 0.5f*(conf1 + conf2);
     }
 }
+
+void Frame::ComputeLineStereoFromRGBDNew(const cv::Mat &imDepth)
+{
+    // 依赖假设（请确保 Frame 成员存在并命名一致）：
+    // NL, mvKeyLinesUn (cv::line_descriptor::KeyLine vector), mbf (float), mpCamera->toK_() -> Eigen::Matrix3f
+    const int rows = imDepth.rows;
+    const int cols = imDepth.cols;
+    mvuLineRight = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
+    mvLineDepth  = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
+    std::vector<std::pair<float,float>> mvLineDepthConfidenceEndpoints(NL, {0.0f,0.0f});
+    mvLineDepthConfidence = std::vector<float>(NL, 0.0f);
+
+    const float minDepth = 0.05f;    // 更小阈值，视设备可调
+    const float maxDepth = 10.0f;
+    const int nSamples = 16;         // 每条线段采样点数
+    const float clusterRatioThreshold = 0.25f; // cluster 差异判定阈值（相对）
+    const float planeResidualThresh = 0.02f;   // 平面拟合残差容忍（单位: 米）
+    const float endpointFallbackConf = 0.4f;   // 端点回退置信度基础
+    // 摄像机内参
+    Eigen::Matrix3f K = mpCamera->toK_();
+    const float fx = K(0,0), fy = K(1,1), cx = K(0,2), cy = K(1,2);
+    for (int i = 0; i < NL; ++i)
+    {
+        const auto &kl = mvKeyLinesUn[i];
+        float u1 = kl.startPointX, v1 = kl.startPointY;
+        float u2 = kl.endPointX,   v2 = kl.endPointY;
+        // boundary
+        if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
+            u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
+            continue;
+        // --- 1) 沿线段采样深度 ---
+        std::vector<float> samples;
+        std::vector<Eigen::Vector2f> samplePixels;
+        samples.reserve(nSamples);
+        samplePixels.reserve(nSamples);
+
+        for (int s = 0; s < nSamples; ++s)
+        {
+            float t = (nSamples==1) ? 0.5f : float(s) / float(nSamples - 1);
+            float u = u1 * (1.0f - t) + u2 * t;
+            float v = v1 * (1.0f - t) + v2 * t;
+            int uu = cvRound(u), vv = cvRound(v);
+            if (uu < 0 || uu >= cols || vv < 0 || vv >= rows) continue;
+            float d = imDepth.at<float>(vv, uu);
+            if (d > minDepth && d < maxDepth)
+            {
+                samples.push_back(d);
+                samplePixels.emplace_back(u, v);
+            }
+        }
+        // 如果采样点太少，退回端点策略（你的原始实现）
+        if (samples.size() < 3)
+        {
+            // 使用端点深度（如果存在）
+            float dA = imDepth.at<float>(cvRound(v1), cvRound(u1));
+            float dB = imDepth.at<float>(cvRound(v2), cvRound(u2));
+            bool validA = (dA > minDepth && dA < maxDepth);
+            bool validB = (dB > minDepth && dB < maxDepth);
+
+            float Z1 = validA ? dA : -1.0f;
+            float Z2 = validB ? dB : -1.0f;
+            float conf1 = validA ? endpointFallbackConf : 0.0f;
+            float conf2 = validB ? endpointFallbackConf : 0.0f;
+
+            // 如果只有一端有效，用该端近似整条线
+            if (!validA && validB) { Z1 = Z2; conf1 = conf2 * 0.8f; }
+            else if (!validB && validA) { Z2 = Z1; conf2 = conf1 * 0.8f; }
+
+            // 写回
+            mvLineDepth[i] = {Z1, Z2};
+            mvuLineRight[i] = {(Z1>0)? (u1 - mbf/Z1) : -1.0f, (Z2>0)? (u2 - mbf/Z2) : -1.0f};
+            mvLineDepthConfidenceEndpoints[i] = {conf1, conf2};
+            mvLineDepthConfidence[i] = 0.5f*(conf1 + conf2);
+            continue;
+        }
+
+        // --- 2) KMeans (K=2) 聚类深度样本 ---
+        cv::Mat samplesMat((int)samples.size(), 1, CV_32F);
+        for (size_t s=0; s<samples.size(); ++s) samplesMat.at<float>((int)s,0) = samples[s];
+
+        // 首先尝试 K=2
+        cv::Mat labels, centers;
+        int Kk = 2;
+        cv::kmeans(samplesMat, Kk, labels,
+                   cv::TermCriteria(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, 50, 1e-4),
+                   3, cv::KMEANS_PP_CENTERS, centers);
+        float mean0 = centers.at<float>(0,0), mean1 = centers.at<float>(1,0);
+        float meanMin = std::min(mean0, mean1), meanMax = std::max(mean0, mean1);
+        float clusterRatio = (meanMax - meanMin) / meanMin; // 相对差异
+        // --- 3) 判断单平面还是前景+背景 ---
+        bool twoClustersSignificant = (clusterRatio > clusterRatioThreshold);
+        float chosenDepth = -1.0f; // 将作为整条线的代表深度（若需要）
+        float conf_end_A = 0.0f, conf_end_B = 0.0f;
+        if (!twoClustersSignificant)
+        {
+            // 单平面：取所有样本的中位数或均值更鲁棒
+            std::nth_element(samples.begin(), samples.begin() + samples.size()/2, samples.end());
+            float median = samples[samples.size()/2];
+            chosenDepth = median;
+
+            // endpoints depth by sampling nearest sample to each endpoint
+            // 简单计算端点对应像素最接近采样点深度平均
+            conf_end_A = conf_end_B = 0.9f; // 高置信度（之后可由 planeResidual 调整）
+        }
+        else
+        {
+            // 前景 + 背景：前景取近处 cluster（mean smaller）
+            float fgMean = meanMin;
+            float bgMean = meanMax;
+            // 得到每类的样本个数与方差作为置信度依据
+            int count0 = 0, count1 = 0;
+            double var0 = 0.0, var1 = 0.0;
+            for (int s=0;s<labels.rows;++s)
+            {
+                if (labels.at<int>(s,0) == 0) { count0++; var0 += std::pow(samples[s] - mean0, 2); }
+                else { count1++; var1 += std::pow(samples[s] - mean1, 2); }
+            }
+            var0 = (count0>1) ? (var0 / count0) : 1e-6;
+            var1 = (count1>1) ? (var1 / count1) : 1e-6;
+            // 选择前景 cluster（较小 mean）
+            int fgLabel = (mean0 < mean1) ? 0 : 1;
+            chosenDepth = (fgLabel == 0) ? mean0 : mean1;
+            // 置信度结合 cluster 大小与方差：越多点且方差越小 → 置信更高
+            double cnt = std::max(1, count0 + count1);
+            double fgCount = (fgLabel==0) ? count0 : count1;
+            double fgVar = (fgLabel==0) ? var0 : var1;
+            double w_fg = (fgCount / cnt) * (1.0 / (1.0 + fgVar)); // 0..1 范围近似
+            float baseConf = std::min(0.95f, std::max(0.2f, float(w_fg))); // 限制在 [0.2,0.95]
+            // 给端点置信度，一个端点靠近前景 cluster 则置信度高
+            // 找每个端点在 samplePixels 中最近样本的 label
+            auto nearestLabelFor = [&](float uu, float vv)->int{
+                int best = -1;
+                float bestd = 1e9;
+                for (size_t s=0;s<samplePixels.size();++s)
+                {
+                    float du = samplePixels[s][0]-uu, dv = samplePixels[s][1]-vv;
+                    float dist2 = du*du + dv*dv;
+                    if (dist2 < bestd) { bestd = dist2; best = labels.at<int>((int)s,0); }
+                }
+                return best;
+            };
+            int labA = nearestLabelFor(u1, v1);
+            int labB = nearestLabelFor(u2, v2);
+            conf_end_A = (labA == fgLabel) ? baseConf : baseConf * 0.4f;
+            conf_end_B = (labB == fgLabel) ? baseConf : baseConf * 0.4f;
+        }
+        // --- 4) 用样本点反投影成 3D，做平面拟合（PCA）以获得几何一致性评分 ---
+        std::vector<Eigen::Vector3f> pts3d;
+        pts3d.reserve(samplePixels.size());
+        for (size_t s=0;s<samplePixels.size();++s)
+        {
+            float Z = samples[s];
+            float u = samplePixels[s][0], v = samplePixels[s][1];
+            float X = (u - cx) * Z / fx;
+            float Y = (v - cy) * Z / fy;
+            pts3d.emplace_back(X, Y, Z);
+        }
+        // PCA 平面拟合：计算残差（点到拟合平面的 RMS）
+        float planeResidual = 1e6f;
+        if (pts3d.size() >= 3)
+        {
+            Eigen::Vector3f centroid(0,0,0);
+            for (auto &p: pts3d) centroid += p;
+            centroid /= float(pts3d.size());
+            Eigen::Matrix3f cov = Eigen::Matrix3f::Zero();
+            for (auto &p: pts3d)
+            {
+                Eigen::Vector3f q = p - centroid;
+                cov += q * q.transpose();
+            }
+            cov /= float(pts3d.size());
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(cov);
+            Eigen::Vector3f evals = solver.eigenvalues();
+            Eigen::Matrix3f evecs = solver.eigenvectors();
+            // 最小特征值方向为法向量，残差可用最小特征值开方近似
+            float smallestEval = std::max(0.0f, float(evals[0]));
+            planeResidual = std::sqrt(smallestEval);
+        }
+
+        // 基于平面残差和线检测响应，调整置信度
+        float edgeResponse = std::min(1.0f, std::max(0.0f, kl.response)); // 假设 response 已归一（若未归一，可能需要缩放）
+        float planeScore = (planeResidual < planeResidualThresh) ? 1.0f : std::max(0.0f, 1.0f - planeResidual / (planeResidual + 0.1f));
+        // 最终端点置信度融合：图像响应 * planeScore * 基础置信度
+        conf_end_A *= (0.4f + 0.6f * edgeResponse) * planeScore;
+        conf_end_B *= (0.4f + 0.6f * edgeResponse) * planeScore;
+
+        // 若 chosenDepth 非法（理论上不应），则回退
+        if (!(chosenDepth > 0.0f)) chosenDepth = (pts3d.empty() ? -1.0f : pts3d[0].z());
+
+        // --- 5) 写回结果：端点深度（两端尽量给出）以及右图坐标 ---
+        // 为了兼容原接口，尽量给两端深度：如果聚类识别为前景+背景，则用 chosenDepth 作为近端深度，另一端保留原端点采样均值或设为 -1
+        float Z1_out = -1.0f, Z2_out = -1.0f;
+        // 简单策略：将两端深度分别设为 nearest sample depth to endpoint, 若该端不属于 fg cluster 则用 chosenDepth for near-case
+        // 找最近样本索引
+        auto nearestDepthTo = [&](float uu, float vv)->float {
+            float bestd = 1e9; int besti = -1;
+            for (size_t s=0;s<samplePixels.size();++s)
+            {
+                float du = samplePixels[s][0]-uu, dv = samplePixels[s][1]-vv;
+                float dist2 = du*du + dv*dv;
+                if (dist2 < bestd) { bestd = dist2; besti = (int)s; }
+            }
+            return (besti>=0) ? samples[besti] : -1.0f;
+        };
+
+        float nearA = nearestDepthTo(u1, v1);
+        float nearB = nearestDepthTo(u2, v2);
+        if (twoClustersSignificant)
+        {
+            // 主观策略：两端都给出近端深度（chosenDepth）以便后续匹配使用
+            Z1_out = (nearA>0) ? nearA : chosenDepth;
+            Z2_out = (nearB>0) ? nearB : chosenDepth;
+            // 但降低非前景端的置信度已在 conf_end_* 中处理
+        }
+        else
+        {
+            // 单平面场景，使用 chosenDepth 作为两端深度近似
+            Z1_out = Z2_out = chosenDepth;
+        }
+
+        // 右图 u 坐标（stereo）: uR = u - mbf / Z
+        float uR1 = (Z1_out>0) ? (u1 - mbf / Z1_out) : -1.0f;
+        float uR2 = (Z2_out>0) ? (u2 - mbf / Z2_out) : -1.0f;
+
+        mvLineDepth[i] = {Z1_out, Z2_out};
+        mvuLineRight[i] = {uR1, uR2};
+        mvLineDepthConfidenceEndpoints[i] = {conf_end_A, conf_end_B};
+        mvLineDepthConfidence[i] = 0.5f*(conf_end_A + conf_end_B);
+    }
+
+    // 最后把端点置信度数组存回成员（如果你希望保留名字相同）
+    // 假设 Frame 有成员 mvLineDepthConfidenceEndpoints
+    //this->mvLineDepthConfidenceEndpoints = mvLineDepthConfidenceEndpoints;
+}
+
 
 
 // void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)

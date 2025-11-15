@@ -65,4 +65,56 @@ bool GeometricTools::Triangulate(Eigen::Vector3f &x_c1, Eigen::Vector3f &x_c2,Ei
     return true;
 }
 
+Eigen::Vector4f GeometricTools::ComputeLinePlane(
+        const Eigen::Vector3f& x1,
+        const Eigen::Vector3f& x2,
+        const Eigen::Vector3f& Ow)
+{
+    Eigen::Vector3f n = x1.cross(x2).normalized();
+    float d = -n.dot(Ow);
+    return Eigen::Vector4f(n(0), n(1), n(2), d);
+}
+
+bool GeometricTools::IntersectPlanes(
+        const Eigen::Vector4f& p1,
+        const Eigen::Vector4f& p2,
+        Eigen::Vector3f& point,
+        Eigen::Vector3f& dir)
+{
+    Eigen::Vector3f n1 = p1.head<3>();
+    Eigen::Vector3f n2 = p2.head<3>();
+
+    dir = n1.cross(n2);
+    if (dir.norm() < 1e-6)
+        return false;
+
+    Eigen::Matrix3f A;
+    A.row(0) = n1;
+    A.row(1) = n2;
+    A.row(2) = dir;
+
+    Eigen::Vector3f b(-p1[3], -p2[3], 0);
+
+    point = A.colPivHouseholderQr().solve(b);
+    return true;
+}
+
+Eigen::Vector3f GeometricTools::ProjectRayToLine(
+        const Eigen::Vector3f& rayDir,
+        const Eigen::Vector3f& camCenter,
+        const Eigen::Vector3f& linePoint,
+        const Eigen::Vector3f& lineDir)
+{
+    Eigen::Vector3f w0 = camCenter - linePoint;
+    Eigen::Vector3f a = lineDir.cross(rayDir);
+    float denom = a.squaredNorm();
+
+    if (denom < 1e-6)
+        return linePoint;
+
+    float t = a.dot(lineDir.cross(w0)) / denom;
+    return linePoint + t * lineDir;
+}
+
+
 } //namespace ORB_SLAM

@@ -758,53 +758,82 @@ namespace ORB_SLAM3
         return nmatches;
     }
     
-    int LSDmatcher::SearchByProjection(KeyFrame* pKF,Frame &currentF, vector<MapLine*> &vpMapLineMatches)
+    // int LSDmatcher::SearchByProjection(KeyFrame* pKF,Frame &currentF, vector<MapLine*> &vpMapLineMatches)
+    // {
+    //     const std::vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
+    //     vpMapLineMatches = std::vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
+    //     int nmatches = 0;
+    //     if(currentF.NL==0 || pKF->NL==0)
+    //         return 0;
+    //     cv::BFMatcher bfm(cv::NORM_HAMMING, false);
+    //     cv::Mat ldesc1, ldesc2;
+    //     std::vector<std::vector<cv::DMatch>> lmatches;
+    //     ldesc1 = pKF->mLineDescriptors;
+    //     ldesc2 = currentF.mLineDescriptors;
+    //     //bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
+    //     bfm.knnMatch(ldesc1, ldesc2, lmatches, 2);
+    //     if (lmatches.empty())
+    //         return 0;
+    //     double nn_dist_th, nn12_dist_th;
+    //     const float minRatio=1.0f/1.5f;
+    //     currentF.lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
+    //     nn12_dist_th = nn12_dist_th*0.5;
+    //     std::sort(lmatches.begin(), lmatches.end(), LSDmatcher::sortByQueryIdx);
+    //     for(int i=0; i<lmatches.size(); i++)
+    //     {
+    //         //lmatches里装的 是匹配的编号，
+    //         int qdx = lmatches[i][0].queryIdx;
+    //         int tdx = lmatches[i][0].trainIdx;
+    //         double dist_12 = lmatches[i][0].distance/lmatches[i][1].distance;
+    //         //if(dist_12>nn12_dist_th)
+    //         if(dist_12<minRatio)
+    //         {
+    //             MapLine* mapLine = vpMapLinesKF[qdx];
+    //             if(mapLine)
+    //             {
+    //                 //cout<<"qdx and tdx"<<qdx<<","<<tdx<<endl;
+    //                 vpMapLineMatches[tdx]=mapLine;
+    //                 nmatches++;
+    //             }
+    //         }
+    //     }
+    //     return nmatches;
+    // }
+
+    int LSDmatcher::SearchByProjection(KeyFrame* pKF, Frame &currentF, vector<MapLine*> &vpMapLineMatches)
     {
-        const std::vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
-
-        vpMapLineMatches = std::vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
-
-        int nmatches = 0;
-        if(currentF.NL==0 || pKF->NL==0)
+        if(currentF.NL == 0 || pKF->NL == 0)
             return 0;
 
-        cv::BFMatcher bfm(cv::NORM_HAMMING, false);
-        cv::Mat ldesc1, ldesc2;
+        const auto& vpMapLinesKF = pKF->GetMapLineMatches();
+        vpMapLineMatches.assign(currentF.NL, nullptr);
+
+        // 1. 描述子匹配
+        cv::BFMatcher matcher(cv::NORM_HAMMING, false);
         std::vector<std::vector<cv::DMatch>> lmatches;
-        ldesc1 = pKF->mLineDescriptors;
-        ldesc2 = currentF.mLineDescriptors;
-        //bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
-        bfm.knnMatch(ldesc1, ldesc2, lmatches, 2);
-
-        if (lmatches.empty())
+        matcher.knnMatch(pKF->mLineDescriptors, currentF.mLineDescriptors, lmatches, 2);
+        if(lmatches.empty())
             return 0;
-
-        double nn_dist_th, nn12_dist_th;
-        const float minRatio=1.0f/1.5f;
-        currentF.lineDescriptorMAD(lmatches, nn_dist_th, nn12_dist_th);
-        nn12_dist_th = nn12_dist_th*0.5;
+        // 2. Ratio test
+        const float minRatio = 1.0f / 1.5f;
         std::sort(lmatches.begin(), lmatches.end(), LSDmatcher::sortByQueryIdx);
-        for(int i=0; i<lmatches.size(); i++)
+        int nmatches = 0;
+        for(const auto& matchPair : lmatches)
         {
-            //lmatches里装的 是匹配的编号，
-            int qdx = lmatches[i][0].queryIdx;
-            int tdx = lmatches[i][0].trainIdx;
-            double dist_12 = lmatches[i][0].distance/lmatches[i][1].distance;
-            //if(dist_12>nn12_dist_th)
-            if(dist_12<minRatio)
+            const cv::DMatch& m0 = matchPair[0];
+            const cv::DMatch& m1 = matchPair[1];
+            if(m0.distance / m1.distance >= minRatio)
+                continue;
+            MapLine* mapLine = vpMapLinesKF[m0.queryIdx];
+            if(mapLine)
             {
-                MapLine* mapLine = vpMapLinesKF[qdx];
-                if(mapLine)
-                {
-                    //cout<<"qdx and tdx"<<qdx<<","<<tdx<<endl;
-                    vpMapLineMatches[tdx]=mapLine;
-                    nmatches++;
-                }
-
+                vpMapLineMatches[m0.trainIdx] = mapLine;
+                nmatches++;
             }
         }
         return nmatches;
     }
+
 
     void LSDmatcher::DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame)
     {
@@ -989,7 +1018,7 @@ namespace ORB_SLAM3
             //std::cerr << "  Search Area Center: (" << u_mean << ", " << v_mean << "), Radius: " << r * F.mvScaleFactors[nPredictLevel] << std::endl;
 
             std::vector<size_t> vIndices =
-                F.GetLinesInAreaMean(u_mean, v_mean, r * F.mvScaleFactors[nPredictLevel],
+                F.GetLinesInAreaMean(u_mean, v_mean, r * F.mvScaleFactors[nPredictLevel]*4,
                                 minLevel, maxLevel);
 
             if (vIndices.empty())
@@ -1040,6 +1069,87 @@ namespace ORB_SLAM3
             nmatches++;
         }
         return nmatches;
+    }
+
+    void LSDmatcher::DebugSearchByProjectionLinesMatch(
+        Frame &F,
+        std::vector<MapLine*> &vpMapLines,
+        const std::string &windowName)
+    {
+        cv::Mat imgDraw = F.imgLeftRGB.clone();
+        if (imgDraw.channels() == 1)
+            cv::cvtColor(imgDraw, imgDraw, cv::COLOR_GRAY2BGR);
+        const Sophus::SE3f Tcw = F.GetPose();  // 世界 -> 当前帧
+        int nProj = 0, nMatched = 0;
+        for (size_t iML = 0; iML < vpMapLines.size(); ++iML)
+        {
+            MapLine *pML = vpMapLines[iML];
+            if (!pML || pML->isBad() || !pML->mbLineTrackInView)
+                continue;
+            //=== 世界坐标 -> 相机坐标（线段两个端点）
+            Eigen::Vector3f P1w = pML->GetLineWorldPos().first;;
+            Eigen::Vector3f P2w = pML->GetLineWorldPos().second;
+            Eigen::Vector3f P1c = Tcw * P1w;
+            Eigen::Vector3f P2c = Tcw * P2w;
+            //=== 过滤无效深度
+            if (P1c[2] <= 0 || P2c[2] <= 0)
+                continue;
+            //=== 投影到像素坐标
+            Eigen::Vector2f uv1 = F.mpCamera->project(P1c);
+            Eigen::Vector2f uv2 = F.mpCamera->project(P2c);
+            //=== 过滤越界
+            if ((uv1[0] < 0 || uv1[0] >= imgDraw.cols || uv1[1] < 0 || uv1[1] >= imgDraw.rows) ||
+                (uv2[0] < 0 || uv2[0] >= imgDraw.cols || uv2[1] < 0 || uv2[1] >= imgDraw.rows))
+                continue;
+
+            nProj++;
+            cv::Point2f p1(uv1[0], uv1[1]);
+            cv::Point2f p2(uv2[0], uv2[1]);
+            //=== 绘制预测线段（红色）
+            cv::line(imgDraw, p1, p2, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+
+            //=== 查找匹配
+            bool bMatched = false;
+            int matchedIdx = -1;
+            for (size_t i = 0; i < F.mvpMapLines.size(); ++i)
+            {
+                if (F.mvpMapLines[i] == pML)
+                {
+                    bMatched = true;
+                    matchedIdx = i;
+                    break;
+                }
+            }
+            if (bMatched)
+            {
+                nMatched++;
+                const KeyLine &kl = F.mvKeyLines[matchedIdx];
+                cv::Point2f kp1 = kl.getStartPoint();
+                cv::Point2f kp2 = kl.getEndPoint();
+                //=== 绘制匹配到的线段（绿色）
+                cv::line(imgDraw, kp1, kp2, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+                //=== 连线连接预测与匹配（细线）
+                cv::line(imgDraw, (p1 + p2) * 0.5f, (kp1 + kp2) * 0.5f,
+                        cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                //=== 标号
+                cv::putText(imgDraw, std::to_string(iML),
+                            (p1 + p2) * 0.5f + cv::Point2f(3, -3),
+                            cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(255, 255, 255), 1);
+            }
+            else
+            {
+                // 未匹配到
+                cv::putText(imgDraw, "X",
+                            (p1 + p2) * 0.5f + cv::Point2f(3, -3),
+                            cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(0, 0, 255), 1);
+            }
+        }
+        std::cout << "[Debug-Line] 投影线段数: " << nProj
+                << " | 成功匹配: " << nMatched
+                << " | 失败: " << (nProj - nMatched) << std::endl;
+
+        cv::imshow(windowName, imgDraw);
+        cv::waitKey(0);
     }
 
 
@@ -1164,6 +1274,9 @@ namespace ORB_SLAM3
 
     int LSDmatcher::SearchByDescriptor(KeyFrame* pKF, Frame &currentF, vector<MapLine*> &vpMapLineMatches)
     {
+        if(currentF.NL==0 || pKF->NL==0)
+            return 0;
+
         const std::vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
 
         vpMapLineMatches = std::vector<MapLine*>(currentF.NL,static_cast<MapLine*>(NULL));
@@ -1176,7 +1289,7 @@ namespace ORB_SLAM3
         ldesc2 = currentF.mLineDescriptors;
         bfm->knnMatch(ldesc1, ldesc2, lmatches, 2);
 
-        std::cout<<"LSDMATCH:lmatches"<<lmatches.size()<<endl;
+        std::cout<<"Initial LSDMATCH:lmatches"<<lmatches.size()<<endl;
 
         double nn_dist_th, nn12_dist_th;
         const float minRatio=1.0f/1.5f;
@@ -1193,7 +1306,6 @@ namespace ORB_SLAM3
             if(dist_12<minRatio)
             {
                 MapLine* mapLine = vpMapLinesKF[qdx];
-
                 if(mapLine)
                 {
                     vpMapLineMatches[tdx]=mapLine;
@@ -1241,7 +1353,7 @@ namespace ORB_SLAM3
     }
 
      int LSDmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2,
-                                           std::vector<std::pair<size_t, size_t>> &vMatchedPairs)
+                                           std::vector<std::pair<int, int>> &vMatchedPairs)
     {
         vMatchedPairs.clear();
         int nmatches = 0;
@@ -1273,126 +1385,367 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    void LSDmatcher::SearchForTriangulationLine(
+        KeyFrame *pKF1, KeyFrame *pKF2,
+        vector<pair<int,int>> &vMatchedIdx)
+    {
+        vMatchedIdx.clear();
+        const auto &vLines1 = pKF1->mvKeyLines;
+        const auto &vLines2 = pKF2->mvKeyLines;
+        const int N1 = vLines1.size();
+        const int N2 = vLines2.size();
+        if (N1 == 0 || N2 == 0)
+            return;
+        // --- 预计算 KeyFrame2 的方向 ---
+        vector<Eigen::Vector2f> vDirs2(N2);
+        for (int i = 0; i < N2; i++)
+        {
+            Eigen::Vector2f d(
+                vLines2[i].endPointX - vLines2[i].startPointX,
+                vLines2[i].endPointY - vLines2[i].startPointY
+            );
+            vDirs2[i] = d.normalized();
+        }
+        const float cosAngleTh = cosf(20.f * M_PI / 180.f);
+        for (int i1 = 0; i1 < N1; i1++)
+        {
+            const auto &l1 = vLines1[i1];
+            Eigen::Vector2f d1(
+                l1.endPointX - l1.startPointX,
+                l1.endPointY - l1.startPointY);
+            d1.normalize();
+            Eigen::Vector2f s1(l1.startPointX, l1.startPointY);
+            Eigen::Vector2f e1(l1.endPointX,   l1.endPointY);
+            float bestDist = std::numeric_limits<float>::max();
+            int bestIdx = -1;
+            for (int i2 = 0; i2 < N2; i2++)
+            {
+            const auto &l2 = vLines2[i2];
+            // (1) 方向（允许反向）
+            float cosDir = fabs(d1.dot(vDirs2[i2]));
+            if (cosDir < cosAngleTh)
+                continue;
+            // (2) 长度比例
+            float len1 = l1.lineLength;
+            float len2 = l2.lineLength;
+            float lenDiff = fabs(len1 - len2) / std::max(len1, len2);
+            if (lenDiff > 0.5f)
+                continue;
+            // (3) 两种端点排列
+            Eigen::Vector2f s2(l2.startPointX, l2.startPointY);
+            Eigen::Vector2f e2(l2.endPointX,   l2.endPointY);
+            float dA = (s1 - s2).squaredNorm() + (e1 - e2).squaredNorm();
+            float dB = (s1 - e2).squaredNorm() + (e1 - s2).squaredNorm();
+            float dsum = std::min(dA, dB);
+            if (dsum < bestDist)
+            {
+                bestDist = dsum;
+                bestIdx = i2;
+            }
+        }
+        if (bestIdx >= 0)
+            vMatchedIdx.emplace_back(i1, bestIdx);
+        }
+    }
+
+    int LSDmatcher::SearchForTriangulationFused(
+        KeyFrame *pKF1, KeyFrame *pKF2,
+        std::vector<std::pair<int, int>> &vMatchedPairs)
+    {
+        vMatchedPairs.clear();
+        int nmatches = 0;
+        const auto &vLines1 = pKF1->mvKeyLines;
+        const auto &vLines2 = pKF2->mvKeyLines;
+        const int N1 = vLines1.size();
+        const int N2 = vLines2.size();
+        if (N1 == 0 || N2 == 0)
+            return 0;
+        // === 1. 预计算 KeyFrame2 的方向向量 ===
+        std::vector<Eigen::Vector2f> vDirs2(N2);
+        for (int i = 0; i < N2; i++)
+        {
+            Eigen::Vector2f d(
+                vLines2[i].endPointX - vLines2[i].startPointX,
+                vLines2[i].endPointY - vLines2[i].startPointY);
+            vDirs2[i] = d.normalized();
+        }
+        const float cosAngleTh = cosf(20.f * M_PI / 180.f);  // 最大方向差 20°
+        // === 2. 几何候选匹配 ===
+        std::vector<std::pair<int,int>> geomCandidates;
+        for (int i1 = 0; i1 < N1; i1++)
+        {
+            const auto &l1 = vLines1[i1];
+            Eigen::Vector2f d1(
+                l1.endPointX - l1.startPointX,
+                l1.endPointY - l1.startPointY);
+            d1.normalize();
+            Eigen::Vector2f s1(l1.startPointX, l1.startPointY);
+            Eigen::Vector2f e1(l1.endPointX,   l1.endPointY);
+            float bestDist = std::numeric_limits<float>::max();
+            int bestIdx = -1;
+            for (int i2 = 0; i2 < N2; i2++)
+            {
+                const auto &l2 = vLines2[i2];
+                // 方向允许反向
+                float cosDir = fabs(d1.dot(vDirs2[i2]));
+                if (cosDir < cosAngleTh)
+                    continue;
+                // 长度比例
+                float len1 = l1.lineLength;
+                float len2 = l2.lineLength;
+                float lenDiff = fabs(len1 - len2) / std::max(len1, len2);
+                if (lenDiff > 0.5f)
+                    continue;
+                // 两种端点排列
+                Eigen::Vector2f s2(l2.startPointX, l2.startPointY);
+                Eigen::Vector2f e2(l2.endPointX,   l2.endPointY);
+                float dA = (s1 - s2).squaredNorm() + (e1 - e2).squaredNorm();
+                float dB = (s1 - e2).squaredNorm() + (e1 - s2).squaredNorm();
+                float dsum = std::min(dA, dB);
+                if (dsum < bestDist)
+                {
+                    bestDist = dsum;
+                    bestIdx = i2;
+                }
+            }
+            if (bestIdx >= 0)
+                geomCandidates.emplace_back(i1, bestIdx);
+        }
+        if (geomCandidates.empty())
+            return 0;
+        // === 3. 描述子验证 ===
+        cv::BFMatcher bfm(cv::NORM_HAMMING, false);
+        std::vector<std::vector<cv::DMatch>> knnMatches;
+        cv::Mat ldesc1 = pKF1->mLineDescriptors;
+        cv::Mat ldesc2 = pKF2->mLineDescriptors;
+        bfm.knnMatch(ldesc1, ldesc2, knnMatches, 2);
+        // 计算 MAD 阈值
+        double nn_dist_th, nn12_dist_th;
+        pKF1->lineDescriptorMAD(knnMatches, nn_dist_th, nn12_dist_th);
+        nn12_dist_th *= 0.1; // 调整比例
+        // 候选集合筛选
+        for (auto &pair : geomCandidates)
+        {
+            int qdx = pair.first;
+            int tdx = pair.second;
+            if (pKF1->GetMapLine(qdx) || pKF2->GetMapLine(tdx))
+                continue;
+            // 找在 knnMatches 中对应的 trainIdx
+            for (auto &m : knnMatches[qdx])
+            {
+                if (m.trainIdx == tdx)
+                {
+                    if (knnMatches[qdx].size() > 1)
+                    {
+                        double dist12 = knnMatches[qdx][1].distance - knnMatches[qdx][0].distance;
+                        if (dist12 > nn12_dist_th)
+                        {
+                            vMatchedPairs.emplace_back(qdx, tdx);
+                            nmatches++;
+                        }
+                    }
+                    else
+                    {
+                        // 只有一个匹配时也保留
+                        vMatchedPairs.emplace_back(qdx, tdx);
+                        nmatches++;
+                    }
+                    break;
+                }
+            }
+        }
+        return nmatches;
+    }
+
+
+    // int LSDmatcher::Fuse(KeyFrame *pKF, const std::vector<MapLine *> &vpMapLines, const float th)
+    // {
+    //     Eigen::Matrix3f Rcw_eigen = pKF->GetRotation();
+    //     Eigen::Vector3f tcw_eigen = pKF->GetTranslation();
+    //     Eigen::Vector3f Ow_eigen = pKF->GetCameraCenter();
+    //     cv::Mat Rcw = Converter::toCvMat(Rcw_eigen);
+    //     cv::Mat tcw = (cv::Mat_<float>(3,1) << tcw_eigen(0), tcw_eigen(1), tcw_eigen(2));
+    //     const float &fx = pKF->fx;
+    //     const float &fy = pKF->fy;
+    //     const float &cx = pKF->cx;
+    //     const float &cy = pKF->cy;
+    //     int nFused = 0;
+    //     const int nLines = vpMapLines.size();
+    //     for(int iML = 0; iML < nLines; iML++)
+    //     {
+    //         MapLine* pML = vpMapLines[iML];
+    //         if(!pML || pML->isBad())
+    //             continue;
+    //         // 获取世界坐标线段端点
+    //         std::pair<Eigen::Vector3f, Eigen::Vector3f> lineWorldPos = pML->GetLineWorldPos();
+    //         Eigen::Vector3f SP = lineWorldPos.first;
+    //         Eigen::Vector3f EP = lineWorldPos.second;
+    //         // 投影到相机坐标系
+    //         Eigen::Vector3f SPc = Rcw_eigen * SP + tcw_eigen;
+    //         Eigen::Vector3f EPc = Rcw_eigen * EP + tcw_eigen;
+    //         // 端点深度检查
+    //         if(SPc(2) <= 0 || EPc(2) <= 0)
+    //             continue;
+    //         // 计算像素坐标
+    //         float u1 = fx * SPc(0)/SPc(2) + cx;
+    //         float v1 = fy * SPc(1)/SPc(2) + cy;
+    //         float u2 = fx * EPc(0)/EPc(2) + cx;
+    //         float v2 = fy * EPc(1)/EPc(2) + cy;
+    //         if(u1 < pKF->mnMinX || u1 > pKF->mnMaxX || v1 < pKF->mnMinY || v1 > pKF->mnMaxY)
+    //             continue;
+    //         if(u2 < pKF->mnMinX || u2 > pKF->mnMaxX || v2 < pKF->mnMinY || v2 > pKF->mnMaxY)
+    //             continue;
+    //         // 距离限制
+    //         const float maxDistance = pML->GetMaxDistanceInvariance();
+    //         const float minDistance = pML->GetMinDistanceInvariance();
+    //         Eigen::Vector3f OM = 0.5f*(SP+EP) - Ow_eigen;
+    //         float dist = OM.norm();
+    //         if(dist < minDistance || dist > maxDistance)
+    //             continue;
+    //         // === 可见性判断：相机朝向与线段中点向量夹角 ===
+    //         Eigen::Vector3f camDir = (Eigen::Vector3f(0,0,1).transpose() * Rcw_eigen).transpose(); // 相机前向
+    //         Eigen::Vector3f OMdir = OM.normalized();
+    //         float cosAngle = camDir.dot(OMdir);
+    //         if(cosAngle < 0.3f) // 阈值可调
+    //             continue;
+    //         // 尺度预测
+    //         int nPredictedLevel = pML->PredictScale(dist, pKF);
+    //         float radius = th * pKF->mvScaleFactors[nPredictedLevel];
+    //         // 候选 KeyLine
+    //         std::vector<std::size_t> vIndices = pKF->GetLinesInArea(u1,v1, u2,v2, radius);
+    //         if(vIndices.empty())
+    //             continue;
+    //         // 描述子匹配
+    //         cv::Mat dML = pML->GetLineDescriptor();
+    //         int bestDist = INT_MAX;
+    //         int bestIdx = -1;
+    //         for(size_t idx : vIndices)
+    //         {
+    //             int klLevel = pKF->mvKeyLines[idx].octave;
+    //             if(klLevel < nPredictedLevel-1 || klLevel > nPredictedLevel)
+    //                 continue;
+    //             const cv::Mat &dKF = pKF->mLineDescriptors.row(idx);
+    //             int distDesc = DescriptorDistance(dML,dKF);
+    //             if(distDesc < bestDist)
+    //             {
+    //                 bestDist = distDesc;
+    //                 bestIdx = idx;
+    //             }
+    //         }
+    //         if(bestDist <= TH_LOW)
+    //         {
+    //             MapLine* pMLinKF = pKF->GetMapLine(bestIdx);
+    //             if(pMLinKF)
+    //             {
+    //                 if(!pMLinKF->isBad())
+    //                 {
+    //                     if(pMLinKF->Observations() > pML->Observations())
+    //                         pML->Replace(pMLinKF);
+    //                     else
+    //                         pMLinKF->Replace(pML);
+    //                 }
+    //             }
+    //             else
+    //             {
+    //                 pML->AddLineObservation(pKF, bestIdx);
+    //                 pKF->AddMapLine(pML, bestIdx);
+    //             }
+    //             nFused++;
+    //         }
+    //     }
+    //     return nFused;
+    // }
+
     int LSDmatcher::Fuse(KeyFrame *pKF, const std::vector<MapLine *> &vpMapLines, const float th)
     {
-        Eigen::Matrix3f Rcw_eigen = pKF->GetRotation();
-        Eigen::Vector3f tcw_eigen = pKF->GetTranslation();
-
-        cv::Mat Rcw = Converter::toCvMat(Rcw_eigen);;
-        cv::Mat tcw = (Mat_<float>(3, 1) << tcw_eigen(0), tcw_eigen(1), tcw_eigen(2));
-
+        Eigen::Matrix3f Rcw = pKF->GetRotation();
+        Eigen::Vector3f tcw = pKF->GetTranslation();
+        Eigen::Vector3f Ow = pKF->GetCameraCenter();
         const float &fx = pKF->fx;
         const float &fy = pKF->fy;
         const float &cx = pKF->cx;
         const float &cy = pKF->cy;
-        const float &bf = pKF->mbf;
-
-        Eigen::Vector3f Ow_eigen = pKF->GetCameraCenter();
-        cv::Mat Ow = (Mat_<float>(3, 1) << Ow_eigen(0), Ow_eigen(1), Ow_eigen(2));
-
-        int nFused=0;
-
-        const int nLines = vpMapLines.size();
-
-        // For each candidate MapPoint project and match
-        for(int iML=0; iML<nLines; iML++)
+        int nFused = 0;
+        for (MapLine* pML : vpMapLines)
         {
-            MapLine* pML = vpMapLines[iML];
-
-            // Discard Bad MapLines and already found
-            if(!pML || pML->isBad())
+            if (!pML || pML->isBad())
                 continue;
+            auto [SP, EP] = pML->GetLineWorldPos();
+            // 投影到相机坐标系
+            Eigen::Vector3f SPc = Rcw * SP + tcw;
+            Eigen::Vector3f EPc = Rcw * EP + tcw;
+            // === 在相机坐标系下裁剪 Z <= 0 ===
+            Eigen::Vector3f SPc_clip = SPc;
+            Eigen::Vector3f EPc_clip = EPc;
+            if (SPc_clip(2) <= 0 && EPc_clip(2) > 0)
+            {
+                float alpha = EPc_clip(2) / (EPc_clip(2)-SPc_clip(2));
+                SPc_clip = SPc_clip + alpha*(EPc_clip-SPc_clip);
+            }
+            else if (EPc_clip(2) <= 0 && SPc_clip(2) > 0)
+            {
+                float alpha = SPc_clip(2) / (SPc_clip(2)-EPc_clip(2));
+                EPc_clip = EPc_clip + alpha*(SPc_clip-EPc_clip);
+            }
+            else if (SPc_clip(2) <= 0 && EPc_clip(2) <= 0)
+                continue; // 整条线在相机后方
+            // 投影到像素坐标
+            float u1 = fx * SPc_clip(0)/SPc_clip(2) + cx;
+            float v1 = fy * SPc_clip(1)/SPc_clip(2) + cy;
+            float u2 = fx * EPc_clip(0)/EPc_clip(2) + cx;
+            float v2 = fy * EPc_clip(1)/EPc_clip(2) + cy;
+            // 裁剪到图像边界
+            // u1 = std::clamp(u1, (float)pKF->mnMinX, (float)pKF->mnMaxX);
+            // v1 = std::clamp(v1, (float)pKF->mnMinY, (float)pKF->mnMaxY);
+            // u2 = std::clamp(u2, (float)pKF->mnMinX, (float)pKF->mnMaxX);
+            // v2 = std::clamp(v2, (float)pKF->mnMinY, (float)pKF->mnMaxY);
+            // 替换后
+            if (u1 < pKF->mnMinX) u1 = (float)pKF->mnMinX;
+            if (u1 > pKF->mnMaxX) u1 = (float)pKF->mnMaxX;
+            if (v1 < pKF->mnMinY) v1 = (float)pKF->mnMinY;
+            if (v1 > pKF->mnMaxY) v1 = (float)pKF->mnMaxY;
 
-            //Vector6d P = pML->GetWorldPos();
-            std::pair<Eigen::Vector3f, Eigen::Vector3f> lineWorldPosition = pML->GetLineWorldPos();
+            if (u2 < pKF->mnMinX) u2 = (float)pKF->mnMinX;
+            if (u2 > pKF->mnMaxX) u2 = (float)pKF->mnMaxX;
+            if (v2 < pKF->mnMinY) v2 = (float)pKF->mnMinY;
+            if (v2 > pKF->mnMaxY) v2 = (float)pKF->mnMaxY;
 
-            cv::Mat SP = (Mat_<float>(3, 1) << lineWorldPosition.first(0), lineWorldPosition.first(1), lineWorldPosition.first(2));
-            cv::Mat EP = (Mat_<float>(3, 1) << lineWorldPosition.second(0), lineWorldPosition.second(1), lineWorldPosition.second(2));
-
-            const cv::Mat SPc = Rcw * SP + tcw;
-            const auto &SPcX = SPc.at<float>(0);
-            const auto &SPcY = SPc.at<float>(1);
-            const auto &SPcZ = SPc.at<float>(2);
-
-            const cv::Mat EPc = Rcw * EP + tcw;
-            const auto &EPcX = EPc.at<float>(0);
-            const auto &EPcY = EPc.at<float>(1);
-            const auto &EPcZ = EPc.at<float>(2);
-
-            if (SPcZ < 0.0f || EPcZ < 0.0f)
-                continue;
-
-            const float invz1 = 1.0f / SPcZ;
-            const float u1 = fx * SPcX * invz1 + cx;
-            const float v1 = fy * SPcY * invz1 + cy;
-
-            if (u1 < pKF->mnMinX || u1 > pKF->mnMaxX)
-                continue;
-            if (v1 < pKF->mnMinY || v1 > pKF->mnMaxY)
-                continue;
-
-            const float invz2 = 1.0f / EPcZ;
-            const float u2 = fx * EPcX * invz2 + cx;
-            const float v2 = fy * EPcY * invz2 + cy;
-
-            if (u2 < pKF->mnMinX || u2 > pKF->mnMaxX)
-                continue;
-            if (v2 < pKF->mnMinY || v2 > pKF->mnMaxY)
-                continue;
-
-            const float maxDistance = pML->GetMaxDistanceInvariance();
-            const float minDistance = pML->GetMinDistanceInvariance();
-
-            const cv::Mat OM = 0.5 * (SP + EP) - Ow;
-            const float dist = cv::norm(OM);
-
-            if (dist < minDistance || dist > maxDistance)
-                continue;
-
-            // Check viewing angle 这个LineNormal是啥意思？
-            Eigen::Vector3f Pn = pML->GetLineNormalVector();
-            cv::Mat pn = (Mat_<float>(3, 1) << Pn(0), Pn(1), Pn(2));
-
-            if(OM.dot(pn)<0.5*dist)
-                continue;
-
-            const int nPredictedLevel = pML->PredictScale(dist, pKF);
-            const float radius = th*pKF->mvScaleFactors[nPredictedLevel];
-            const std::vector<std::size_t> vIndices = pKF->GetLinesInArea(u1,v1, u2, v2, radius);
-
+            // // 距离限制
+            float dist = (0.5f*(SP+EP) - Ow).norm();
+            // if(dist < pML->GetMinDistanceInvariance() || dist > pML->GetMaxDistanceInvariance())
+            //     continue;
+            // 尺度预测和半径
+            int nPredictedLevel = pML->PredictScale(dist, pKF);
+            float radius = th * pKF->mvScaleFactors[nPredictedLevel];
+            // 获取候选KeyLine
+            std::vector<std::size_t> vIndices = pKF->GetLinesInArea(u1,v1,u2,v2,radius);
             if(vIndices.empty())
                 continue;
-
-            const cv::Mat dML = pML->GetLineDescriptor();
-
-            int bestDist=INT_MAX;
-            int bestIdx =-1 ;
-
-            for(unsigned long idx : vIndices)
+            // 描述子匹配
+            cv::Mat dML = pML->GetLineDescriptor();
+            int bestDist = INT_MAX;
+            int bestIdx = -1;
+            for (size_t idx : vIndices)
             {
-                const int &klLevel = pKF->mvKeyLines[idx].octave;
-
-                if(klLevel<nPredictedLevel-1 || klLevel>nPredictedLevel)
+                int klLevel = pKF->mvKeyLines[idx].octave;
+                if(klLevel < nPredictedLevel-1 || klLevel > nPredictedLevel)
                     continue;
-
                 const cv::Mat &dKF = pKF->mLineDescriptors.row(idx);
-
-                const int dist = DescriptorDistance(dML,dKF);
-
-                if(dist<bestDist)
+                int distDesc = DescriptorDistance(dML, dKF);
+                if(distDesc < bestDist)
                 {
-                    bestDist = dist;
+                    bestDist = distDesc;
                     bestIdx = idx;
                 }
             }
-
-            if(bestDist<=TH_LOW)
+            if(bestDist <= TH_LOW)
             {
                 MapLine* pMLinKF = pKF->GetMapLine(bestIdx);
                 if(pMLinKF)
                 {
-                    if(!pMLinKF->isBad()) {
-                        if(pMLinKF->Observations()>pML->Observations())
+                    if(!pMLinKF->isBad())
+                    {
+                        if(pMLinKF->Observations() > pML->Observations())
                             pML->Replace(pMLinKF);
                         else
                             pMLinKF->Replace(pML);
@@ -1400,17 +1753,16 @@ namespace ORB_SLAM3
                 }
                 else
                 {
-                    pML->AddLineObservation(pKF,bestIdx);
-                    pKF->AddMapLine(pML,bestIdx);
+                    pML->AddLineObservation(pKF, bestIdx);
+                    pKF->AddMapLine(pML, bestIdx);
                 }
                 nFused++;
             }
         }
-
         return nFused;
     }
 
-
+    
     float LSDmatcher::RadiusByViewingCos(const float &viewCos)
     {
         if(viewCos>0.998)

@@ -26,6 +26,7 @@
 #include "Tracking.h"
 #include "KeyFrameDatabase.h"
 #include "Settings.h"
+#include "MapLine.h"
 
 #include <mutex>
 
@@ -51,6 +52,8 @@ public:
 
     // Main function
     void Run();
+
+    void RunWithLine();
 
     void InsertKeyFrame(KeyFrame* pKF);
     void EmptyQueue();
@@ -134,11 +137,17 @@ protected:
 
     bool CheckNewKeyFrames();
     void ProcessNewKeyFrame();
+    void ProcessNewKeyFrameWithLine();  //
     void CreateNewMapPoints();
+    void CreateNewMapLines();
 
     void MapPointCulling();
+    void MapLineCulling();
     void SearchInNeighbors();
+    void SearchInNeighborsWithLine();
     void KeyFrameCulling();
+
+    bool CheckLineReprojection(KeyFrame* pKF, const Eigen::Vector3f &X3Ds, const Eigen::Vector3f &X3De, const cv::line_descriptor::KeyLine &kline);
 
     System *mpSystem;
 
@@ -167,6 +176,7 @@ protected:
     KeyFrame* mpCurrentKeyFrame;
 
     std::list<MapPoint*> mlpRecentAddedMapPoints;
+    std::list<MapLine*> mlpRecentAddedMapLines;
 
     std::mutex mMutexNewKFs;
 

@@ -212,6 +212,115 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    void ORBmatcher::DebugProjectMapPoints(
+        Frame &F,
+        const std::vector<MapPoint*> &vpMapPoints,
+        const std::string &windowName)
+    {
+        cv::Mat imgDraw = F.imgLeftRGB.clone();
+        if (imgDraw.channels() == 1)
+            cv::cvtColor(imgDraw, imgDraw, cv::COLOR_GRAY2BGR);
+        //=== 当前帧位姿：世界 -> 当前相机
+        const Sophus::SE3f Tcw = F.GetPose();
+        int nValidProj = 0;
+        for (size_t i = 0; i < vpMapPoints.size(); ++i)
+        {
+            MapPoint *pMP = vpMapPoints[i];
+            if (!pMP || pMP->isBad())
+                continue;
+            //=== 世界坐标
+            Eigen::Vector3f Pw = pMP->GetWorldPos();
+            //=== 相机坐标系
+            Eigen::Vector3f Pc = Tcw * Pw;
+            if (Pc[2] <= 0)
+                continue; // 深度无效（在相机后方）
+            //=== 投影到像素坐标
+            Eigen::Vector2f uv = F.mpCamera->project(Pc);
+            if (uv[0] < 0 || uv[0] >= imgDraw.cols || uv[1] < 0 || uv[1] >= imgDraw.rows)
+                continue; // 超出图像范围
+            //=== 绘制投影点（红色）
+            cv::circle(imgDraw, cv::Point2f(uv[0], uv[1]), 3, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
+            //=== 编号（可选）
+            cv::putText(imgDraw, std::to_string(i), cv::Point2f(uv[0] + 2, uv[1] - 2),
+                    cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(255, 255, 255), 1);
+
+            nValidProj++;
+        }
+        std::cout << "[Debug] 投影到当前帧的有效 MapPoints 数量: "
+                << nValidProj << " / " << vpMapPoints.size() << std::endl;
+
+        cv::imshow(windowName, imgDraw);
+        cv::waitKey(0);
+    }
+
+
+    void ORBmatcher::DebugSearchByProjectionPointsMatch(
+        Frame &F,
+        const std::vector<MapPoint*> &vpMapPoints,
+        const std::string &windowName)
+    {
+        cv::Mat imgDraw = F.imgLeftRGB.clone();
+        if (imgDraw.channels() == 1)
+            cv::cvtColor(imgDraw, imgDraw, cv::COLOR_GRAY2BGR);
+        const Sophus::SE3f Tcw = F.GetPose();  // 世界 -> 当前
+        int nProj = 0, nMatched = 0;
+        for (size_t iMP = 0; iMP < vpMapPoints.size(); ++iMP)
+        {
+            MapPoint *pMP = vpMapPoints[iMP];
+            if (!pMP || pMP->isBad())
+                continue;
+            //=== 世界坐标 -> 当前帧相机坐标
+            Eigen::Vector3f Pw = pMP->GetWorldPos();
+            Eigen::Vector3f Pc = Tcw * Pw;
+            if (Pc[2] <= 0)
+                continue;
+            //=== 投影到像素坐标
+            Eigen::Vector2f uv = F.mpCamera->project(Pc);
+            if (uv[0] < 0 || uv[0] >= imgDraw.cols || uv[1] < 0 || uv[1] >= imgDraw.rows)
+                continue;
+            nProj++;
+            cv::Point2f pProj(uv[0], uv[1]);
+            //=== 绘制预测投影点（红色）
+            cv::circle(imgDraw, pProj, 3, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
+            //=== 查找是否真的匹配到了该 MapPoint
+            bool bMatched = false;
+            int matchedIdx = -1;
+            for (size_t i = 0; i < F.mvpMapPoints.size(); ++i)
+            {
+                if (F.mvpMapPoints[i] == pMP)
+                {
+                    bMatched = true;
+                    matchedIdx = i;
+                    break;
+                }
+            }
+            if (bMatched)
+            {
+                nMatched++;
+                // 绘制实际匹配的关键点位置（绿色）
+                cv::Point2f kp = F.mvKeys[matchedIdx].pt;
+                cv::circle(imgDraw, kp, 3, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+                // 连线（绿色连投影与匹配点）
+                cv::line(imgDraw, pProj, kp, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                // 标号
+                cv::putText(imgDraw, std::to_string(iMP), pProj + cv::Point2f(3, -3),
+                            cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(255, 255, 255), 1);
+            }
+            else
+            {
+                // 未匹配到的 MapPoint
+                cv::putText(imgDraw, "X", pProj + cv::Point2f(3, -3),
+                            cv::FONT_HERSHEY_PLAIN, 0.8, cv::Scalar(0, 0, 255), 1);
+            }
+        }
+        std::cout << "[Debug] MapPoints 投影: " << nProj
+                << " | 成功匹配: " << nMatched
+                << " | 失败: " << (nProj - nMatched) << std::endl;
+        cv::imshow(windowName, imgDraw);
+        cv::waitKey(0);
+    }
+
+
     // void ORBmatcher::DebugPointProjectionDual(
     //     Frame &F,
     //     const std::vector<MapPoint*> &vpMapPoints,

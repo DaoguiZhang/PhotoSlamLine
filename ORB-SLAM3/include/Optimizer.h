@@ -66,6 +66,8 @@ public:
 
     void static LocalBundleAdjustment(KeyFrame* pKF, bool *pbStopFlag, Map *pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, MappingOperation& opr);
 
+    void static LocalBundleAdjustmentWithLine(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, int& num_Lines, MappingOperation& opr);
+
     int static PoseOptimization(Frame* pFrame);
     //int static PoseOptimizationWithLineEndLine(Frame* pFrame);
     int static PoseOptimizationWithLine(Frame* pFrame);
@@ -106,7 +108,7 @@ public:
     void static LocalBundleAdjustment(KeyFrame* pMainKF,vector<KeyFrame*> vpAdjustKF, vector<KeyFrame*> vpFixedKF, bool *pbStopFlag);
 
     // Local BA in welding area when two maps are merged with lines
-    void static LocalBundleAdjustmentWithLine(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, MappingOperation& opr);
+    void static LocalBundleAdjustmentWithLine(KeyFrame* pMainKF,vector<KeyFrame*> vpAdjustKF, vector<KeyFrame*> vpFixedKF, bool *pbStopFlag);
 
     // Marginalize block element (start:end,start:end). Perform Schur complement.
     // Marginalized elements are filled with zeros.

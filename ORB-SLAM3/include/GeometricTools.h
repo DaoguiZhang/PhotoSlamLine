@@ -72,6 +72,23 @@ public:
         return true;
     }
 
+    static Eigen::Vector4f ComputeLinePlane(
+        const Eigen::Vector3f& x1,
+        const Eigen::Vector3f& x2,
+        const Eigen::Vector3f& Ow);
+    
+    static bool IntersectPlanes(
+        const Eigen::Vector4f& p1,
+        const Eigen::Vector4f& p2,
+        Eigen::Vector3f& point,
+        Eigen::Vector3f& dir);
+    
+    static Eigen::Vector3f ProjectRayToLine(
+        const Eigen::Vector3f& rayDir,
+        const Eigen::Vector3f& camCenter,
+        const Eigen::Vector3f& linePoint,
+        const Eigen::Vector3f& lineDir);
+
 };
 
 }// namespace ORB_SLAM
