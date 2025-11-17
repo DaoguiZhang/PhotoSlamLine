@@ -22,9 +22,12 @@
 #include "Thirdparty/g2o/g2o/core/base_unary_edge.h"
 #include <Thirdparty/g2o/g2o/types/types_six_dof_expmap.h>
 #include <Thirdparty/g2o/g2o/types/sim3.h>
+#include <Thirdparty/g2o/g2o/core/base_multi_edge.h>
+#include <Thirdparty/g2o/g2o/types/types_sba.h>        // VertexSBAPointXYZ
 
 #include <Eigen/Geometry>
 #include <include/CameraModels/GeometricCamera.h>
+#include "VertexToLinePlucker.h"
 
 
 namespace ORB_SLAM3 {
@@ -740,12 +743,10 @@ public:
         const double y = Xc(1);
         const double z = Xc(2);
         const double z2 = z*z;
-
         // d pi / d Xc  (2x3)
         Eigen::Matrix<double,2,3> Jpi;
         Jpi(0,0) = fx / z;      Jpi(0,1) = 0.0;        Jpi(0,2) = -fx * x / z2;
         Jpi(1,0) = 0.0;         Jpi(1,1) = fy / z;     Jpi(1,2) = -fy * y / z2;
-
         // d Xc / d xi  (3x6)  for left-multiplicative perturbation
         Eigen::Matrix<double,3,6> dXc_dxi;
         dXc_dxi.setZero();
@@ -756,14 +757,11 @@ public:
         dXc_dxi(0,3) = 0.0;  dXc_dxi(0,4) =  z;  dXc_dxi(0,5) = -y;
         dXc_dxi(1,3) = -z;   dXc_dxi(1,4) = 0.0; dXc_dxi(1,5) =  x;
         dXc_dxi(2,3) =  y;   dXc_dxi(2,4) = -x;  dXc_dxi(2,5) = 0.0;
-
         return Jpi * dXc_dxi; // 2x6
     }
-
     // Members
     Eigen::Vector3d Xw1, Xw2;   // world endpoints (set by caller)
     double fx, fy, cx, cy;      // camera intrinsics (set by caller)
-
     // observed line parameters (unit normal) a*u + b*v + c = 0
     double a, b, c;
 };
@@ -1164,6 +1162,565 @@ public:
 
     // body->left transform (constant)
     g2o::SE3Quat mTrl;
+};
+
+class EdgeSE3ProjectLine_PoseAndPoints : public g2o::BaseMultiEdge<2, Eigen::Vector2d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectLine_PoseAndPoints()
+        : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0)
+    {
+        resize(3); // 0: pose, 1: point1, 2: point2
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void SetCameraIntrinsics(double _fx,double _fy,double _cx,double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    void SetObservedLineByEndpoints(double u1,double v1,double u2,double v2)
+    {
+        double dx = u2-u1, dy = v2-v1;
+        double na = dy, nb = -dx;
+        double norm = std::sqrt(na*na + nb*nb);
+        if(norm < 1e-12){ a=b=c=0.0; return; }
+        a = na / norm;
+        b = nb / norm;
+        c = -(a*u1 + b*v1);
+    }
+
+    void SetObservedLineABC(double _a,double _b,double _c)
+    {
+        double norm = std::sqrt(_a*_a + _b*_b);
+        if(norm < 1e-12){ a=_a; b=_b; c=_c; return; }
+        a = _a/norm;
+        b = _b/norm;
+        c = _c/norm;
+    }
+
+    void computeError() override
+    {
+        using g2o::VertexSE3Expmap;
+        using g2o::VertexSBAPointXYZ;
+
+        const VertexSE3Expmap* vPose  = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexSBAPointXYZ* vP1  = static_cast<const VertexSBAPointXYZ*>(_vertices[1]);
+        const VertexSBAPointXYZ* vP2  = static_cast<const VertexSBAPointXYZ*>(_vertices[2]);
+
+        Eigen::Vector3d Xc1 = vPose->estimate().map(vP1->estimate());
+        Eigen::Vector3d Xc2 = vPose->estimate().map(vP2->estimate());
+
+        if (Xc1(2) <= 1e-9 || Xc2(2) <= 1e-9) {
+            _error.setConstant(1e3);
+            return;
+        }
+
+        Eigen::Vector2d uv1 = cam2pixel(Xc1);
+        Eigen::Vector2d uv2 = cam2pixel(Xc2);
+
+        _error(0) = a*uv1(0) + b*uv1(1) + c;
+        _error(1) = a*uv2(0) + b*uv2(1) + c;
+    }
+
+    void linearizeOplus() override
+    {
+        using g2o::VertexSE3Expmap;
+        using g2o::VertexSBAPointXYZ;
+
+        const VertexSE3Expmap* vPose  = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexSBAPointXYZ* vP1  = static_cast<const VertexSBAPointXYZ*>(_vertices[1]);
+        const VertexSBAPointXYZ* vP2  = static_cast<const VertexSBAPointXYZ*>(_vertices[2]);
+
+        Eigen::Vector3d Xc1 = vPose->estimate().map(vP1->estimate());
+        Eigen::Vector3d Xc2 = vPose->estimate().map(vP2->estimate());
+
+        Eigen::Matrix3d R = vPose->estimate().rotation().toRotationMatrix();
+
+        if (Xc1(2)<=1e-9 || Xc2(2)<=1e-9) {
+            _jacobianOplus[0] = Eigen::Matrix<double,2,6>::Zero();
+            _jacobianOplus[1] = Eigen::Matrix<double,2,3>::Zero();
+            _jacobianOplus[2] = Eigen::Matrix<double,2,3>::Zero();
+            return;
+        }
+
+        // Projection Jacobians
+        Eigen::Matrix<double,2,3> Jpi1 = projectionJacobian_Xc(Xc1);
+        Eigen::Matrix<double,2,3> Jpi2 = projectionJacobian_Xc(Xc2);
+
+        // dXc/dxi (3x6)
+        Eigen::Matrix<double,3,6> dXc1_dxi = dXc_dxi_from_Xc(Xc1);
+        Eigen::Matrix<double,3,6> dXc2_dxi = dXc_dxi_from_Xc(Xc2);
+
+        // Pose Jacobian (2x6)
+        Eigen::Matrix<double,2,6> Jpose1 = Jpi1 * dXc1_dxi;
+        Eigen::Matrix<double,2,6> Jpose2 = Jpi2 * dXc2_dxi;
+
+        Eigen::RowVector2d ab(a,b);
+        Eigen::Matrix<double,1,6> row1 = ab * Jpose1;
+        Eigen::Matrix<double,1,6> row2 = ab * Jpose2;
+
+        Eigen::Matrix<double,2,6> Jpose;
+        Jpose.row(0) = row1;
+        Jpose.row(1) = row2;
+        _jacobianOplus[0] = Jpose;
+
+        // Point Jacobians (2x3)
+        _jacobianOplus[1] = Jpi1 * R;
+        _jacobianOplus[2] = Jpi2 * R;
+    }
+
+private:
+    Eigen::Vector2d cam2pixel(const Eigen::Vector3d& Xc) const {
+        return Eigen::Vector2d(fx*Xc(0)/Xc(2)+cx,
+                               fy*Xc(1)/Xc(2)+cy);
+    }
+
+    Eigen::Matrix<double,2,3> projectionJacobian_Xc(const Eigen::Vector3d &Xc) const {
+        double x=Xc(0), y=Xc(1), z=Xc(2), z2=z*z;
+        Eigen::Matrix<double,2,3> J;
+        J << fx/z, 0, -fx*x/z2,
+             0, fy/z, -fy*y/z2;
+        return J;
+    }
+
+    Eigen::Matrix<double,3,6> dXc_dxi_from_Xc(const Eigen::Vector3d& Xc) const {
+        Eigen::Matrix<double,3,6> m = Eigen::Matrix<double,3,6>::Zero();
+        m.block<3,3>(0,0) = Eigen::Matrix3d::Identity();
+        double x=Xc(0), y=Xc(1), z=Xc(2);
+        m(0,4)= z;   m(0,5)= -y;
+        m(1,3)= -z;  m(1,5)= x;
+        m(2,3)= y;   m(2,4)= -x;
+        return m;
+    }
+
+public:
+    double fx, fy, cx, cy;
+    double a, b, c;
+};
+
+class EdgeSE3ProjectPluckerLine_PoseAndLine
+    : public g2o::BaseMultiEdge<2, Eigen::Vector2d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectPluckerLine_PoseAndLine()
+        : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0)
+    {
+        resize(2); // vertex 0: SE3, vertex 1: Plucker line
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    inline void SetCameraIntrinsics(double _fx,double _fy,double _cx,double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    inline void SetObservedLineABC(double _a,double _b,double _c)
+    {
+        double n = std::sqrt(_a*_a + _b*_b);
+        if(n < 1e-12) { a=_a; b=_b; c=_c; return; }
+        a=_a/n; b=_b/n; c=_c/n;
+    }
+
+    void computeError() override
+    {
+        using g2o::VertexSE3Expmap;
+
+        const VertexSE3Expmap* vPose =
+            static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexLinePlucker* vLine =
+            static_cast<const VertexLinePlucker*>(_vertices[1]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix<double,6,1> Lw = vLine->estimate();
+
+        Eigen::Vector3d n_w = Lw.head<3>();
+        Eigen::Vector3d v_w = Lw.tail<3>();
+
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        Eigen::Vector3d n_c = Rcw*n_w + tcw.cross(Rcw*v_w);
+
+        Eigen::Vector3d l;
+        l(0) = fx * n_c(0) + cx * n_c(2);
+        l(1) = fy * n_c(1) + cy * n_c(2);
+        l(2) = n_c(2);
+
+        _error(0) = l(0) - a;
+        _error(1) = l(1) - b;
+    }
+
+    void linearizeOplus() override
+    {
+        using g2o::VertexSE3Expmap;
+
+        const VertexSE3Expmap* vPose =
+            static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexLinePlucker* vLine =
+            static_cast<const VertexLinePlucker*>(_vertices[1]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix<double,6,1> Lw = vLine->estimate();
+
+        Eigen::Vector3d n_w = Lw.head<3>();
+        Eigen::Vector3d v_w = Lw.tail<3>();
+
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        Eigen::Vector3d n_c = Rcw*n_w + tcw.cross(Rcw*v_w);
+
+        // --- Jacobian wrt pose (2x6) ---
+        Eigen::Matrix<double,3,3> dldnc;
+        dldnc << fx, 0, cx,
+                 0, fy, cy,
+                 0,  0, 1;
+
+        Eigen::Matrix<double,3,6> dncdxi;
+        dncdxi.setZero();
+        dncdxi.block<3,3>(0,0) = -skew(Rcw*v_w);
+        dncdxi.block<3,3>(0,3) = -Rcw*skew(n_w) - skew(tcw)*Rcw*skew(v_w);
+
+        Eigen::Matrix<double,3,6> dldxi = dldnc * dncdxi;
+
+        Eigen::Matrix<double,2,6> Jpose;
+        Jpose.row(0) = dldxi.row(0);
+        Jpose.row(1) = dldxi.row(1);
+        _jacobianOplus[0] = Jpose;  // 直接赋值，不用 setZero
+
+        // --- Jacobian wrt line (2x6) ---
+        Eigen::Matrix<double,2,6> Jline;
+        Jline.setZero();
+        Jline.block<2,3>(0,0) = dldnc.block<2,3>(0,0) * Rcw;
+        Jline.block<2,3>(0,3) = dldnc.block<2,3>(0,0) * skew(tcw) * Rcw;
+
+        _jacobianOplus[1] = Jline;
+    }
+
+    inline Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
+    {
+        Eigen::Matrix3d S;
+        S <<     0, -v(2),  v(1),
+              v(2),    0, -v(0),
+             -v(1), v(0),   0;
+        return S;
+    }
+
+private:
+    double fx, fy, cx, cy;
+    double a, b, c;
+};
+
+
+class EdgeSE3ProjectPluckerLine_PoseOnly
+    : public g2o::BaseUnaryEdge<2, Eigen::Vector2d, g2o::VertexSE3Expmap>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectPluckerLine_PoseOnly()
+        : fx(0), fy(0), cx(0), cy(0)
+    {}
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void SetCameraIntrinsics(double _fx,double _fy,double _cx,double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    void SetObservedPluckerLine(const Eigen::Vector3d& n, const Eigen::Vector3d& v)
+    {
+        n_w = n;
+        v_w = v;
+    }
+
+    void SetObservedLineABC(double _a,double _b,double _c)
+    {
+        double n = std::sqrt(_a*_a + _b*_b);
+        if(n < 1e-12) { a=_a; b=_b; c=_c; return; }
+        a=_a/n; b=_b/n; c=_c/n;
+    }
+
+    void computeError() override
+    {
+        const g2o::VertexSE3Expmap* vPose =
+            static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        Eigen::Vector3d n_c = Rcw*n_w + tcw.cross(Rcw*v_w);
+
+        Eigen::Vector3d l;
+        l(0) = fx * n_c(0) + cx * n_c(2);
+        l(1) = fy * n_c(1) + cy * n_c(2);
+        l(2) = n_c(2);
+
+        _error(0) = l(0) - a;
+        _error(1) = l(1) - b;
+    }
+
+    void linearizeOplus() override
+    {
+        const g2o::VertexSE3Expmap* vPose =
+            static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        Eigen::Matrix<double,3,3> dldnc;
+        dldnc << fx, 0, cx,
+                 0, fy, cy,
+                 0,  0, 1;
+
+        Eigen::Matrix<double,3,6> dncdxi;
+        dncdxi.setZero();
+        dncdxi.block<3,3>(0,0) = -skew(Rcw*v_w);
+        dncdxi.block<3,3>(0,3) = -Rcw*skew(n_w) - skew(tcw)*Rcw*skew(v_w);
+
+        Eigen::Matrix<double,3,6> dldxi = dldnc * dncdxi;
+
+        // 直接写入BaseUnaryEdge提供的 _jacobianOplusXi
+        _jacobianOplusXi.block<2,6>(0,0) = dldxi.block<2,6>(0,0);
+    }
+
+private:
+    Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
+    {
+        Eigen::Matrix3d S;
+        S <<     0, -v(2),  v(1),
+              v(2),    0, -v(0),
+             -v(1), v(0),   0;
+        return S;
+    }
+
+private:
+    double fx, fy, cx, cy;
+    double a=0, b=0, c=0;
+    Eigen::Vector3d n_w;
+    Eigen::Vector3d v_w;
+};
+
+//LineSegmentToPlucker
+class EdgeStereoSE3ProjectPluckerLine_PoseOnly
+    : public g2o::BaseUnaryEdge<4, Eigen::Vector4d, g2o::VertexSE3Expmap>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeStereoSE3ProjectPluckerLine_PoseOnly()
+        : fx(0), fy(0), cx(0), cy(0), bf(0) 
+    {
+        // 只有一个顶点：相机位姿
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    inline void SetCameraIntrinsics(double _fx,double _fy,double _cx,double _cy, double _bf)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; bf=_bf; }
+
+    inline void SetObservedPluckerLine(const Eigen::Vector3d& n, const Eigen::Vector3d& v)
+    {
+        n_w = n;
+        v_w = v;
+    }
+
+    inline void SetObservedLineStereo(double uL1, double vL1, double uL2, double vL2)
+    {
+        obs(0) = uL1; obs(1) = vL1;
+        obs(2) = uL2; obs(3) = vL2;
+    }
+
+    void computeError() override
+    {
+        const g2o::VertexSE3Expmap* vPose =
+            static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        Eigen::Vector3d n_c = Rcw*n_w + tcw.cross(Rcw*v_w);
+
+        Eigen::Vector2d uvL, uvR;
+        uvL(0) = fx*n_c(0)/n_c(2) + cx;
+        uvL(1) = fy*n_c(1)/n_c(2) + cy;
+        uvR(0) = uvL(0) - bf / n_c(2); // 双目视差
+        uvR(1) = uvL(1);
+
+        _error(0) = uvL(0) - obs(0);
+        _error(1) = uvL(1) - obs(1);
+        _error(2) = uvR(0) - obs(2);
+        _error(3) = uvR(1) - obs(3);
+    }
+
+    void linearizeOplus() override
+    {
+        const g2o::VertexSE3Expmap* vPose =
+            static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        Eigen::Vector3d n_c = Rcw*n_w + tcw.cross(Rcw*v_w);
+
+        // --- Jacobian wrt pose (4x6) ---
+        Eigen::Matrix<double,3,6> dncdxi;
+        dncdxi.setZero();
+        dncdxi.block<3,3>(0,0) = -skew(Rcw*v_w);
+        dncdxi.block<3,3>(0,3) = -Rcw*skew(n_w) - skew(tcw)*Rcw*skew(v_w);
+
+        Eigen::Matrix<double,4,6> Jpose;
+        double x = n_c(0), y = n_c(1), z = n_c(2);
+        double z2 = z*z;
+
+        // 左相机 uL,vL
+        Jpose(0,0) = fx / z * dncdxi(0,0) - fx * x / z2 * dncdxi(2,0); // duL/dxi
+        Jpose(0,1) = fx / z * dncdxi(0,1) - fx * x / z2 * dncdxi(2,1);
+        Jpose(0,2) = fx / z * dncdxi(0,2) - fx * x / z2 * dncdxi(2,2);
+        Jpose(0,3) = fx / z * dncdxi(0,3) - fx * x / z2 * dncdxi(2,3);
+        Jpose(0,4) = fx / z * dncdxi(0,4) - fx * x / z2 * dncdxi(2,4);
+        Jpose(0,5) = fx / z * dncdxi(0,5) - fx * x / z2 * dncdxi(2,5);
+
+        Jpose(1,0) = fy / z * dncdxi(1,0) - fy * y / z2 * dncdxi(2,0); // dvL/dxi
+        Jpose(1,1) = fy / z * dncdxi(1,1) - fy * y / z2 * dncdxi(2,1);
+        Jpose(1,2) = fy / z * dncdxi(1,2) - fy * y / z2 * dncdxi(2,2);
+        Jpose(1,3) = fy / z * dncdxi(1,3) - fy * y / z2 * dncdxi(2,3);
+        Jpose(1,4) = fy / z * dncdxi(1,4) - fy * y / z2 * dncdxi(2,4);
+        Jpose(1,5) = fy / z * dncdxi(1,5) - fy * y / z2 * dncdxi(2,5);
+
+        // 右相机 uR,vR
+        Jpose(2,0) = Jpose(0,0) - bf / z2 * dncdxi(2,0); // duR/dxi
+        Jpose(2,1) = Jpose(0,1) - bf / z2 * dncdxi(2,1);
+        Jpose(2,2) = Jpose(0,2) - bf / z2 * dncdxi(2,2);
+        Jpose(2,3) = Jpose(0,3) - bf / z2 * dncdxi(2,3);
+        Jpose(2,4) = Jpose(0,4) - bf / z2 * dncdxi(2,4);
+        Jpose(2,5) = Jpose(0,5) - bf / z2 * dncdxi(2,5);
+
+        Jpose(3,0) = Jpose(1,0);
+        Jpose(3,1) = Jpose(1,1);
+        Jpose(3,2) = Jpose(1,2);
+        Jpose(3,3) = Jpose(1,3);
+        Jpose(3,4) = Jpose(1,4);
+        Jpose(3,5) = Jpose(1,5);
+
+        _jacobianOplusXi = Jpose;
+    }
+
+    inline Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
+    {
+        Eigen::Matrix3d S;
+        S <<     0, -v(2),  v(1),
+              v(2),    0, -v(0),
+             -v(1), v(0),   0;
+        return S;
+    }
+
+private:
+    double fx, fy, cx, cy, bf;  // bf = baseline*fx
+    Eigen::Vector3d n_w, v_w;
+    Eigen::Vector4d obs;         // uL,vL,uR,vR
+};
+
+class EdgeSE3ProjectPluckerLine_OnlyPoseToBody
+    : public g2o::BaseUnaryEdge<2, Eigen::Vector2d, g2o::VertexSE3Expmap>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectPluckerLine_OnlyPoseToBody()
+        : fx(0), fy(0), cx(0), cy(0)
+    {
+        // 顶点是机体相对于世界的位姿
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void SetCameraIntrinsics(double _fx, double _fy, double _cx, double _cy)
+    {
+        fx = _fx; fy = _fy; cx = _cx; cy = _cy;
+    }
+
+    // 设置观测 Plucker 线在相机坐标系下的 n,v
+    void SetObservedPluckerLineCamera(const Eigen::Vector3d& n_cam, const Eigen::Vector3d& v_cam)
+    {
+        n_c = n_cam;
+        v_c = v_cam;
+    }
+
+    // 设置观测线 (a,b,c)
+    void SetObservedLineABC(double _a,double _b,double _c)
+    {
+        double norm = std::sqrt(_a*_a + _b*_b);
+        if(norm < 1e-12) { a=_a; b=_b; c=_c; return; }
+        a = _a / norm; b = _b / norm; c = _c / norm;
+    }
+
+    void computeError() override
+    {
+        const g2o::VertexSE3Expmap* vBodyPose =
+            static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+
+        g2o::SE3Quat Twb = vBodyPose->estimate();  // body -> world
+        Eigen::Matrix3d Rwb = Twb.rotation().toRotationMatrix();
+        Eigen::Vector3d twb = Twb.translation();
+
+        // 将机体坐标系下的 Plucker 线投影到相机坐标
+        Eigen::Vector3d n_cam_proj = n_c + twb.cross(v_c);  // 简化为机体位移作用
+        Eigen::Vector2d uv;
+        uv(0) = fx * n_cam_proj(0) + cx * n_cam_proj(2);
+        uv(1) = fy * n_cam_proj(1) + cy * n_cam_proj(2);
+
+        _error(0) = uv(0) - a;
+        _error(1) = uv(1) - b;
+    }
+
+    void linearizeOplus() override
+    {
+        // 顶点是机体 SE3，雅可比类似 Pose-only
+        Eigen::Matrix3d dldnc;
+        dldnc << fx, 0, cx,
+                 0, fy, cy,
+                 0,  0, 1;
+
+        Eigen::Matrix<double,3,6> dncdxi;
+        dncdxi.setZero();
+        dncdxi.block<3,3>(0,0) = -skew(v_c);        // translation
+        dncdxi.block<3,3>(0,3) = -skew(n_c);        // rotation
+
+        Eigen::Matrix<double,3,6> dldxi = dldnc * dncdxi;
+
+        Eigen::Matrix<double,2,6> Jpose;
+        Jpose.row(0) = dldxi.row(0);
+        Jpose.row(1) = dldxi.row(1);
+
+        _jacobianOplusXi = Jpose;
+    }
+
+    inline Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
+    {
+        Eigen::Matrix3d S;
+        S <<     0, -v(2),  v(1),
+              v(2),    0, -v(0),
+             -v(1), v(0),   0;
+        return S;
+    }
+
+private:
+    double fx, fy, cx, cy;
+    double a=0, b=0, c=0;
+    Eigen::Vector3d n_c;  // Plucker n in camera frame
+    Eigen::Vector3d v_c;  // Plucker v in camera frame
 };
 
 }

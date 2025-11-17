@@ -311,4 +311,17 @@ Sophus::Sim3f Converter::toSophus(const g2o::Sim3& S) {
                          S.translation().cast<float>());
 }
 
+void LineSegmentToPlucker(
+    const Eigen::Vector3d& P1,
+    const Eigen::Vector3d& P2,
+    Eigen::Vector3d& n,
+    Eigen::Vector3d& v)
+{
+    // 方向向量
+    v = P2 - P1;
+
+    // 法向量部分
+    n = P1.cross(v);
+}
+
 } //namespace ORB_SLAM

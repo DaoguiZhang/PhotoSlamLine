@@ -272,6 +272,7 @@ public:
 
     void GetKeypointInfo(std::vector<float> &pixelsUndist, std::vector<float> &pointsLocal);
     void GetKeyLineInfo(std::vector<float> &pixelsUndist,std::vector<float> &pointsLocal);
+    bool GetLineEndpoints(int lineIdx, cv::Point2f &s_out, cv::Point2f &e_out);
 
     //keyLine functions(modified by zdg)
     std::vector<size_t> GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
@@ -318,7 +319,7 @@ public:
     void PreSaveWithMapLines(set<KeyFrame*>& spKF,set<MapPoint*>& spMP, set<MapLine*>& spML, set<GeometricCamera*>& spCam);
     void PostLoadWithMapLines(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapPoint*>& mpMPid, map<long unsigned int, MapLine*>& mpMLid, map<unsigned int, GeometricCamera*>& mpCamId);
 
-
+    
     void SetORBVocabulary(ORBVocabulary* pORBVoc);
     void SetKeyFrameDatabase(KeyFrameDatabase* pKFDB);
 

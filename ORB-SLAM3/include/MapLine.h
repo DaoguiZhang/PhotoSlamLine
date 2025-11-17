@@ -172,6 +172,54 @@ public:
     void PreSave(set<KeyFrame*>& spKF,set<MapLine*>& spMP);
     void PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapLine*>& mpMPid);
 
+    Eigen::Vector3f GetProjectedLineABC(KeyFrame *pKF);
+
+    void SetPluckerLineNew(const Eigen::Matrix<double,6,1>& plk);
+
+    // --- Set ---
+    inline void SetPluckerLine(const Eigen::Matrix<double,6,1>& Plucker)
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        mWorldPlucker = Plucker;
+    }
+
+    // --- Get ---
+    inline Eigen::Matrix<double,6,1> GetPluckerLine()
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        return mWorldPlucker;
+    }
+
+    //void SetPluckerLineNew(const Eigen::Matrix<double,6,1>& plk);
+
+    // 将像素点 (u,v) 在该 keyframe 下反投影成相机坐标系的单位方向向量（未缩放，单位向量）
+    // 返回：rayDir_world (单位向量), camCenter_world (相机中心在世界系)
+    static void BackprojectPixelToWorldRay(KeyFrame* pKF, const cv::Point2f &uv, Eigen::Vector3f &camCenter_world, Eigen::Vector3f &rayDir_world);
+
+    // 将 Plücker 参数 L = [n(3); v(3)] 转换为 直线上一点 p0 (world) 和方向 dir (world, 单位向量)
+    // p0 = (n × v) / |v|^2
+    static void PluckerToPointAndDir(const Eigen::Matrix<double,6,1> &L, Eigen::Vector3f &p0, Eigen::Vector3f &dir);
+
+    // 计算两条无穷直线（L1: P1 + s * d1, L2: P2 + t * d2）间的最近点
+    // 返回：点在 L1 上的参数 s，点在 L2 上的参数 t，以及对应的点 p1 = P1 + s*d1, p2 = P2 + t*d2
+    // 若平行，会选择投影到其中一条上
+    static void ClosestPointsBetweenLines(const Eigen::Vector3f &P1, const Eigen::Vector3f &d1,
+                                      const Eigen::Vector3f &P2, const Eigen::Vector3f &d2,
+                                      float &s_out, float &t_out,
+                                      Eigen::Vector3f &p1_out, Eigen::Vector3f &p2_out);
+
+    // 稳健均值（按每个坐标维度取中位数）
+    // 输入：points (非空)
+    // 返回：三维中位数向量
+    static Eigen::Vector3f RobustMedian3(const std::vector<Eigen::Vector3f> &points);
+
+    // 返回 true 表示成功拿到端点 (s,e)
+    static bool GetKeyFrameLineEndpoints(KeyFrame* pKF, int lineIdx, cv::Point2f &s_out, cv::Point2f &e_out);
+    
+    //Important
+    void UpdateFromPluckerLine();
+
+
 public:
     long unsigned int mnId;
     static long unsigned int nNextId;
@@ -245,6 +293,9 @@ protected:
      // Position in absolute coordinates
      Eigen::Matrix<float,6,1> mLineWorldPos;
      Eigen::Vector3f mLsWorldPos, mLeWorldPos;  //line start and end point
+
+     //
+     Eigen::Matrix<double,6,1> mWorldPlucker;   //plucker
 
      // RGB Color from the first observation
      // -- Useless for ORB-SLAM3 but useful in Gaussian Mapping, so supposed to be constant since created

@@ -93,6 +93,7 @@ src/Config.cc
 src/Settings.cc
 include/MapExporter.h
 include/CommonTypeORB.h
+include/VertexToLinePlucker.h
 #include/levmar.h
 include/LineExtractor.h
 include/LSDextractor.h

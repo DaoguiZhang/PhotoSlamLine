@@ -1371,135 +1371,138 @@ void LocalMapping::SearchInNeighbors()
 
 void LocalMapping::SearchInNeighborsWithLine()
 {
-    // Retrieve neighbor keyframes
-    int nn = 10;
-    if(mbMonocular)
-        nn=30;
-    const vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
-    vector<KeyFrame*> vpTargetKFs;
-    for(vector<KeyFrame*>::const_iterator vit=vpNeighKFs.begin(), vend=vpNeighKFs.end(); vit!=vend; vit++)
+    if(!mpCurrentKeyFrame) return;
+
+    // 1. 获取当前 KeyFrame 的邻居 KeyFrames
+    int nn = mbMonocular ? 30 : 10;
+    const std::vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+    std::vector<KeyFrame*> vpTargetKFs;
+
+    for(KeyFrame* pKFi : vpNeighKFs)
     {
-        KeyFrame* pKFi = *vit;
         if(pKFi->isBad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->mnId)
             continue;
         vpTargetKFs.push_back(pKFi);
         pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
     }
 
-    // Add some covisible of covisible
-    // Extend to some second neighbors if abort is not requested
-    for(int i=0, imax=vpTargetKFs.size(); i<imax; i++)
+    // 可选：拓展二级邻居
+    for(size_t i = 0; i < vpTargetKFs.size(); ++i)
     {
-        const vector<KeyFrame*> vpSecondNeighKFs = vpTargetKFs[i]->GetBestCovisibilityKeyFrames(20);
-        for(vector<KeyFrame*>::const_iterator vit2=vpSecondNeighKFs.begin(), vend2=vpSecondNeighKFs.end(); vit2!=vend2; vit2++)
+        if(mbAbortBA) break;
+        const std::vector<KeyFrame*> vpSecondNeighKFs = vpTargetKFs[i]->GetBestCovisibilityKeyFrames(20);
+        for(KeyFrame* pKFi2 : vpSecondNeighKFs)
         {
-            KeyFrame* pKFi2 = *vit2;
-            if(pKFi2->isBad() || pKFi2->mnFuseTargetForKF==mpCurrentKeyFrame->mnId || pKFi2->mnId==mpCurrentKeyFrame->mnId)
+            if(pKFi2->isBad() || pKFi2->mnFuseTargetForKF == mpCurrentKeyFrame->mnId || pKFi2->mnId == mpCurrentKeyFrame->mnId)
                 continue;
             vpTargetKFs.push_back(pKFi2);
-            pKFi2->mnFuseTargetForKF=mpCurrentKeyFrame->mnId;
+            pKFi2->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
         }
-        if (mbAbortBA)
-            break;
     }
 
-    // Extend to temporal neighbors
+    // 可选：拓展时间邻居（惯性相机）
     if(mbInertial)
     {
         KeyFrame* pKFi = mpCurrentKeyFrame->mPrevKF;
-        while(vpTargetKFs.size()<20 && pKFi)
+        while(vpTargetKFs.size() < 20 && pKFi)
         {
-            if(pKFi->isBad() || pKFi->mnFuseTargetForKF==mpCurrentKeyFrame->mnId)
+            if(!pKFi->isBad() && pKFi->mnFuseTargetForKF != mpCurrentKeyFrame->mnId)
             {
-                pKFi = pKFi->mPrevKF;
-                continue;
+                vpTargetKFs.push_back(pKFi);
+                pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
             }
-            vpTargetKFs.push_back(pKFi);
-            pKFi->mnFuseTargetForKF=mpCurrentKeyFrame->mnId;
             pKFi = pKFi->mPrevKF;
-        }
-    }
-
-    // Search matches by projection from current KF in target KFs
-    ORBmatcher matcher;
-    vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
-    for(vector<KeyFrame*>::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
-    {
-        KeyFrame* pKFi = *vit;
-
-        matcher.Fuse(pKFi,vpMapPointMatches);
-        if(pKFi->NLeft != -1) matcher.Fuse(pKFi,vpMapPointMatches,true);
-    }
-
-
-    if (mbAbortBA)
-        return;
-
-    // Search matches by projection from target KFs in current KF
-    vector<MapPoint*> vpFuseCandidates;
-    vpFuseCandidates.reserve(vpTargetKFs.size()*vpMapPointMatches.size());
-
-    for(vector<KeyFrame*>::iterator vitKF=vpTargetKFs.begin(), vendKF=vpTargetKFs.end(); vitKF!=vendKF; vitKF++)
-    {
-        KeyFrame* pKFi = *vitKF;
-
-        vector<MapPoint*> vpMapPointsKFi = pKFi->GetMapPointMatches();
-
-        for(vector<MapPoint*>::iterator vitMP=vpMapPointsKFi.begin(), vendMP=vpMapPointsKFi.end(); vitMP!=vendMP; vitMP++)
-        {
-            MapPoint* pMP = *vitMP;
-            if(!pMP)
-                continue;
-            if(pMP->isBad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
-                continue;
-            pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
-            vpFuseCandidates.push_back(pMP);
-        }
-    }
-
-    matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates);
-    if(mpCurrentKeyFrame->NLeft != -1) matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates,true);
-
-
-    // Update points
-    vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
-    for(size_t i=0, iend=vpMapPointMatches.size(); i<iend; i++)
-    {
-        MapPoint* pMP=vpMapPointMatches[i];
-        if(pMP)
-        {
-            if(!pMP->isBad())
-            {
-                pMP->ComputeDistinctiveDescriptors();
-                pMP->UpdateNormalAndDepth();
-            }
         }
     }
 
     if(mbAbortBA) return;
 
-    // === Step 3: Fuse MapLines ===
-    LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f,2.0f);
+    // === 2. MapPoint 融合 ===
+    ORBmatcher matcher;
+    std::vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
 
-    // 当前 KeyFrame 的 MapLine 列表
+    // 从邻居 KeyFrame 融合到当前 KeyFrame
+    for(KeyFrame* pKFi : vpTargetKFs)
+    {
+        matcher.Fuse(pKFi, vpMapPointMatches);
+        if(pKFi->NLeft != -1)
+            matcher.Fuse(pKFi, vpMapPointMatches, true);
+    }
+
+    if(mbAbortBA) return;
+
+    // 从当前 KeyFrame 融合到邻居 KeyFrame（候选点机制）
+    std::vector<MapPoint*> vpFusePointCandidates;
+    vpFusePointCandidates.reserve(vpTargetKFs.size() * vpMapPointMatches.size());
+
+    for(KeyFrame* pKFi : vpTargetKFs)
+    {
+        const std::vector<MapPoint*> vpMapPointsKFi = pKFi->GetMapPointMatches();
+        for(MapPoint* pMP : vpMapPointsKFi)
+        {
+            if(!pMP || pMP->isBad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+            vpFusePointCandidates.push_back(pMP);
+        }
+    }
+
+    matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates);
+    if(mpCurrentKeyFrame->NLeft != -1)
+        matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates, true);
+
+    // 更新 MapPoint 描述子和法向量
+    vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+    for(MapPoint* pMP : vpMapPointMatches)
+    {
+        if(pMP && !pMP->isBad())
+        {
+            pMP->ComputeDistinctiveDescriptors();
+            pMP->UpdateNormalAndDepth();
+        }
+    }
+
+    if(mbAbortBA) return;
+
+    // === 3. MapLine 融合 ===
+    LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f, 2.0f);
     std::vector<MapLine*> vpMapLinesCurKF = mpCurrentKeyFrame->GetMapLineMatches();
 
-    for(auto vitKF = vpTargetKFs.begin(); vitKF != vpTargetKFs.end(); vitKF++)
+    // 收集候选 MapLine
+    std::vector<MapLine*> vpFuseLineCandidates;
+    vpFuseLineCandidates.reserve(vpTargetKFs.size() * vpMapLinesCurKF.size());
+
+    for(KeyFrame* pKFi : vpTargetKFs)
     {
-        KeyFrame* pKFi = *vitKF;
         if(mbAbortBA) return;
-        // 使用 LSDmatcher::Fuse 融合 MapLine
-        line_matcher.Fuse(pKFi, vpMapLinesCurKF, 50.0f); // th=3像素，可以调整
+        const std::vector<MapLine*> vpMapLinesKFi = pKFi->GetMapLineMatches();
+        for(MapLine* pML : vpMapLinesKFi)
+        {
+            if(!pML || pML->isBad() || pML->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            pML->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+            vpFuseLineCandidates.push_back(pML);
+        }
     }
+
+    // 融合候选 MapLine 到当前 KeyFrame
+    line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f); // th 可调整
+    //to do next
+    //if(mpCurrentKeyFrame->NLeft != -1)
+    //    line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f, true);
+
     // 更新 MapLine 描述子
     for(MapLine* pML : vpMapLinesCurKF)
     {
         if(pML && !pML->isBad())
         {
             pML->ComputeDistinctiveDescriptors();
+            pML->UpdateNormalAndDepth();
         }
+            
     }
-    // Update connections in covisibility graph
+
+    // 更新共视连接
     mpCurrentKeyFrame->UpdateConnections();
 }
 

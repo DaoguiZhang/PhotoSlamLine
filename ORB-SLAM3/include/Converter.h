@@ -74,6 +74,12 @@ public:
     //TODO: Sophus migration, to be deleted in the future
     static Sophus::SE3<float> toSophus(const cv::Mat& T);
     static Sophus::Sim3f toSophus(const g2o::Sim3& S);
+
+    static void LineSegmentToPlucker(
+        const Eigen::Vector3d& P1,
+        const Eigen::Vector3d& P2,
+        Eigen::Vector3d& n,
+        Eigen::Vector3d& v);
 };
 
 }// namespace ORB_SLAM
