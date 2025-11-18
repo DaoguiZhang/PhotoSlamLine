@@ -6,6 +6,7 @@
 #include "LSDmatcher.h"
 #include "Converter.h"
 #include "LSDVisualizer.h"
+#include <unordered_set>
 
 using namespace std;
 using namespace cv;
@@ -1271,6 +1272,139 @@ namespace ORB_SLAM3
         cv::waitKey(0);
     }
 
+    void LSDmatcher::DebugLineProjectedKeyFrame(KeyFrame* pKF, std::vector<MapLine*> &vpMapLines, const std::string &winName)
+    {
+        if(!pKF || vpMapLines.empty()) return;
+        // 复制图像，用于绘制
+        cv::Mat img;
+        if(pKF->imgLeftRGB.channels() == 3)
+            img = pKF->imgLeftRGB.clone();
+        else
+            cv::cvtColor(pKF->imgLeftRGB, img, cv::COLOR_GRAY2BGR);
+        // 获取相机内参
+        const float fx = pKF->fx;
+        const float fy = pKF->fy;
+        const float cx = pKF->cx;
+        const float cy = pKF->cy;
+        // 位姿
+        Sophus::SE3f Tcw = pKF->GetPose();
+        Eigen::Matrix3f Rcw = Tcw.rotationMatrix();
+        Eigen::Vector3f tcw = Tcw.translation();
+        for(MapLine* pML : vpMapLines)
+        {
+            if(!pML || pML->isBad()) continue;
+            Eigen::Vector3f SP, EP;
+            std::tie(SP, EP) = pML->GetLineWorldPos();
+            // 投影到相机坐标系
+            Eigen::Vector3f SPc = Rcw * SP + tcw;
+            Eigen::Vector3f EPc = Rcw * EP + tcw;
+            // === 改进裁剪 Z <= 0 ===
+            if(SPc(2) <= 0 && EPc(2) <= 0)
+                continue; // 线段完全在相机后方，舍弃
+            else if(SPc(2) <= 0)
+            {
+                float alpha = EPc(2) / (EPc(2)-SPc(2));
+                SPc = SPc + alpha*(EPc-SPc);
+            }
+            else if(EPc(2) <= 0)
+            {
+                float alpha = SPc(2) / (SPc(2)-EPc(2));
+                EPc = EPc + alpha*(SPc-EPc);
+            }
+            // 投影到像素平面
+            cv::Point2f pt1(fx*SPc(0)/SPc(2) + cx, fy*SPc(1)/SPc(2) + cy);
+            cv::Point2f pt2(fx*EPc(0)/EPc(2) + cx, fy*EPc(1)/EPc(2) + cy);
+            // 可选：裁剪到图像边界
+            pt1.x = std::max(0.f, std::min(pt1.x, float(pKF->mnMaxX)));
+            pt1.y = std::max(0.f, std::min(pt1.y, float(pKF->mnMaxY)));
+            pt2.x = std::max(0.f, std::min(pt2.x, float(pKF->mnMaxX)));
+            pt2.y = std::max(0.f, std::min(pt2.y, float(pKF->mnMaxY)));
+            // 画线
+            cv::Scalar color(0, 0, 255); // 红色线
+            cv::line(img, pt1, pt2, color, 2, cv::LINE_AA);
+            // 可选：绘制端点
+            cv::circle(img, pt1, 3, cv::Scalar(0,255,0), -1); // 绿色端点
+            cv::circle(img, pt2, 3, cv::Scalar(255,0,0), -1); // 蓝色端点
+        }
+        // 显示
+        cv::namedWindow(winName, cv::WINDOW_NORMAL);
+        cv::imshow(winName, img);
+        cv::waitKey(1);
+    }
+
+    void LSDmatcher::DebugLineMatchesTwoFrames(KeyFrame* pKF1,KeyFrame* pKF2,const std::vector<std::pair<MapLine*, MapLine*>> &vpMatchedLines,const std::string &winName)
+    {
+        if(!pKF1 || !pKF2 || vpMatchedLines.empty()) return;
+        // 克隆两帧图像
+        cv::Mat img1, img2;
+        if(pKF1->imgLeftRGB.channels() == 3)
+            img1 = pKF1->imgLeftRGB.clone();
+        else
+            cv::cvtColor(pKF1->imgLeftRGB, img1, cv::COLOR_GRAY2BGR);
+        if(pKF2->imgLeftRGB.channels() == 3)
+            img2 = pKF2->imgLeftRGB.clone();
+        else
+            cv::cvtColor(pKF2->imgLeftRGB, img2, cv::COLOR_GRAY2BGR);
+        // 相机内参
+        const float fx1 = pKF1->fx, fy1 = pKF1->fy, cx1 = pKF1->cx, cy1 = pKF1->cy;
+        const float fx2 = pKF2->fx, fy2 = pKF2->fy, cx2 = pKF2->cx, cy2 = pKF2->cy;
+        // 位姿
+        Sophus::SE3f Tcw1 = pKF1->GetPose();
+        Sophus::SE3f Tcw2 = pKF2->GetPose();
+        Eigen::Matrix3f Rcw1 = Tcw1.rotationMatrix();
+        Eigen::Vector3f tcw1 = Tcw1.translation();
+        Eigen::Matrix3f Rcw2 = Tcw2.rotationMatrix();
+        Eigen::Vector3f tcw2 = Tcw2.translation();
+        for(const auto &match : vpMatchedLines)
+        {
+            MapLine* pML1 = match.first;
+            MapLine* pML2 = match.second;
+            if(!pML1 || !pML2 || pML1->isBad() || pML2->isBad())
+                continue;
+            Eigen::Vector3f SP1, EP1, SP2, EP2;
+            std::tie(SP1, EP1) = pML1->GetLineWorldPos();
+            std::tie(SP2, EP2) = pML2->GetLineWorldPos();
+            // 投影到相机坐标系
+            Eigen::Vector3f SPc1 = Rcw1 * SP1 + tcw1;
+            Eigen::Vector3f EPc1 = Rcw1 * EP1 + tcw1;
+            Eigen::Vector3f SPc2 = Rcw2 * SP2 + tcw2;
+            Eigen::Vector3f EPc2 = Rcw2 * EP2 + tcw2;
+            // 简单裁剪 Z <= 0
+            if(SPc1(2) <= 0 || EPc1(2) <= 0 || SPc2(2) <= 0 || EPc2(2) <= 0)
+                continue;
+            // 投影到像素坐标
+            cv::Point2f pt1_1(fx1*SPc1(0)/SPc1(2) + cx1, fy1*SPc1(1)/SPc1(2) + cy1);
+            cv::Point2f pt1_2(fx1*EPc1(0)/EPc1(2) + cx1, fy1*EPc1(1)/EPc1(2) + cy1);
+            cv::Point2f pt2_1(fx2*SPc2(0)/SPc2(2) + cx2, fy2*SPc2(1)/SPc2(2) + cy2);
+            cv::Point2f pt2_2(fx2*EPc2(0)/EPc2(2) + cx2, fy2*EPc2(1)/EPc2(2) + cy2);
+            // 边界裁剪 C++11
+            pt1_1.x = std::max(0.f, std::min(pt1_1.x, float(pKF1->mnMaxX)));
+            pt1_1.y = std::max(0.f, std::min(pt1_1.y, float(pKF1->mnMaxY)));
+            pt1_2.x = std::max(0.f, std::min(pt1_2.x, float(pKF1->mnMaxX)));
+            pt1_2.y = std::max(0.f, std::min(pt1_2.y, float(pKF1->mnMaxY)));
+            pt2_1.x = std::max(0.f, std::min(pt2_1.x, float(pKF2->mnMaxX)));
+            pt2_1.y = std::max(0.f, std::min(pt2_1.y, float(pKF2->mnMaxY)));
+            pt2_2.x = std::max(0.f, std::min(pt2_2.x, float(pKF2->mnMaxX)));
+            pt2_2.y = std::max(0.f, std::min(pt2_2.y, float(pKF2->mnMaxY)));
+            // 绘制 KF1 的线段
+            cv::line(img1, pt1_1, pt1_2, cv::Scalar(0,0,255), 2, cv::LINE_AA);
+            cv::circle(img1, pt1_1, 3, cv::Scalar(0,255,0), -1);
+            cv::circle(img1, pt1_2, 3, cv::Scalar(255,0,0), -1);
+            // 绘制 KF2 的线段
+            cv::line(img2, pt2_1, pt2_2, cv::Scalar(0,255,255), 2, cv::LINE_AA);
+            cv::circle(img2, pt2_1, 3, cv::Scalar(0,128,255), -1);
+            cv::circle(img2, pt2_2, 3, cv::Scalar(255,128,0), -1);
+            // 可选：画匹配连线（在合并显示时）
+            cv::line(img1, pt1_1, pt2_1, cv::Scalar(255,255,0), 1, cv::LINE_AA);
+            cv::line(img1, pt1_2, pt2_2, cv::Scalar(255,255,0), 1, cv::LINE_AA);
+        }
+        // 将两帧图像水平拼接显示
+        cv::Mat imgConcat;
+        cv::hconcat(img1, img2, imgConcat);
+        cv::namedWindow(winName, cv::WINDOW_NORMAL);
+        cv::imshow(winName, imgConcat);
+        cv::waitKey(1);
+    }
 
     int LSDmatcher::SearchByDescriptor(KeyFrame* pKF, Frame &currentF, vector<MapLine*> &vpMapLineMatches)
     {
@@ -1762,7 +1896,91 @@ namespace ORB_SLAM3
         return nFused;
     }
 
-    
+    int LSDmatcher::FuseOld(KeyFrame* pKF, const std::vector<MapLine*>& vpMapLines, const float th)
+    {
+        Eigen::Matrix3f Rcw = pKF->GetRotation();
+        Eigen::Vector3f tcw = pKF->GetTranslation();
+        Eigen::Vector3f Ow = pKF->GetCameraCenter();
+        const float& fx = pKF->fx;
+        const float& fy = pKF->fy;
+        const float& cx = pKF->cx;
+        const float& cy = pKF->cy;
+        int nFused = 0;
+        std::unordered_set<MapLine*> fusedSet;
+        for(MapLine* pML : vpMapLines)
+        {
+            if(!pML || pML->isBad() || fusedSet.count(pML))
+                continue;
+            fusedSet.insert(pML);
+            // Step 1: 获取数据，无锁
+            auto [SP, EP] = pML->GetLineWorldPos();
+            float dist = (0.5f*(SP+EP)-Ow).norm();
+            int nPredictedLevel = pML->PredictScale(dist, pKF);
+            float radius = th * pKF->mvScaleFactors[nPredictedLevel];
+            // 投影到相机坐标
+            Eigen::Vector3f SPc = Rcw*SP + tcw;
+            Eigen::Vector3f EPc = Rcw*EP + tcw;
+            // 裁剪相机后方
+            if(SPc(2)<=0 && EPc(2)<=0) continue;
+            if(SPc(2)<=0) SPc += (EPc-SPc)*(EPc(2)/(EPc(2)-SPc(2)));
+            else if(EPc(2)<=0) EPc += (SPc-EPc)*(SPc(2)/(SPc(2)-EPc(2)));
+            // 投影到像素
+            float u1 = fx*SPc(0)/SPc(2)+cx, v1 = fy*SPc(1)/SPc(2)+cy;
+            float u2 = fx*EPc(0)/EPc(2)+cx, v2 = fy*EPc(1)/EPc(2)+cy;
+            u1 = std::max((float)pKF->mnMinX, std::min(u1, (float)pKF->mnMaxX));
+            v1 = std::max((float)pKF->mnMinY, std::min(v1, (float)pKF->mnMaxY));
+            u2 = std::max((float)pKF->mnMinX, std::min(u2, (float)pKF->mnMaxX));
+            v2 = std::max((float)pKF->mnMinY, std::min(v2, (float)pKF->mnMaxY));
+            std::vector<size_t> vIndices = pKF->GetLinesInArea(u1,v1,u2,v2,radius);
+            if(vIndices.empty()) continue;
+            cv::Mat dML = pML->GetLineDescriptor();
+            int bestDist = INT_MAX;
+            int bestIdx = -1;
+            for(size_t idx : vIndices)
+            {
+                int klLevel = pKF->mvKeyLines[idx].octave;
+                if(klLevel<nPredictedLevel-1 || klLevel>nPredictedLevel) continue;
+                const cv::Mat& dKF = pKF->mLineDescriptors.row(idx);
+                int distDesc = DescriptorDistance(dML,dKF);
+                if(distDesc<bestDist){ bestDist=distDesc; bestIdx=idx; }
+            }
+            if(bestDist > TH_LOW) continue;
+            // Step 2: 修改 MapLine 或 KeyFrame 状态，加锁最小粒度
+            MapLine* currentML = pML;
+            // 获取 KeyFrame 中对应 MapLine
+            MapLine* pMLinKF = nullptr;
+            {
+                //std::unique_lock<std::mutex> lockKF(pKF->mMutexFeatures);
+                pMLinKF = pKF->GetMapLine(bestIdx);
+            }
+            if(pMLinKF && !pMLinKF->isBad())
+            {
+                // 锁住两条 MapLine，顺序固定: 小ID先锁
+                MapLine *first = (currentML->mnId < pMLinKF->mnId) ? currentML : pMLinKF;
+                MapLine *second = (currentML->mnId < pMLinKF->mnId) ? pMLinKF : currentML;
+                //std::unique_lock<std::mutex> lock1(first->mMutexPos);
+                //std::unique_lock<std::mutex> lock2(second->mMutexPos);
+                if(pMLinKF->Observations() > currentML->Observations())
+                    currentML->Replace(pMLinKF);
+                else
+                    pMLinKF->Replace(currentML);
+                currentML = currentML->GetReplaced();
+            }
+            else
+            {
+                //std::unique_lock<std::mutex> lockML(currentML->mMutexFeatures);
+                currentML->AddLineObservation(pKF,bestIdx);
+                {
+                    //std::unique_lock<std::mutex> lockKF(pKF->mMutexFeatures);
+                    pKF->AddMapLine(currentML,bestIdx);
+                }
+            }
+            nFused++;
+        }
+        return nFused;
+    }
+
+
     float LSDmatcher::RadiusByViewingCos(const float &viewCos)
     {
         if(viewCos>0.998)

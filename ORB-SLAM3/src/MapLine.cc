@@ -37,6 +37,9 @@ MapLine::MapLine():
     mbRetrived(false)
 {
     mpLineReplaced = static_cast<MapLine*>(NULL);
+    // MapLines can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
+    unique_lock<mutex> lock(mpMap->mMutexLineCreation);//指的是啥？我暂且忘记了？？？
+     mnId=nNextId++;
 }
 
 //construct a MapLine with 3D Line position
@@ -59,7 +62,7 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos, con
     mbLineTrackInView = false;
 
     // MapLines can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
-    unique_lock<mutex> lock(mpMap->mMutexPointCreation);//指的是啥？我暂且忘记了？？？
+    unique_lock<mutex> lock(mpMap->mMutexLineCreation);//指的是啥？我暂且忘记了？？？
     mnId=nNextId++;
 }
 
@@ -124,8 +127,8 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Ma
 
     //pFrame->mDescriptors.row(idxF).copyTo(mDescriptor);   //to do next...(Line feature descriptor)
 
-    // MapPoints can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
-    unique_lock<mutex> lock(mpMap->mMutexPointCreation);
+    // MapLines can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
+    unique_lock<mutex> lock(mpMap->mMutexLineCreation);
     mnId=nNextId++;
 }
 
@@ -416,7 +419,6 @@ void MapLine::Replace(MapLine* pML)
     {
         // Replace measurement in keyframe
         KeyFrame* pKF = mit->first;
-
         tuple<int,int> indexes = mit -> second;
         int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
 
@@ -444,8 +446,11 @@ void MapLine::Replace(MapLine* pML)
     pML->IncreaseFound(nfound);
     pML->IncreaseVisible(nvisible);
     pML->ComputeDistinctiveDescriptors();
-
-    mpMap->EraseMapLine(this);
+    if (mpMap)
+    {
+        mpMap->EraseMapLine(this);
+    }
+    
 }
 
 bool MapLine::IsInKeyFrame(KeyFrame *pKF)

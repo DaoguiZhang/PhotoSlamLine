@@ -41,11 +41,21 @@ Map::Map(int initKFid):mnInitKFid(initKFid), mnMaxKFid(initKFid),/*mnLastLoopKFi
 
 Map::~Map()
 {
+    // 删除所有 MapPoints
+    for (auto pMP : mspMapPoints)
+        delete pMP;
     //TODO: erase all points from memory
     mspMapPoints.clear();
+
+    // 删除所有 MapLines
+    for (auto pML : mspMapLines)
+        delete pML;
     mspMapLines.clear();  //added for MapLine
 
     //TODO: erase all keyframes from memory
+    // 删除 KeyFrames
+    for (auto pKF : mspKeyFrames)
+        delete pKF;
     mspKeyFrames.clear();
 
     mvpReferenceMapPoints.clear();
@@ -136,8 +146,15 @@ void Map::AddMapLine(MapLine* pML)
 
 void Map::EraseMapLine(MapLine* pML)
 {
-    unique_lock<mutex> lock(mMutexMap);
-    mspMapLines.erase(pML);
+    if (!pML)
+        return;
+    std::unique_lock<std::mutex> lock(mMutexMap);
+    auto it = mspMapLines.find(pML);
+    if (it != mspMapLines.end())
+    {
+        // 仅从 set 中移除，不 delete
+        mspMapLines.erase(it);
+    }
 }
 
 void Map::SetReferenceMapLines(const vector<MapLine *> &vpMLs)
@@ -265,6 +282,26 @@ void Map::clear()
     mvpKeyFrameOrigins.clear();
     mbIMU_BA1 = false;
     mbIMU_BA2 = false;
+}
+
+void Map::AddToLineDeletionQueue(MapLine* pML)
+{
+    if(!pML) return;
+    unique_lock<mutex> lock(mMutexMap);
+    mvpLinesToBeErased.push_back(pML);
+}
+
+void Map::EraseQueuedLines()
+{
+    unique_lock<mutex> lock(mMutexMap);
+    for(MapLine* pML : mvpLinesToBeErased)
+    {
+        // Remove from container (already done in Replace via EraseMapLine),
+        // but ensure if still present we erase:
+        mspMapLines.erase(pML);
+        delete pML; // now safe: call from Mapping thread at safe point
+    }
+    mvpLinesToBeErased.clear();
 }
 
 bool Map::IsInUse()

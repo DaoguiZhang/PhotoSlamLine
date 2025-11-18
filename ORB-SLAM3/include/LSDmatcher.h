@@ -62,6 +62,8 @@ namespace ORB_SLAM3
         void DebugDrawLineMatches(const Frame &lastFrame, const Frame &currentFrame);
         void DebugDrawLineMatchesFrame(Frame &CurrentFrame, std::string &windowName);
         void DebugSearchByProjectionLinesMatch(Frame &F, std::vector<MapLine*> &vpMapLines,const std::string &windowName);
+        void DebugLineProjectedKeyFrame(KeyFrame* pKF, std::vector<MapLine*> &vpMapLines, const std::string & winName);
+        void DebugLineMatchesTwoFrames(KeyFrame* pKF1,KeyFrame* pKF2,const std::vector<std::pair<MapLine*, MapLine*>> &vpMatchedLines,const std::string &winName);
         void DebugDrawProjectedLineFrame(Frame &CurrentFrame, std::string &windowName);
         int SearchByProjection(KeyFrame* pKF,Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
         void DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame);
@@ -77,6 +79,7 @@ namespace ORB_SLAM3
         int SearchForTriangulationFused(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<int, int>> &vMatchedPairs);
 
         // Project MapLines into KeyFrame and search for duplicated MapLines
+        int FuseOld(KeyFrame* pKF, const std::vector<MapLine *> &vpMapLines, const float th=3.0);
         int Fuse(KeyFrame* pKF, const std::vector<MapLine *> &vpMapLines, const float th=3.0);
 
         int Fuse(KeyFrame* pKF, cv::Mat Scw, const std::vector<MapLine*> &vpLines, float th, std::vector<MapLine *> &vpReplaceLine);

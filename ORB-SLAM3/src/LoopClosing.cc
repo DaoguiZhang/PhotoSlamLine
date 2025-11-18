@@ -271,7 +271,7 @@ void LoopClosing::Run()
                         nLoop += 1;
 
 #endif
-                        CorrectLoop();
+                        CorrectLoop();  //main function,to do next...
 #ifdef REGISTER_TIMES
                         std::chrono::steady_clock::time_point time_EndLoop = std::chrono::steady_clock::now();
 

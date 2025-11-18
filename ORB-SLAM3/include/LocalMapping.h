@@ -145,6 +145,7 @@ protected:
     void MapLineCulling();
     void SearchInNeighbors();
     void SearchInNeighborsWithLine();
+    void SearchInNeighborsWithLineNew();
     void KeyFrameCulling();
 
     bool CheckLineReprojection(KeyFrame* pKF, const Eigen::Vector3f &X3Ds, const Eigen::Vector3f &X3De, const cv::line_descriptor::KeyLine &kline);

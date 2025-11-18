@@ -328,6 +328,8 @@ void LocalMapping::RunWithLine()
             CreateNewMapPoints();
             //Triangle new MapLines
             CreateNewMapLines();
+            //Debug the lines
+
 
             mbAbortBA = false;
 
@@ -335,6 +337,7 @@ void LocalMapping::RunWithLine()
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
                 SearchInNeighborsWithLine();
+                //SearchInNeighbors();
             }
 
 #ifdef REGISTER_TIMES
@@ -374,7 +377,6 @@ void LocalMapping::RunWithLine()
                                 mbBadImu = true;
                             }
                         }
-
                         bool bLarge = ((mpTracker->GetMatchesInliers()>75)&&mbMonocular)||((mpTracker->GetMatchesInliers()>100)&&!mbMonocular);
                         MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
                         Optimizer::LocalInertialBA(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr, bLarge, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());
@@ -387,6 +389,7 @@ void LocalMapping::RunWithLine()
                         Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
                         //修改LocalBundleAdjustment，把这个写完，明天调试这些代码，如果能调试好，几乎所有都做好了。后面对于全局的相机优化，是否再弄一下，需要调整一下。
                         //Optimizer::LocalBundleAdjustmentWithLine(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        //Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         b_doneLBA = true;
                         mpAtlas->pushMappingOperation(opr);
                     }
@@ -483,7 +486,7 @@ void LocalMapping::RunWithLine()
             vdKFCullingSync_ms.push_back(timeKFCulling_ms);
 #endif
 
-            mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);
+            mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);    //TO DO THE GLOBALBUNDLEADJUSTMENT
 
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_EndLocalMap = std::chrono::steady_clock::now();
@@ -1194,19 +1197,17 @@ void LocalMapping::CreateNewMapLines()
 
             // === Step E：创建 MapLine ===
             MapLine* pML = new MapLine(s3D, e3D, line_seg_color.first, line_seg_color.second, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
-
             pML->AddLineObservation(mpCurrentKeyFrame, idx1);
             pML->AddLineObservation(pKF2, idx2);
-
             mpCurrentKeyFrame->AddMapLine(pML, idx1);
             pKF2->AddMapLine(pML, idx2);
-
             pML->ComputeDistinctiveDescriptors();
             mpAtlas->AddMapLine(pML);
-
             mlpRecentAddedMapLines.push_back(pML);
         }
     }
+    //debug the line 3D
+    //line_matcher.DebugDrawLineMatchesFrame
 }
 
 bool LocalMapping::CheckLineReprojection(
@@ -1484,27 +1485,221 @@ void LocalMapping::SearchInNeighborsWithLine()
             vpFuseLineCandidates.push_back(pML);
         }
     }
-
     // 融合候选 MapLine 到当前 KeyFrame
     line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f); // th 可调整
     //to do next
     //if(mpCurrentKeyFrame->NLeft != -1)
     //    line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f, true);
-
     // 更新 MapLine 描述子
     for(MapLine* pML : vpMapLinesCurKF)
     {
-        if(pML && !pML->isBad())
-        {
-            pML->ComputeDistinctiveDescriptors();
-            pML->UpdateNormalAndDepth();
-        }
-            
+       if(pML && !pML->isBad())
+       {
+           pML->ComputeDistinctiveDescriptors();
+           pML->UpdateNormalAndDepth();
+       }           
     }
+    //debug一下线段匹配的情况
+    ////debug draw
+    //std::cerr << "TrackWithMotionModelWithLine->Point Matches: " <<  nmatches  << ";   TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
+    // line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
+    // std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+    // MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+    // std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+    // MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
+    // if(nLinematches<8)
+    // {
+    //     Verbose::PrintMess("Not enough Line matches after debug draw!!", Verbose::VERBOSITY_NORMAL); //TO DO NEXT
+    //     std::string last_win_proj_name = "LineProj_LastFrame_" + std::to_string(mLastFrame.mnId);
+    //     std::string current_win_proj_name = "LineProj_CurrentFrame_" + std::to_string(mCurrentFrame.mnId);
+    //     line_matcher.DebugDrawProjectedLineFrame(mLastFrame, last_win_proj_name);
+    //     line_matcher.DebugDrawProjectedLineFrame(mCurrentFrame, current_win_proj_name);
+    //     std::string last_win_name = "LineMatches_LastFrame_" + std::to_string(mLastFrame.mnId);
+    //     std::string current_win_name = "LineMatches_CurrentFrame_" + std::to_string(mCurrentFrame.mnId);
+    //     line_matcher.DebugDrawLineMatchesFrame(mLastFrame, last_win_name);
+    //     line_matcher.DebugDrawLineMatchesFrame(mCurrentFrame, current_win_name);
+    //     line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
+    //     line_matcher.DebugLineProjectionNew(mCurrentFrame, mLastFrame.mvpMapLines, "ProjectedLinesBeforeOpti");
+    //     std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+    //     MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+    //     std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+    //     MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
+    // }
 
     // 更新共视连接
     mpCurrentKeyFrame->UpdateConnections();
 }
+
+void LocalMapping::SearchInNeighborsWithLineNew()
+{
+    if(!mpCurrentKeyFrame) return;
+
+    // 1. 获取当前 KeyFrame 的邻居 KeyFrames (短时拷贝，带锁)
+    std::vector<KeyFrame*> vpTargetKFs;
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        int nn = mbMonocular ? 30 : 10;
+        const std::vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+        for(KeyFrame* pKFi : vpNeighKFs)
+        {
+            if(pKFi->isBad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            vpTargetKFs.push_back(pKFi);
+            pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+        }
+
+        // 二级邻居（短时复制）
+        for(size_t i = 0; i < vpTargetKFs.size(); ++i)
+        {
+            if(mbAbortBA) break;
+            const std::vector<KeyFrame*> vpSecondNeighKFs = vpTargetKFs[i]->GetBestCovisibilityKeyFrames(20);
+            for(KeyFrame* pKFi2 : vpSecondNeighKFs)
+            {
+                if(pKFi2->isBad() || pKFi2->mnFuseTargetForKF == mpCurrentKeyFrame->mnId || pKFi2->mnId == mpCurrentKeyFrame->mnId)
+                    continue;
+                vpTargetKFs.push_back(pKFi2);
+                pKFi2->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+            }
+        }
+
+        // 时间邻居（若有）
+        if(mbInertial)
+        {
+            KeyFrame* pKFi = mpCurrentKeyFrame->mPrevKF;
+            while(vpTargetKFs.size() < 20 && pKFi)
+            {
+                if(!pKFi->isBad() && pKFi->mnFuseTargetForKF != mpCurrentKeyFrame->mnId)
+                {
+                    vpTargetKFs.push_back(pKFi);
+                    pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+                }
+                pKFi = pKFi->mPrevKF;
+            }
+        }
+    } // release lock after collecting and marking targets
+
+    if(mbAbortBA) return;
+
+    // === 2. MapPoint 融合 ===
+    ORBmatcher matcher;
+    std::vector<MapPoint*> vpMapPointMatches;
+    {
+        // 拷贝当前 KF 的 MapPoints（短时锁）
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+    }
+
+    // 从邻居 KeyFrame 融合到当前 KeyFrame
+    for(KeyFrame* pKFi : vpTargetKFs)
+    {
+        if(mbAbortBA) break;
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        matcher.Fuse(pKFi, vpMapPointMatches);
+        if(pKFi->NLeft != -1)
+            matcher.Fuse(pKFi, vpMapPointMatches, true);
+    }
+
+    if(mbAbortBA) return;
+
+    // 从当前 KeyFrame 融合到邻居 KeyFrame（候选点机制）
+    std::vector<MapPoint*> vpFusePointCandidates;
+    vpFusePointCandidates.reserve(vpTargetKFs.size() * vpMapPointMatches.size());
+
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(KeyFrame* pKFi : vpTargetKFs)
+        {
+            const std::vector<MapPoint*> vpMapPointsKFi = pKFi->GetMapPointMatches();
+            for(MapPoint* pMP : vpMapPointsKFi)
+            {
+                if(!pMP || pMP->isBad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                    continue;
+                pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+                vpFusePointCandidates.push_back(pMP);
+            }
+        }
+    }
+
+    // 融合（持锁以防 Fuse 修改 Map）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates);
+        if(mpCurrentKeyFrame->NLeft != -1)
+            matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates, true);
+    }
+
+    // 更新 MapPoint 描述子和法向量（在锁内写回，确保线程安全）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+        for(MapPoint* pMP : vpMapPointMatches)
+        {
+            if(pMP && !pMP->isBad())
+            {
+                pMP->ComputeDistinctiveDescriptors();
+                pMP->UpdateNormalAndDepth();
+            }
+        }
+    }
+
+    if(mbAbortBA) return;
+
+    // === 3. MapLine 融合 ===
+    LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f, 2.0f);
+
+    // 拷贝当前 KF 的线（短时锁）
+    std::vector<MapLine*> vpMapLinesCurKF;
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        vpMapLinesCurKF = mpCurrentKeyFrame->GetMapLineMatches();
+    }
+
+    // 收集候选 MapLine（短时拷贝）
+    std::vector<MapLine*> vpFuseLineCandidates;
+    vpFuseLineCandidates.reserve(vpTargetKFs.size() * vpMapLinesCurKF.size());
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(KeyFrame* pKFi : vpTargetKFs)
+        {
+            if(mbAbortBA) return;
+            const std::vector<MapLine*> vpMapLinesKFi = pKFi->GetMapLineMatches();
+            for(MapLine* pML : vpMapLinesKFi)
+            {
+                if(!pML || pML->isBad() || pML->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                    continue;
+                pML->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+                vpFuseLineCandidates.push_back(pML);
+            }
+        }
+    }
+
+    // 执行融合：line_matcher.Fuse 可能会修改 MapLine/KeyFrame 的观测，需持锁
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f);
+        // if(mpCurrentKeyFrame->NLeft != -1) line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f, true);
+    }
+
+    // 更新 MapLine 描述子（持锁）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(MapLine* pML : vpMapLinesCurKF)
+        {
+            if(pML && !pML->isBad())
+            {
+                pML->ComputeDistinctiveDescriptors();
+                pML->UpdateNormalAndDepth();
+            }
+        }
+    }
+
+    // 更新共视连接（持锁，因为可能更新 KeyFrame 内部结构）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        mpCurrentKeyFrame->UpdateConnections();
+    }
+}
+
 
 
 void LocalMapping::RequestStop()

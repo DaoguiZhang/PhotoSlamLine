@@ -510,6 +510,7 @@ void KeyFrame::EraseMapLineMatch(const int &idx)
 
 void KeyFrame::EraseMapLineMatch(MapLine* pML)
 {
+    unique_lock<mutex> lock(mMutexFeatures);
     tuple<size_t,size_t> indexes = pML->GetIndexInKeyFrame(this);
     size_t leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
     if(leftIndex != -1)
@@ -520,6 +521,7 @@ void KeyFrame::EraseMapLineMatch(MapLine* pML)
 
 void KeyFrame::ReplaceMapLineMatch(const int &idx, MapLine* pML)
 {
+    unique_lock<mutex> lock(mMutexFeatures);
     mvpMapLines[idx]=pML;
 }
 
@@ -914,42 +916,84 @@ vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const
     return vIndices;
 }
 
-std::vector<size_t> KeyFrame::GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
-        const float  &r, const int minLevel, const int maxLevel, const bool bRight) const
+std::vector<size_t> KeyFrame::GetLinesInArea(
+    const float &ls_x, const float &ls_y, const float &le_x, const float &le_y, 
+    const float &r, const int minLevel, const int maxLevel, const bool bRight) const
 {
-    vector<size_t> vIndices;
-    vIndices.reserve(NL);
+    std::vector<size_t> vIndices;
+    std::vector<cv::line_descriptor::KeyLine> vkl;
+    {
+        //std::unique_lock<std::mutex> lock(mMutexFeatures); // 锁住 KeyFrame
+        vkl = mvKeyLines;
+    }
 
-    std::vector<cv::line_descriptor::KeyLine> vkl = this->mvKeyLines;
-    const bool bCheckLevels = (minLevel > 0) || (maxLevel > 0);
+    vIndices.reserve(vkl.size());
 
-    for (size_t i = 0; i < vkl.size(); i++) {
-        cv::line_descriptor::KeyLine keyline = vkl[i];
+    const float mx = 0.5f*(ls_x + le_x);
+    const float my = 0.5f*(ls_y + le_y);
 
-        //// 1.对比中点距离
-        // float distance = (0.5 * (x1 + x2) - keyline.pt.x) * (0.5 * (x1 + x2) - keyline.pt.x) +
-        //                    (0.5 * (y1 + y2) - keyline.pt.y) * (0.5 * (y1 + y2) - keyline.pt.y);
-        // 1.对比中点距离
-        float distance = (0.5 * (ls_x + le_x) - keyline.pt.x) * (0.5 * (ls_x + le_x) - keyline.pt.x) +
-                            (0.5 * (ls_y + le_y) - keyline.pt.y) * (0.5 * (ls_y + le_y) - keyline.pt.y);
-        if (distance > r * r)
-            continue;
+    for(size_t i = 0; i < vkl.size(); ++i)
+    {
+        const cv::line_descriptor::KeyLine& keyline = vkl[i];
 
-        //float slope = (y1 - y2) / (x1 - x2) - keyline.angle;
-        float slope = (ls_y - le_y) / (ls_x - le_x) - keyline.angle;
-        if (slope > r * 0.01)
-            continue;
+        // 中点距离
+        float dx = mx - keyline.pt.x;
+        float dy = my - keyline.pt.y;
+        float dist2 = dx*dx + dy*dy;
+        if(dist2 > r*r) continue;
 
-        if (bCheckLevels) 
-        {
-            if (keyline.octave < minLevel)
-                continue;
-            if (maxLevel >= 0 && keyline.octave > maxLevel)
-                continue;
-        }
+        // slope 判断
+        float dxLine = ls_x - le_x;
+        if(fabs(dxLine) < 1e-6) continue; // 避免除0
+        float slope = (ls_y - le_y) / dxLine - keyline.angle;
+        if(fabs(slope) > r*0.01) continue;
+
+        // level 检查
+        if(minLevel > 0 && keyline.octave < minLevel) continue;
+        if(maxLevel >= 0 && keyline.octave > maxLevel) continue;
+
         vIndices.push_back(i);
     }
+
+    return vIndices;
 }
+
+
+// std::vector<size_t> KeyFrame::GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
+//         const float  &r, const int minLevel, const int maxLevel, const bool bRight) const
+// {
+//     vector<size_t> vIndices;
+//     vIndices.reserve(NL);
+
+//     std::vector<cv::line_descriptor::KeyLine> vkl = this->mvKeyLines;
+//     const bool bCheckLevels = (minLevel > 0) || (maxLevel > 0);
+
+//     for (size_t i = 0; i < vkl.size(); i++) {
+//         cv::line_descriptor::KeyLine keyline = vkl[i];
+
+//         //// 1.对比中点距离
+//         // float distance = (0.5 * (x1 + x2) - keyline.pt.x) * (0.5 * (x1 + x2) - keyline.pt.x) +
+//         //                    (0.5 * (y1 + y2) - keyline.pt.y) * (0.5 * (y1 + y2) - keyline.pt.y);
+//         // 1.对比中点距离
+//         float distance = (0.5 * (ls_x + le_x) - keyline.pt.x) * (0.5 * (ls_x + le_x) - keyline.pt.x) +
+//                             (0.5 * (ls_y + le_y) - keyline.pt.y) * (0.5 * (ls_y + le_y) - keyline.pt.y);
+//         if (distance > r * r)
+//             continue;
+//         //float slope = (y1 - y2) / (x1 - x2) - keyline.angle;
+//         float slope = (ls_y - le_y) / (ls_x - le_x) - keyline.angle;
+//         if (slope > r * 0.01)
+//             continue;
+
+//         if (bCheckLevels) 
+//         {
+//             if (keyline.octave < minLevel)
+//                 continue;
+//             if (maxLevel >= 0 && keyline.octave > maxLevel)
+//                 continue;
+//         }
+//         vIndices.push_back(i);
+//     }
+// }
 
 bool KeyFrame::IsInImage(const float &x, const float &y) const
 {

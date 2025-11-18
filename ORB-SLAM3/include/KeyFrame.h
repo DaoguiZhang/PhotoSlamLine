@@ -542,6 +542,7 @@ protected:
     std::mutex mMutexMap;
 
 public:
+    
     GeometricCamera* mpCamera, *mpCamera2;
 
     //Indexes of stereo observations correspondences

@@ -54,6 +54,7 @@ class Map
         //ar & mspMapPoints;
         ar & mvpBackupKeyFrames;
         ar & mvpBackupMapPoints;
+        ar & mvpBackupMapLines;
         ar & mvBackupKeyFrameOriginsId;
         ar & mnBackupKFinitialID;
         ar & mnBackupKFlowerID;
@@ -91,6 +92,8 @@ public:
     //added for MapLine
     std::vector<MapLine*> GetAllMapLines();
     std::vector<MapLine*> GetReferenceMapLines();
+    void AddToLineDeletionQueue(MapLine* pML);
+    void EraseQueuedLines();
 
     long unsigned int MapPointsInMap();
     long unsigned int MapLinesInMap();  //added for MapLine
@@ -149,6 +152,8 @@ public:
 
     // This avoid that two points are created simultaneously in separate threads (id conflict)
     std::mutex mMutexPointCreation;
+    // This avoid that two lines are created simultaneously in separate threads (id conflict)
+    std::mutex mMutexLineCreation;
 
     bool mbFail;
 
@@ -171,6 +176,7 @@ protected:
     std::vector<MapLine*> mvpBackupMapLines;   //added for MapLine
     std::vector<unsigned long int> mvBackupMapPointsId;
     std::vector<KeyFrame*> mvpBackupKeyFrames;
+    std::vector<MapLine*> mvpLinesToBeErased; // queue for deletion
 
     KeyFrame* mpKFinitial;
     KeyFrame* mpKFlowerID;
