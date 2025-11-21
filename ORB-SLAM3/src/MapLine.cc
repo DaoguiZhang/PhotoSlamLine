@@ -591,7 +591,7 @@ void MapLine::PrintObservations()
     }
 }
 
-//to check the bug
+//to check the bug->done
 void MapLine::UpdateNormalAndDepth()
 {
     map<KeyFrame*,tuple<int,int> > observations;

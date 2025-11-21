@@ -5,6 +5,7 @@
 #include <string>
 #include <Eigen/Core>
 #include "Frame.h"
+#include "KeyFrame.h"
 #include "MapPoint.h"
 #include "MapLine.h"
 
@@ -15,6 +16,22 @@ class MapExporter
 {
 public:
     MapExporter() = default;
+
+    enum class LineColorMode {
+        LENGTH,
+        TRACK_NUM,
+        ID_HASH
+    };
+
+    inline Eigen::Vector3f ColorMapJet(float t)
+    {
+        // Jet colormap: t ∈ [0,1]
+        t = std::max(0.f, std::min(1.f, t));
+        float r = std::min(1.f, std::max(0.f, 1.5f - std::fabs(4*t - 3)));
+        float g = std::min(1.f, std::max(0.f, 1.5f - std::fabs(4*t - 2)));
+        float b = std::min(1.f, std::max(0.f, 1.5f - std::fabs(4*t - 1)));
+        return Eigen::Vector3f(r, g, b);
+    }
 
     /**
      * @brief 导出局部地图 + 相机 + 坐标系到 PLY 文件
@@ -114,13 +131,32 @@ public:
         const std::string &filename = "map_points_with_camera_axes.obj",
         float axisLength = 0.2f);
     
+    static void ExportMapPointsWithCameraAxesOBJKeyFrame(
+        KeyFrame *pKF,
+        const std::vector<MapPoint*> &mapPoints,
+        const std::string &filename = "map_points_with_camera_axes.obj",
+        float axisLength = 0.2f);
+    
     static void ExportMapLinesWithCameraAxesOBJ(
         Frame &F,
         const std::vector<MapLine*> &mapLines,
         const std::string &filename = "map_lines_with_camera_axes.obj",
         float axisLength = 0.2f);
+    
+    static void ExportMapLinesWithCameraAxesOBJKeyFrame(
+        KeyFrame *pKF,
+        const std::vector<MapLine*> &mapLines,
+        const std::string &filename = "map_lines_with_camera_axes.obj",
+        float axisLength = 0.2f);
 
-
+    void ExportFullSceneOBJ(
+        const std::vector<MapPoint*> &mapPoints,
+        const std::vector<MapLine*> &mapLines,
+        const std::vector<KeyFrame*> &keyframes,
+        const std::string &filename = "full_scene.obj",
+        float axisLength = 0.2f,
+        LineColorMode lineColorMode = LineColorMode::LENGTH);
+    
 };
 
 } // namespace ORB_SLAM3

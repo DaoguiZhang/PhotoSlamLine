@@ -958,6 +958,95 @@ std::vector<size_t> KeyFrame::GetLinesInArea(
     return vIndices;
 }
 
+bool KeyFrame::UnprojectStereoLine(
+    const int &i,
+    std::pair<Eigen::Vector3f, Eigen::Vector3f> &xLine3D,
+    std::pair<Eigen::Vector3f, Eigen::Vector3f> &colorLine3DRGB)
+{
+    // 获取端点深度
+    const float z1 = mvLineDepth[i].first;   // 左端点深度
+    const float z2 = mvLineDepth[i].second;  // 右端点深度
+
+    // 深度有效性检查
+    if (z1 <= 0 || z2 <= 0)
+        return false;
+
+    // ==== 获取未畸变线段两个端点 ====
+    const cv::line_descriptor::KeyLine &klUn = mvKeyLinesUn[i];
+    cv::Point2f p1u = klUn.getStartPoint();
+    cv::Point2f p2u = klUn.getEndPoint();
+
+    // ==== 像素到相机坐标（分别使用端点各自深度） ====
+    const float x1 = (p1u.x - cx) * z1 * invfx;
+    const float y1 = (p1u.y - cy) * z1 * invfy;
+    const float x2 = (p2u.x - cx) * z2 * invfx;
+    const float y2 = (p2u.y - cy) * z2 * invfy;
+
+    Eigen::Vector3f Xc1(x1, y1, z1);
+    Eigen::Vector3f Xc2(x2, y2, z2);
+    
+    Eigen::Vector3f Ow = GetCameraCenter();
+    // ==== 相机坐标系 -> 世界坐标系 ====
+    xLine3D.first  = mRwc * Xc1 + Ow;
+    xLine3D.second = mRwc * Xc2 + Ow;
+
+    // ==== 获取颜色信息（原图端点处） ====
+    const cv::line_descriptor::KeyLine &kl = mvKeyLines[i];
+    cv::Point2f p1 = kl.getStartPoint();
+    cv::Point2f p2 = kl.getEndPoint();
+
+    int u1 = static_cast<int>(std::round(p1.x));
+    int v1 = static_cast<int>(std::round(p1.y));
+    int u2 = static_cast<int>(std::round(p2.x));
+    int v2 = static_cast<int>(std::round(p2.y));
+
+    if (u1 < 0 || u1 >= imgLeftRGB.cols || v1 < 0 || v1 >= imgLeftRGB.rows ||
+        u2 < 0 || u2 >= imgLeftRGB.cols || v2 < 0 || v2 >= imgLeftRGB.rows)
+        return false;
+
+    const cv::Vec3f &color1 = imgLeftRGB.at<cv::Vec3f>(v1, u1);
+    const cv::Vec3f &color2 = imgLeftRGB.at<cv::Vec3f>(v2, u2);
+
+    colorLine3DRGB.first  = Eigen::Vector3f(color1[0], color1[1], color1[2]);
+    colorLine3DRGB.second = Eigen::Vector3f(color2[0], color2[1], color2[2]);
+
+    return true;
+}
+
+
+bool KeyFrame::UnprojectDepthLine(const int& i, Eigen::Vector3f& ls3D, Eigen::Vector3f& le3D)
+{
+    // 获取端点深度
+    const float z1 = mvLineDepth[i].first;   // 左端点深度
+    const float z2 = mvLineDepth[i].second;  // 右端点深度
+
+    // 深度有效性检查
+    if (z1 <= 0 || z2 <= 0)
+        return false;
+
+    // ==== 获取未畸变线段两个端点 ====
+    const cv::line_descriptor::KeyLine &klUn = mvKeyLinesUn[i];
+    cv::Point2f p1u = klUn.getStartPoint();
+    cv::Point2f p2u = klUn.getEndPoint();
+
+    // ==== 像素到相机坐标（分别使用端点各自深度） ====
+    const float x1 = (p1u.x - cx) * z1 * invfx;
+    const float y1 = (p1u.y - cy) * z1 * invfy;
+    const float x2 = (p2u.x - cx) * z2 * invfx;
+    const float y2 = (p2u.y - cy) * z2 * invfy;
+
+    Eigen::Vector3f Xc1(x1, y1, z1);
+    Eigen::Vector3f Xc2(x2, y2, z2);
+
+    Eigen::Vector3f Ow = GetCameraCenter();
+
+    // ==== 相机坐标系 -> 世界坐标系 ====
+    ls3D  = mRwc * Xc1 + Ow;
+    le3D = mRwc * Xc2 + Ow;
+
+    return true;
+}
+
 
 // std::vector<size_t> KeyFrame::GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
 //         const float  &r, const int minLevel, const int maxLevel, const bool bRight) const

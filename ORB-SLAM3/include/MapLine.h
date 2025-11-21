@@ -157,6 +157,10 @@ public:
     cv::Mat GetLineDescriptor();
 
     void UpdateNormalAndDepth();
+    //End Point
+    //bool UnprojectStereoLine(const KeyFrame* pKF,const cv::line_descriptor::KeyLine &kl,Eigen::Matrix<float,6,1> &Lw);
+    //bool UnprojectStereoLinePlucker(const KeyFrame* pKF,const cv::line_descriptor::KeyLine &kl,Eigen::Matrix<float,6,1> &Lw);
+
 
     float GetMinDistanceInvariance();
     float GetMaxDistanceInvariance();

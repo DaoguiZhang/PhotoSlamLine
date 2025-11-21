@@ -278,6 +278,11 @@ public:
     std::vector<size_t> GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
         const float  &r, const int minLevel=-1, const int maxLevel=-1, const bool bRight = false) const;
     //bool UnprojectStereoLine(int i, Eigen::Vector4f &line3D, Eigen::Vector3f &colorRGB);
+    bool UnprojectStereoLine(
+        const int &i,
+        std::pair<Eigen::Vector3f, Eigen::Vector3f> &xLine3D,
+        std::pair<Eigen::Vector3f, Eigen::Vector3f> &colorLine3DRGB);
+    bool UnprojectDepthLine(const int& i, Eigen::Vector3f& ls3D, Eigen::Vector3f& le3D);
 
     // Image
     bool IsInImage(const float &x, const float &y) const;

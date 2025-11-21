@@ -2794,11 +2794,11 @@ void Tracking::TrackWithLine()
                 {
                     Verbose::PrintMess("TRACK: Track with motion model With Line", Verbose::VERBOSITY_DEBUG);
                     bOK = TrackWithMotionModelWithLine();
-                    std::cerr << "----------------------------------------end TrackWithMotionModelWithLine----------------------------" << std::endl;
+                    //std::cerr << "----------------------------------------end TrackWithMotionModelWithLine----------------------------" << std::endl;
                     if(!bOK)
                     {
                         bOK = TrackReferenceKeyFrameWithLine();
-                        std::cerr << "----------------------------------------TrackWithMotionModelWithLine end TrackReferenceKeyFrameWithLine----------------------------" << std::endl;
+                        //std::cerr << "----------------------------------------TrackWithMotionModelWithLine end TrackReferenceKeyFrameWithLine----------------------------" << std::endl;
                     }                        
                 }
 
@@ -2972,7 +2972,7 @@ void Tracking::TrackWithLine()
             {
                 //std::cerr <<" --------- TrackLocalMapWithLine->TrackLocalMap()  -------------" << std::endl;
                 bOK = TrackLocalMapWithLine();  //出现线段匹配数量很少情况，原因已经找到，是因为之前已经匹配和优化过了，这个是第二次把剩余的线段进行匹配和优化，所以比较少。
-                std::cerr <<" --------- TrackLocalMapWithLine->TrackLocalMap() end -------------" << std::endl;
+                //std::cerr <<" --------- TrackLocalMapWithLine->TrackLocalMap() end -------------" << std::endl;
             }
             if(!bOK)
                 cout << "Fail to track local map!" << endl;
@@ -3112,9 +3112,9 @@ void Tracking::TrackWithLine()
             if(bNeedKF && (bOK || (mInsertKFsLost && mState==RECENTLY_LOST &&
                                    (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD))))
             {
-                std::cerr <<" --------- CreateNewKeyFrameWithLine->CreateNewKeyFrame()  -------------" << std::endl;
+                //std::cerr <<" --------- CreateNewKeyFrameWithLine->CreateNewKeyFrame()  -------------" << std::endl;
                 CreateNewKeyFrameWithLine();
-                std::cerr <<" --------- CreateNewKeyFrameWithLine->CreateNewKeyFrame() end -------------" << std::endl;
+                //std::cerr <<" --------- CreateNewKeyFrameWithLine->CreateNewKeyFrame() end -------------" << std::endl;
             }
                 
 
@@ -4463,7 +4463,7 @@ bool Tracking::TrackWithMotionModelWithLine()
         //     return false;
     }
     ////debug draw
-    std::cerr << "TrackWithMotionModelWithLine->Point Matches: " <<  nmatches  << ";   TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
+    //std::cerr << "TrackWithMotionModelWithLine->Point Matches: " <<  nmatches  << ";   TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
     
     // line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
     // std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
@@ -4510,10 +4510,10 @@ bool Tracking::TrackWithMotionModelWithLine()
         //再次匹配线特征
         fill(mCurrentFrame.mvpMapLines.begin(),mCurrentFrame.mvpMapLines.end(),static_cast<MapLine*>(NULL));
         nLinematches = line_matcher.SearchByProjectionNew(mCurrentFrame, mLastFrame, 4*th, mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
-        std::cerr << "After point optimization, Line Matches: " << nLinematches << std::endl;
+        //std::cerr << "After point optimization, Line Matches: " << nLinematches << std::endl;
         std::fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
         nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
-        std::cerr << "After point optimization, Point Matches: " << nmatches << std::endl;
+        //std::cerr << "After point optimization, Point Matches: " << nmatches << std::endl;
         //最后再进行一次联合优化
         Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
     }

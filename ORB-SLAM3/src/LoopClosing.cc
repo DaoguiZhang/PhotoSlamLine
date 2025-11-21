@@ -110,7 +110,16 @@ void LoopClosing::Run()
 #endif
 
             bool bFindedRegion = NewDetectCommonRegions();
-
+            //----------------debug----------------------//
+            if(bFindedRegion)
+            {
+                std::cerr << "---------------------- bFindedRegion true-------------------- " << std::endl;
+            }
+            else
+            {
+                std::cerr << "---------------LoopClosing bFindedRegion false-------------------------- " << std::endl;
+            }
+            //----------------------end debug--------------------------//
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_EndPR = std::chrono::steady_clock::now();
 
@@ -1564,7 +1573,7 @@ void LoopClosing::MergeLocal()
         //TODO for debug
         pMergeMap->ChangeId(pCurrentMap->GetId());
 
-        //std::cout << "[Merge]: merging maps finished" << std::endl;
+        std::cout << "Loop Closing [Merge]: merging maps finished" << std::endl;
     }
 
     //Rebuild the essential graph in the local window
@@ -1636,6 +1645,7 @@ void LoopClosing::MergeLocal()
     else
     {
         Optimizer::LocalBundleAdjustment(mpCurrentKF, vpLocalCurrentWindowKFs, vpMergeConnectedKFs,&bStop);
+        std::cerr <<"....................LoopClosing LocalBundleAdjustment.....-----------" << std::endl;
     }
 
 #ifdef REGISTER_TIMES

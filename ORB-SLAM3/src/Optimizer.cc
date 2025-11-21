@@ -2533,6 +2533,11 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         }
     }
 
+    // --- 14. statistics output ---
+    num_OptKF = lLocalKeyFrames.size();
+    num_MPs = lLocalMapPoints.size();
+    num_edges = nEdges;
+
     pMap->IncreaseChangeIndex();
 }
 
@@ -3549,17 +3554,17 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
         }
     }
 
-    // for(size_t i=0; i<vpEdgesLine.size(); i++)
-    // {
-    //     auto e = vpEdgesLine[i];
-    //     auto pML = vpMapLineEdge[i];
-    //     if(e->chi2()>9.0)
-    //     {
-    //         KeyFrame* pKFi = vpEdgeKFLine[i];
-    //         pKFi->EraseMapLineMatch(pML);
-    //         pML->EraseLineObservation(pKFi);
-    //     }
-    // }
+    for(size_t i=0; i<vpEdgesLine.size(); i++)
+    {
+        auto e = vpEdgesLine[i];
+        auto pML = vpMapLineEdge[i];
+        if(e->chi2()>9.0)
+        {
+            KeyFrame* pKFi = vpEdgeKFLine[i];
+            pKFi->EraseMapLineMatch(pML);
+            pML->EraseLineObservation(pKFi);
+        }
+    }
     // -----------------------------
     // Step 11: 更新关键帧 + MapPoint + MapLine
     // -----------------------------
@@ -3582,25 +3587,25 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
             opr.addMapPoint(pMP);
         }
     }
-    // for(MapLine* pML : lLocalMapLines)
-    // {
-    //     int g2oId = mapLineId2G2oId[pML->mnId];
-    //     VertexLinePlucker* vLine = static_cast<VertexLinePlucker*>(optimizer.vertex(g2oId));
-    //     // 1) 写回 Plücker
-    //     pML->SetPluckerLine(vLine->estimate());
-    //     // 2) **用优化后的 Plücker + 各 KeyFrame 观测反投影来重建/更新世界端点**
-    //     //    这个函数在 MapLine 类内部实现（你之前实现的 UpdateFromPluckerLine / UpdateFromPlucker）
-    //     //    请确保 MapLine 中实现了这个函数并且线程安全（会读取 Plücker、遍历观测、写入端点）
-    //     pML->UpdateFromPluckerLine();  
-    //     // 3) 更新描述子（基于新的端点/Plücker）
-    //     pML->ComputeDistinctiveDescriptors();
-    //     pML->UpdateNormalAndDepth();
-    //     if(!pML->isRetrived())
-    //     {
-    //         pML->setRetrived(true);
-    //         opr.addMapLine(pML);
-    //     }
-    // }
+    for(MapLine* pML : lLocalMapLines)
+    {
+        int g2oId = mapLineId2G2oId[pML->mnId];
+        VertexLinePlucker* vLine = static_cast<VertexLinePlucker*>(optimizer.vertex(g2oId));
+        // 1) 写回 Plücker
+        pML->SetPluckerLine(vLine->estimate());
+        // 2) **用优化后的 Plücker + 各 KeyFrame 观测反投影来重建/更新世界端点**
+        //    这个函数在 MapLine 类内部实现（你之前实现的 UpdateFromPluckerLine / UpdateFromPlucker）
+        //    请确保 MapLine 中实现了这个函数并且线程安全（会读取 Plücker、遍历观测、写入端点）
+        pML->UpdateFromPluckerLine();  
+        // 3) 更新描述子（基于新的端点/Plücker）
+        pML->ComputeDistinctiveDescriptors();
+        pML->UpdateNormalAndDepth();
+        if(!pML->isRetrived())
+        {
+            pML->setRetrived(true);
+            opr.addMapLine(pML);
+        }
+    }
     pMap->IncreaseChangeIndex();
     }
 }

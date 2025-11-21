@@ -1489,6 +1489,8 @@ namespace ORB_SLAM3
      int LSDmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2,
                                            std::vector<std::pair<int, int>> &vMatchedPairs)
     {
+        if(pKF1->NL==0 || pKF2->NL==0)
+            return 0;
         vMatchedPairs.clear();
         int nmatches = 0;
         cv::BFMatcher* bfm = new cv::BFMatcher(cv::NORM_HAMMING, false);
@@ -1506,9 +1508,6 @@ namespace ORB_SLAM3
         {
             int qdx = lmatches[i][0].queryIdx;
             int tdx = lmatches[i][0].trainIdx;
-            if (pKF1->GetMapLine(qdx) || pKF2->GetMapLine(tdx)) {
-                continue;
-            }
             double dist_12 = lmatches[i][1].distance - lmatches[i][0].distance;
             if(dist_12>nn12_dist_th)
             {
@@ -1519,11 +1518,14 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
-    void LSDmatcher::SearchForTriangulationLine(
+    void LSDmatcher::SearchForTriangulationLineOld(
         KeyFrame *pKF1, KeyFrame *pKF2,
         vector<pair<int,int>> &vMatchedIdx)
     {
+        if(pKF1->NL==0 || pKF2->NL==0)
+            return;
         vMatchedIdx.clear();
+        //
         const auto &vLines1 = pKF1->mvKeyLines;
         const auto &vLines2 = pKF2->mvKeyLines;
         const int N1 = vLines1.size();
@@ -1580,6 +1582,152 @@ namespace ORB_SLAM3
         if (bestIdx >= 0)
             vMatchedIdx.emplace_back(i1, bestIdx);
         }
+    }
+
+
+    int LSDmatcher::SearchForTriangulationLine(
+        KeyFrame *pKF1, KeyFrame *pKF2,
+        vector<pair<int,int>> &vMatchedIdx)
+    {
+        vMatchedIdx.clear();
+        const int N1 = pKF1->NL;
+        const int N2 = pKF2->NL;
+        if(N1 == 0 || N2 == 0)
+            return 0;
+        const auto &vL1 = pKF1->mvKeyLines;
+        const auto &vL2 = pKF2->mvKeyLines;
+        // ========= 1. 计算位姿 =========
+        Sophus::SE3f T1w = pKF1->GetPose();
+        Sophus::SE3f T2w = pKF2->GetPose();
+        Sophus::SE3f T21 = T2w * T1w.inverse();   // KF1 → KF2
+        Eigen::Matrix3f R21 = T21.rotationMatrix();
+        Eigen::Vector3f t21 = T21.translation();
+        // ========= 2. 内参 =========
+        Eigen::Matrix3f K1 = pKF1->mpCamera->toK_();
+        Eigen::Matrix3f K2 = pKF2->mpCamera->toK_();
+        Eigen::Matrix3f K1inv = K1.inverse();
+        Eigen::Matrix3f K2inv = K2.inverse();
+        // ========= 3. KF2 方向预计算 =========
+        vector<Eigen::Vector2f> vDir2(N2);
+        for(int i=0;i<N2;i++)
+        {
+            Eigen::Vector2f d(
+                vL2[i].endPointX - vL2[i].startPointX,
+                vL2[i].endPointY - vL2[i].startPointY);
+            vDir2[i] = d.normalized();
+        }
+        // ========= 4. 加速：Hash Grid =========
+        const int GRID = 30;                         // 30x30 栅格
+        vector<vector<int>> grid(GRID*GRID);
+        float cellX = pKF2->imgLeftRGB.cols / float(GRID);
+        float cellY = pKF2->imgLeftRGB.rows / float(GRID);
+        auto gridPos = [&](float x, float y){
+            int gx = std::min(GRID-1, std::max(0, int(x / cellX)));
+            int gy = std::min(GRID-1, std::max(0, int(y / cellY)));
+            return gy * GRID + gx;
+        };
+        for(int i=0;i<N2;i++){
+            float mx = (vL2[i].startPointX + vL2[i].endPointX) * 0.5f;
+            float my = (vL2[i].startPointY + vL2[i].endPointY) * 0.5f;
+            grid[ gridPos(mx,my) ].push_back(i);
+        }
+        // ========= 旋转直方图 =========
+        const int HISTO = 30;
+        vector<int> hist[HISTO];
+        for(int i=0;i<HISTO;i++) hist[i].reserve(200);
+        float factor = 1.f / HISTO;
+        // ========= 1:1 互斥匹配 =========
+        vector<int> bestFor1(N1, -1);   // KF1 → KF2
+        vector<float> bestScore1(N1, 1e9);
+        vector<int> bestFor2(N2, -1);   // KF2 → KF1
+        vector<float> bestScore2(N2, 1e9);
+        // --- 几何阈值 ---
+        const float cosAngleTh = cosf(20.f * M_PI / 180.f);
+        const float lenRatioTh = 5.0f;
+        const float rayTh = 10.0f;
+        auto RayResidual = [&](const Eigen::Vector3f &d1,
+                           const Eigen::Vector3f &d2)
+        {
+            Eigen::Vector3f w0 = t21;
+            float a = d1.dot(d1);
+            float b = d1.dot(d2);
+            float c = d2.dot(d2);
+            float d = d1.dot(w0);
+            float e = d2.dot(w0);
+            float denom = a*c - b*b;
+            if(fabs(denom) < 1e-6f) return 1e6f;
+            float s = (b*e - c*d) / denom;
+            float t = (a*e - b*d) / denom;
+            Eigen::Vector3f p1 = t21 + s * d1;
+            Eigen::Vector3f p2 =       t * d2;
+            return (p1 - p2).norm();
+        };
+        // ========= 主循环：遍历 KF1 所有线条 =========
+        for(int i1=0;i1<N1;i1++)
+        {
+            const auto &L1 = vL1[i1];
+            Eigen::Vector2f s1(L1.startPointX, L1.startPointY);
+            Eigen::Vector2f e1(L1.endPointX,   L1.endPointY);
+            Eigen::Vector2f d1 = (e1 - s1).normalized();
+            Eigen::Vector3f r1s = K1inv * Eigen::Vector3f(s1[0], s1[1], 1);
+            Eigen::Vector3f r1e = K1inv * Eigen::Vector3f(e1[0], e1[1], 1);
+            r1s.normalize(); r1e.normalize();
+            // 查找同一区域 grid 中候选 KF2 线
+            float mx = (s1[0] + e1[0]) * 0.5f;
+            float my = (s1[1] + e1[1]) * 0.5f;
+            int cell = gridPos(mx,my);
+            const vector<int> &cand = grid[cell];
+            if(cand.empty()) continue;
+            float len1 = L1.lineLength;
+            for(int idx2 : cand)
+            {
+                const auto &L2 = vL2[idx2];
+                Eigen::Vector2f s2(L2.startPointX, L2.startPointY);
+                Eigen::Vector2f e2(L2.endPointX,   L2.endPointY);
+                // A.方向一致性
+                float cosDir = fabs( d1.dot(vDir2[idx2]) );
+                if(cosDir < cosAngleTh) continue;
+                // B.长度
+                float len2 = L2.lineLength;
+                float lenDiff = fabs(len1 - len2) / std::max(len1, len2);
+                if(lenDiff > lenRatioTh) continue;
+                // C.射线几何约束
+                Eigen::Vector3f r2s = K2inv * Eigen::Vector3f(s2[0], s2[1], 1);
+                Eigen::Vector3f r2e = K2inv * Eigen::Vector3f(e2[0], e2[1], 1);
+                r2s.normalize(); r2e.normalize();
+                Eigen::Vector3f r1s_2 = R21 * r1s;
+                Eigen::Vector3f r1e_2 = R21 * r1e;
+                float res = RayResidual(r1s_2, r2s) + RayResidual(r1e_2, r2e);
+                if(res > rayTh) continue;
+                // 得分更小者取代
+                if(res < bestScore1[i1]){
+                    bestScore1[i1] = res;
+                    bestFor1[i1] = idx2;
+                }
+                if(res < bestScore2[idx2]){
+                    bestScore2[idx2] = res;
+                    bestFor2[idx2] = i1;
+                }
+                // 旋转直方图（用于稍后过滤）
+                float angle1 = atan2(d1[1], d1[0]);
+                float angle2 = atan2(vDir2[idx2][1], vDir2[idx2][0]);
+                float diff = angle1 - angle2;
+                diff = diff < 0 ? diff + M_PI*2 : diff;
+                int bin = round(diff * factor * HISTO);
+                if(bin >= HISTO) bin = 0;
+                hist[bin].push_back(i1);
+            }
+        }
+        // ========== 互斥匹配：只有 bestFor1 和 bestFor2 相互同意才保留 ==========
+        for(int i1=0;i1<N1;i1++)
+        {
+            int i2 = bestFor1[i1];
+            if(i2 < 0) continue;
+            if(bestFor2[i2] == i1){
+                vMatchedIdx.emplace_back(i1, i2);
+            }
+        }
+        return vMatchedIdx.size();
     }
 
     int LSDmatcher::SearchForTriangulationFused(
@@ -1691,7 +1839,387 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    // 假设在 LSDmatcher 类内部，必要的 includes 已有：<vector>, <algorithm>, <limits>, <opencv2/opencv.hpp>, Sophus/Eigen 等
+int LSDmatcher::SearchForTriangulationLinesRobust(
+    KeyFrame *pKF1, KeyFrame *pKF2,
+    std::vector<std::pair<int,int>> &vMatchedPairs,
+    int K_neighbors /*=5*/, int keepCandidatesPerQuery /*=3*/)
+{
+    vMatchedPairs.clear();
+    if (!pKF1 || !pKF2) return 0;
+    if (pKF1->NL == 0 || pKF2->NL == 0) return 0;
 
+    // === 参数（可调） ===
+    const float DESC_TH = 100.0f;        // 描述子最大接受距离（Hamming）
+    const float MAX_EPIPOLAR = 5.0f;     // 极线平均像素误差阈（较宽松）
+    const float MAX_RAY_RES = 5.0f;      // 射线最近点残差阈（像素尺度或归一化尺度）
+    const float MAX_LEN_RATIO = 0.7f;    // 长度差容忍（soft）
+    const float MAX_ANGLE = 45.0f * M_PI / 180.0f; // 最大角度差（弧度，soft）
+    const float EPS = 1e-6f;
+
+    // 权重（用于组合 score；后面会归一化）
+    const float w_desc = 1.0f;
+    const float w_epi  = 2.0f;
+    const float w_ray  = 3.0f;
+    const float w_len  = 1.0f;
+    const float w_ang  = 1.0f;
+
+    // ==== 预计算 / 准备 ====
+    const auto &vL1 = pKF1->mvKeyLines;
+    const auto &vL2 = pKF2->mvKeyLines;
+    const int N1 = (int)vL1.size();
+    const int N2 = (int)vL2.size();
+
+    // 相机内参 & poses
+    Eigen::Matrix3f K1 = pKF1->mpCamera->toK_();
+    Eigen::Matrix3f K2 = pKF2->mpCamera->toK_();
+    Eigen::Matrix3f K1inv = K1.inverse();
+    Eigen::Matrix3f K2inv = K2.inverse();
+
+    Sophus::SE3f T1w = pKF1->GetPose();
+    Sophus::SE3f T2w = pKF2->GetPose();
+    Sophus::SE3f T21 = T2w * T1w.inverse();
+    Eigen::Matrix3f R21 = T21.rotationMatrix();
+    Eigen::Vector3f t21 = T21.translation();
+
+    // BFMatcher 2-NN 若 K_neighbors>2 改用 knnMatch(k)
+    cv::BFMatcher bfm(cv::NORM_HAMMING);
+
+    const cv::Mat &ldesc1 = pKF1->mLineDescriptors;
+    const cv::Mat &ldesc2 = pKF2->mLineDescriptors;
+    if (ldesc1.empty() || ldesc2.empty()) return 0;
+
+    // knnMatch：对所有 query 做 K_neighbors 最近邻（可能会比较慢）
+    std::vector<std::vector<cv::DMatch>> knn;
+    bfm.knnMatch(ldesc1, ldesc2, knn, K_neighbors);
+
+    // helper lambdas
+    auto endpoint_epipolar_error = [&](const cv::line_descriptor::KeyLine &KLq,
+                                       const cv::line_descriptor::KeyLine &KLt)->float
+    {
+        // 计算 pKF1 两端点映射到 pKF2 极线的平均距离
+        Eigen::Vector3f p1s(KLq.startPointX, KLq.startPointY, 1.0f);
+        Eigen::Vector3f p1e(KLq.endPointX,   KLq.endPointY,   1.0f);
+        // Fundamental matrix F = K2^{-T} * [t]_x * R * K1^{-1}
+        Eigen::Matrix3f tx;
+        tx <<     0, -t21(2),  t21(1),
+               t21(2),     0, -t21(0),
+              -t21(1),  t21(0),     0;
+        Eigen::Matrix3f F = K2.inverse().transpose() * tx * R21 * K1.inverse();
+        Eigen::Vector3f l_s = F * p1s;
+        Eigen::Vector3f l_e = F * p1e;
+        // distance from a point (x,y) to line l = |ax+by+c|/sqrt(a^2+b^2)
+        auto dist_pt_line = [&](const Eigen::Vector3f &l, float x, float y){
+            float num = fabs(l(0)*x + l(1)*y + l(2));
+            float den = sqrt(l(0)*l(0) + l(1)*l(1)) + EPS;
+            return num / den;
+        };
+        float d_start = dist_pt_line(l_s, KLt.startPointX, KLt.startPointY);
+        float d_end   = dist_pt_line(l_e, KLt.endPointX,   KLt.endPointY);
+        return 0.5f*(d_start + d_end);
+    };
+
+    auto ray_residual_for_pair = [&](const cv::line_descriptor::KeyLine &KLq,
+                                     const cv::line_descriptor::KeyLine &KLt)->float
+    {
+        // 反投影端点到相机射线（单位向量）
+        Eigen::Vector3f x1s = K1inv * Eigen::Vector3f(KLq.startPointX, KLq.startPointY, 1.0f);
+        Eigen::Vector3f x1e = K1inv * Eigen::Vector3f(KLq.endPointX,   KLq.endPointY,   1.0f);
+        Eigen::Vector3f x2s = K2inv * Eigen::Vector3f(KLt.startPointX, KLt.startPointY, 1.0f);
+        Eigen::Vector3f x2e = K2inv * Eigen::Vector3f(KLt.endPointX,   KLt.endPointY,   1.0f);
+        x1s.normalize(); x1e.normalize(); x2s.normalize(); x2e.normalize();
+
+        // 把 KF1 的射线变换到 KF2 视角： d1' = R21 * d1
+        Eigen::Vector3f d1s = R21 * x1s;
+        Eigen::Vector3f d1e = R21 * x1e;
+        Eigen::Vector3f d2s = x2s;
+        Eigen::Vector3f d2e = x2e;
+
+        // 射线最近点残差函数（使用已知 t21）
+        auto ray_res = [&](const Eigen::Vector3f &dA, const Eigen::Vector3f &dB)->float
+        {
+            // Solve for s,t minimizing |t21 + s dA - t dB|
+            Eigen::Vector3f w0 = t21;
+            float a = dA.dot(dA);
+            float b = dA.dot(dB);
+            float c = dB.dot(dB);
+            float d = dA.dot(w0);
+            float e = dB.dot(w0);
+            float denom = a*c - b*b;
+            if (fabs(denom) < 1e-6f) return 1e6f;
+            float s = (b*e - c*d) / denom;
+            float t = (a*e - b*d) / denom;
+            Eigen::Vector3f p1 = t21 + s * dA;
+            Eigen::Vector3f p2 =       t * dB;
+            return (p1 - p2).norm();
+        };
+
+        float r1 = ray_res(d1s, d2s);
+        float r2 = ray_res(d1e, d2e);
+        return r1 + r2;
+    };
+
+    auto length_ratio = [&](const cv::line_descriptor::KeyLine &KLq,
+                            const cv::line_descriptor::KeyLine &KLt)->float
+    {
+        float l1 = KLq.lineLength;
+        float l2 = KLt.lineLength;
+        if (l1 <= 0 || l2 <= 0) return 1.0f;
+        return fabs(l1 - l2) / std::max(l1, l2); // 0..1
+    };
+
+    auto angle_diff = [&](const cv::line_descriptor::KeyLine &KLq,
+                          const cv::line_descriptor::KeyLine &KLt)->float
+    {
+        float a1 = KLq.angle * M_PI / 180.0f;
+        float a2 = KLt.angle * M_PI / 180.0f;
+        float d = fabs(a1 - a2);
+        if (d > M_PI) d = 2*M_PI - d;
+        return d; // radians
+    };
+
+    // ==== 收集候选并评分 ====
+    struct Candidate { int q, t; float score; float descDist; float epi; float ray; float len; float ang; };
+    std::vector<Candidate> candidates;
+    candidates.reserve(N1 * 4);
+
+    for (int q = 0; q < (int)knn.size(); ++q)
+    {
+        const auto &kvec = knn[q]; // candidate matches for query q
+        if (kvec.empty()) continue;
+
+        // 只处理 top-K_neighbors matches but we'll compute scores for up to K_neighbors
+        int upto = std::min((int)kvec.size(), K_neighbors);
+        for (int kk = 0; kk < upto; ++kk)
+        {
+            const cv::DMatch &dm = kvec[kk];
+            int t = dm.trainIdx;
+            int qidx = dm.queryIdx; // should equal q
+
+            float ddesc = (float)dm.distance;
+            if (ddesc > DESC_TH) continue; // descriptor hard threshold
+
+            // 计算几何量
+            const auto &KLq = vL1[qidx];
+            const auto &KLt = vL2[t];
+
+            float epiErr = endpoint_epipolar_error(KLq, KLt);
+            if (epiErr > MAX_EPIPOLAR * 3.0f) continue; // very large epipolar error -> discard early
+
+            float rayRes = ray_residual_for_pair(KLq, KLt);
+            // rayRes in normalized units; compare with MAX_RAY_RES
+            if (rayRes > MAX_RAY_RES * 5.0f) continue;
+
+            float lenr = length_ratio(KLq, KLt);
+            float angd = angle_diff(KLq, KLt);
+
+            // 归一化各项到大致相同范围（heuristic）
+            float sn_desc = ddesc / (DESC_TH + EPS);        // 0..1ish
+            float sn_epi  = std::min(epiErr / (MAX_EPIPOLAR + EPS), 5.0f);
+            float sn_ray  = std::min(rayRes / (MAX_RAY_RES + EPS), 5.0f);
+            float sn_len  = std::min(lenr / (MAX_LEN_RATIO + EPS), 5.0f);
+            float sn_ang  = std::min(angd / (MAX_ANGLE + EPS), 5.0f);
+
+            float score = w_desc*sn_desc + w_epi*sn_epi + w_ray*sn_ray + w_len*sn_len + w_ang*sn_ang;
+
+            candidates.push_back({qidx, t, score, sn_desc, sn_epi, sn_ray, sn_len, sn_ang});
+        }
+    }
+
+    if (candidates.empty()) return 0;
+
+    // ==== 只保留每个 q 最好的 keepCandidatesPerQuery 个（减少后续复杂度） ====
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b){
+        if (a.q != b.q) return a.q < b.q;
+        return a.score < b.score;
+    });
+
+    std::vector<Candidate> filtered;
+    filtered.reserve(candidates.size());
+    int last_q = -1, kept = 0;
+    for (auto &c : candidates)
+    {
+        if (c.q != last_q) { last_q = c.q; kept = 0; }
+        if (kept < keepCandidatesPerQuery) { filtered.push_back(c); ++kept; }
+    }
+
+    // ==== 全局按 score 排序，执行互斥/替换策略（保证 1:1） ====
+    std::sort(filtered.begin(), filtered.end(), [](const Candidate &a, const Candidate &b){
+        return a.score < b.score;
+    });
+
+    // 为互斥匹配维护当前占用与分数（当发现更好分数时可替换）
+    std::vector<int> matchQtoT(N1, -1);
+    std::vector<float> scoreQ(N1, std::numeric_limits<float>::infinity());
+    std::vector<int> matchTtoQ(N2, -1);
+    std::vector<float> scoreT(N2, std::numeric_limits<float>::infinity());
+
+    for (const auto &c : filtered)
+    {
+        int q = c.q;
+        int t = c.t;
+        float s = c.score;
+
+        // 如果 t 已被其他 q' 占用，只有当当前 s 优于已有分数时替换
+        if (matchTtoQ[t] == -1 && matchQtoT[q] == -1)
+        {
+            matchQtoT[q] = t; scoreQ[q] = s;
+            matchTtoQ[t] = q; scoreT[t] = s;
+        }
+        else if (matchTtoQ[t] != -1 && s < scoreT[t])
+        {
+            // 替换旧匹配
+            int oldq = matchTtoQ[t];
+            matchQtoT[oldq] = -1; scoreQ[oldq] = std::numeric_limits<float>::infinity();
+            matchQtoT[q] = t; scoreQ[q] = s;
+            matchTtoQ[t] = q; scoreT[t] = s;
+        }
+        else if (matchQtoT[q] != -1 && s < scoreQ[q])
+        {
+            // q 已匹配到另一个 t0，但当前 s 更好 -> 替换
+            int oldt = matchQtoT[q];
+            matchTtoQ[oldt] = -1; scoreT[oldt] = std::numeric_limits<float>::infinity();
+            matchQtoT[q] = t; scoreQ[q] = s;
+            matchTtoQ[t] = q; scoreT[t] = s;
+        }
+        // 否则跳过
+    }
+
+    // ==== 方向直方图过滤（optional, 保留大簇） ====
+    if (mbCheckOrientation)
+    {
+        const int HISTO_LENGTH = 30;
+        std::vector<std::vector<int>> rotHist(HISTO_LENGTH);
+        float factor = 360.0f / HISTO_LENGTH;
+        for (int q = 0; q < N1; ++q)
+        {
+            int t = matchQtoT[q];
+            if (t < 0) continue;
+            float a1 = vL1[q].angle;
+            float a2 = vL2[t].angle;
+            float rot = a1 - a2;
+            if (rot < 0.0f) rot += 360.0f;
+            int bin = cvRound(rot * factor);
+            if (bin == HISTO_LENGTH) bin = 0;
+            if (bin >= 0 && bin < HISTO_LENGTH) rotHist[bin].push_back(q);
+        }
+        int ind1=-1, ind2=-1, ind3=-1;
+        ComputeThreeMaxima(rotHist, HISTO_LENGTH, ind1, ind2, ind3);
+        for (int b = 0; b < HISTO_LENGTH; ++b)
+        {
+            if (b == ind1 || b == ind2 || b == ind3) continue;
+            for (int q : rotHist[b])
+            {
+                int t = matchQtoT[q];
+                if (t >= 0)
+                {
+                    matchTtoQ[t] = -1;
+                    matchQtoT[q] = -1;
+                }
+            }
+        }
+    }
+
+    // ==== 填入输出（只返回 q->t 有效的匹配） ====
+    int nmatches = 0;
+    for (int q = 0; q < N1; ++q)
+    {
+        int t = matchQtoT[q];
+        if (t >= 0)
+        {
+            // 可选：再做一次严苛重投影检验（CheckLineReprojection），确保最后质量
+            // if (!CheckLineReprojection(pKF1, pKF2, ...)) continue;
+
+            vMatchedPairs.emplace_back(q, t);
+            ++nmatches;
+        }
+    }
+
+    return nmatches;
+}
+
+
+    void LSDmatcher::DebugShowTriangulationMatchesKF(
+        KeyFrame *pKF1,
+        KeyFrame *pKF2,
+        const std::vector<std::pair<int,int>> &vMatchedIdx)
+    {
+        if (!pKF1 || !pKF2) return;
+        // -----------------------------
+        // 读取图像（优先 RGB，否则转 RGB）
+        // -----------------------------
+        auto GetRGB = [](const cv::Mat &src)->cv::Mat {
+            cv::Mat img;
+            if (src.empty()) {
+                return cv::Mat(); // 空图像保护
+            }
+            if (src.channels() == 3)
+                img = src.clone();
+            else
+                cv::cvtColor(src, img, cv::COLOR_GRAY2BGR);
+            return img;
+        };
+        cv::Mat img1 = GetRGB(pKF1->imgLeftRGB);
+        cv::Mat img2 = GetRGB(pKF2->imgLeftRGB);
+        if (img1.empty() || img2.empty()) return;
+        const auto &vLines1 = pKF1->mvKeyLines;
+        const auto &vLines2 = pKF2->mvKeyLines;
+        // -----------------------------
+        // 创建大画布（左右拼接）
+        // -----------------------------
+        int H = std::max(img1.rows, img2.rows);
+        int W = img1.cols + img2.cols;
+        cv::Mat canvas(H, W, CV_8UC3, cv::Scalar(0,0,0));
+        img1.copyTo(canvas(cv::Rect(0,         0, img1.cols, img1.rows)));
+        img2.copyTo(canvas(cv::Rect(img1.cols, 0, img2.cols, img2.rows)));
+        // -----------------------------
+        // 绘制 KeyLine 的辅助函数
+        // -----------------------------
+        auto DrawLine = [&](const KeyLine &KL, cv::Scalar c, int xoff)
+        {
+            cv::Point p1(KL.startPointX + xoff, KL.startPointY);
+            cv::Point p2(KL.endPointX   + xoff, KL.endPointY);
+            cv::line(canvas, p1, p2, c, 2);
+        };
+        // 所有线段画成灰色
+        for (auto &L : vLines1) DrawLine(L, cv::Scalar(100,100,100), 0);
+        for (auto &L : vLines2) DrawLine(L, cv::Scalar(100,100,100), img1.cols);
+        // -----------------------------
+        // 随机颜色
+        // -----------------------------
+        std::mt19937 rng(0);
+        std::uniform_int_distribution<int> uni(0,255);
+        // -----------------------------
+        // 绘制匹配线段
+        // -----------------------------
+        for (auto &m : vMatchedIdx)
+        {
+            int i1 = m.first;
+            int i2 = m.second;
+            if (i1 < 0 || i1 >= vLines1.size()) continue;
+            if (i2 < 0 || i2 >= vLines2.size()) continue;
+            cv::Scalar col(uni(rng), uni(rng), uni(rng));
+            const KeyLine &L1 = vLines1[i1];
+            const KeyLine &L2 = vLines2[i2];
+            // 绘制匹配线段
+            DrawLine(L1, col, 0);
+            DrawLine(L2, col, img1.cols);
+            // 中点
+            cv::Point mid1((L1.startPointX + L1.endPointX)/2,
+                        (L1.startPointY + L1.endPointY)/2);
+            cv::Point mid2((L2.startPointX + L2.endPointX)/2 + img1.cols,
+                        (L2.startPointY + L2.endPointY)/2);
+            // 连线
+            cv::line(canvas, mid1, mid2, col, 2);
+        }
+        // -----------------------------
+        // 显示
+        // -----------------------------
+        cv::imshow("Debug Line Triangulation (with RGB)", canvas);
+        cv::waitKey(0);  // 不阻塞
+    }
+
+    
     // int LSDmatcher::Fuse(KeyFrame *pKF, const std::vector<MapLine *> &vpMapLines, const float th)
     // {
     //     Eigen::Matrix3f Rcw_eigen = pKF->GetRotation();
@@ -1987,6 +2515,29 @@ namespace ORB_SLAM3
             return 5.0;
         else
             return 8.0;
+    }
+
+    void LSDmatcher::ComputeThreeMaxima(const std::vector<std::vector<int>> &rotHist,
+                        const int HISTO_LENGTH,
+                        int &ind1, int &ind2, int &ind3)
+    {
+        std::vector<std::pair<int,int>> hist;
+        hist.reserve(HISTO_LENGTH);
+        for(int i = 0; i < HISTO_LENGTH; i++)
+        {
+            int s = rotHist[i].size();
+            hist.emplace_back(s, i);   // <数量, bin 索引>
+        }
+        // 根据数量排序（从大到小）
+        std::sort(hist.begin(), hist.end(),
+              [](const std::pair<int,int> &a,
+                 const std::pair<int,int> &b){
+                    return a.first > b.first;
+              });
+
+        ind1 = hist[0].second;
+        ind2 = hist[1].second;
+        ind3 = hist[2].second;
     }
 
 #if 0   //to do next...

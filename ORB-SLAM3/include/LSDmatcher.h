@@ -75,7 +75,10 @@ namespace ORB_SLAM3
         int SerachForInitialize(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int,int>> &LineMatches);
         int SerachForInitializeCV(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int, int>> &LineMatches); //use OpenCV functions
         int SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<int, int>> &vMatchedPairs);
-        void SearchForTriangulationLine(KeyFrame *pKF1, KeyFrame *pKF2,vector<pair<int,int>> &vMatchedIdx);
+        int SearchForTriangulationLine(KeyFrame *pKF1, KeyFrame *pKF2,vector<pair<int,int>> &vMatchedIdx);
+        void SearchForTriangulationLineOld(KeyFrame *pKF1, KeyFrame *pKF2,vector<pair<int,int>> &vMatchedIdx);
+        int SearchForTriangulationLinesRobust(KeyFrame *pKF1, KeyFrame *pKF2,std::vector<std::pair<int,int>> &vMatchedPairs,int K_neighbors = 5, int keepCandidatesPerQuery = 3);
+        void DebugShowTriangulationMatchesKF(KeyFrame *pKF1,KeyFrame *pKF2,const std::vector<std::pair<int,int>> &vMatchedIdx);
         int SearchForTriangulationFused(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<int, int>> &vMatchedPairs);
 
         // Project MapLines into KeyFrame and search for duplicated MapLines
@@ -89,6 +92,9 @@ namespace ORB_SLAM3
         //Draw matches for visualization
         static cv::Mat DrawLineMatches(const cv::Mat &img1, const std::vector<cv::line_descriptor::KeyLine> &keylines1,
                                        const cv::Mat &img2, const std::vector<cv::line_descriptor::KeyLine> &keylines2, std::vector<cv::DMatch> &nmatches);
+        void ComputeThreeMaxima(const std::vector<std::vector<int>> &rotHist,
+                        const int HISTO_LENGTH,
+                        int &ind1, int &ind2, int &ind3);
 
     protected:
         float RadiusByViewingCos(const float &viewCos);

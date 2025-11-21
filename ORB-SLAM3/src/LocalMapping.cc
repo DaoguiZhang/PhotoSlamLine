@@ -23,6 +23,7 @@
 #include "Optimizer.h"
 #include "Converter.h"
 #include "GeometricTools.h"
+#include "MapExporter.h"
 
 #include<mutex>
 #include<chrono>
@@ -335,7 +336,7 @@ void LocalMapping::RunWithLine()
 
             if(!CheckNewKeyFrames())
             {
-                // Find more matches in neighbor keyframes and fuse point duplications
+                // Find more matches in neighbor keyframes and fuse point and lines duplications
                 SearchInNeighborsWithLine();
                 //SearchInNeighbors();
             }
@@ -356,8 +357,21 @@ void LocalMapping::RunWithLine()
 
             if(!CheckNewKeyFrames() && !stopRequested())
             {
-                if(mpAtlas->KeyFramesInMap()>2)
+                if(mpAtlas->KeyFramesInMap()>2) //三个或者以上的KeyFrame
                 {
+                    //优化前的点云和线段导出来，现在测试第三keyframe的时候，就运行这一步
+                    if(mpCurrentKeyFrame->mnId == 2)
+                    {
+                        std::string map_points_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_MapPoints_before.obj";
+                        MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
+                        std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_before.obj";
+                        MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
+                    }
+                    //
+                    //std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+                    //MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+                    //std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+                    //MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
 
                     if(mbInertial && mpCurrentKeyFrame->GetMap()->isImuInitialized())
                     {
@@ -391,7 +405,16 @@ void LocalMapping::RunWithLine()
                         //Optimizer::LocalBundleAdjustmentWithLine(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         //Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         b_doneLBA = true;
+                        std::cerr << "Local bundle adjustment num_MPs, num_MLs: " << num_MPs_BA << ", " <<  num_MLs_BA << std::endl;
                         mpAtlas->pushMappingOperation(opr);
+                    }
+
+                    if(mpCurrentKeyFrame->mnId == 2)
+                    {
+                        std::string map_points_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_MapPoints_after.obj";
+                        MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
+                        std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_after.obj";
+                        MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
                     }
 
                 }
@@ -590,6 +613,9 @@ void LocalMapping::ProcessNewKeyFrameWithLine()
     // Associate MapPoints to the new keyframe and update normal and descriptor
     const vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
     const vector<MapLine*> vpMapLineMatches = mpCurrentKeyFrame->GetMapLineMatches();
+
+    std::cerr << " ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId " << mpCurrentKeyFrame->mnId << std::endl;
+    std::cerr << " ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnFrameId " << mpCurrentKeyFrame->mnFrameId << std::endl;
 
     for(size_t i=0; i<vpMapPointMatches.size(); i++)
     {
@@ -1083,6 +1109,7 @@ void LocalMapping::CreateNewMapPoints()
 
 void LocalMapping::CreateNewMapLines()
 {
+    // --- 1. neighbor keyframes (same as points) ---
     int nn = mbMonocular ? 30 : 10;
     vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
 
@@ -1098,117 +1125,488 @@ void LocalMapping::CreateNewMapLines()
         }
     }
 
-    LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f,2.0f); // 类似 ORBmatcher 的线版本
+    // robust line matcher (you already have this)
+    LSDmatcher line_matcher(0.6f, true, 0.85f, 3.0f, 30.0f, 2.0f);
 
+    // current KF
     Sophus::SE3f Tcw1 = mpCurrentKeyFrame->GetPose();
     Eigen::Matrix<float,3,4> eigTcw1 = Tcw1.matrix3x4();
-    Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
     Eigen::Matrix3f Rcw1 = eigTcw1.block<3,3>(0,0);
+    Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+    GeometricCamera* cam1_base = mpCurrentKeyFrame->mpCamera;
 
+    // thresholds (tunable)
+    const float minLinePixels = 5.0f;            // reject too short lines
+    const float maxLenRatioHard = 1.5f;          // if > -> discard
+    const float maxLenRatioSoft = 0.7f;          // if > -> penalize but may accept
+    const float maxAngleDiff = 45.0f * M_PI / 180.0f;
+    const float MAX_EPIPOLAR = 4.0f;             // px
+    const float MAX_RAY_RES = 5.0f;              // normalized units (loose)
+    const float EPS = 1e-6f;
+
+    // Iterate neighbors
     for (KeyFrame* pKF2 : vpNeighKFs)
     {
         if (CheckNewKeyFrames()) return;
 
         Sophus::SE3f Tcw2 = pKF2->GetPose();
         Eigen::Matrix<float,3,4> eigTcw2 = Tcw2.matrix3x4();
-        Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
         Eigen::Matrix3f Rcw2 = eigTcw2.block<3,3>(0,0);
+        Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
+        GeometricCamera* cam2_base = pKF2->mpCamera;
 
+        // baseline / scene depth test (same logic as points)
         float baseline = (Ow2 - Ow1).norm();
-        if (mbMonocular)
-        {
-            float med = pKF2->ComputeSceneMedianDepth(2);
-            if (baseline / med < 0.01f) continue;
-        }
-        else
+        if (!mbMonocular)
         {
             if (baseline < pKF2->mb) continue;
         }
-        std::vector<pair<int,int>> vMatchedIdx;
-        line_matcher.SearchForTriangulationLine(mpCurrentKeyFrame, pKF2, vMatchedIdx);
-        //line_matcher.SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIdx);
-
-        for (auto &idxPair : vMatchedIdx)
+        else
         {
-            int idx1 = idxPair.first;
-            int idx2 = idxPair.second;
+            float med = pKF2->ComputeSceneMedianDepth(2);
+            if (med <= 0) continue;
+            if (baseline / med < 0.01f) continue;
+        }
 
+        // get candidate matches
+        vector<pair<int,int>> vMatchedIdx;
+        line_matcher.SearchForTriangulationLinesRobust(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+        // 可视化
+        //         //line_matcher.DebugShowTriangulationMatchesKF(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+        if (vMatchedIdx.empty()) continue;
+
+        // prepare camera intrinsics (for epipolar F if needed)
+        Eigen::Matrix3f K1 = cam1_base->toK_();
+        Eigen::Matrix3f K2 = cam2_base->toK_();
+        Eigen::Matrix3f K1inv = K1.inverse();
+        Eigen::Matrix3f K2inv = K2.inverse();
+
+        // precompute T poses for stereo cases later
+        Sophus::SE3f T1w = Tcw1;
+        Sophus::SE3f T2w = Tcw2;
+
+        // For each matched line pair
+        for (const auto &pr : vMatchedIdx)
+        {
+            int idx1 = pr.first;
+            int idx2 = pr.second;
+            // Avoid duplicate triangulation: if either KF already has MapLine for this keyline, skip
+            //if (mpCurrentKeyFrame->GetMapLine(idx1) || pKF2->GetMapLine(idx2))
+            //   continue;
             const cv::line_descriptor::KeyLine &le1 = mpCurrentKeyFrame->mvKeyLines[idx1];
             const cv::line_descriptor::KeyLine &le2 = pKF2->mvKeyLines[idx2];
-            cv::Point2f le1_startPt = cv::Point2f(le1.startPointX, le1.startPointY);
-            cv::Point2f le1_endPt = cv::Point2f(le1.endPointX, le1.endPointY);
-            cv::Point2f le2_startPt = cv::Point2f(le2.startPointX, le2.startPointY);
-            cv::Point2f le2_endPt = cv::Point2f(le2.endPointX, le2.endPointY);
-            //Get Color
+            // reject too short lines
+            if (le1.lineLength < minLinePixels || le2.lineLength < minLinePixels) continue;
+            // length & angle checks
+            float len1 = le1.lineLength;
+            float len2 = le2.lineLength;
+            float lenRatio = fabs(len1 - len2) / max(len1, len2);
+            if (lenRatio > maxLenRatioHard) continue;
+            float a1 = atan2(le1.endPointY - le1.startPointY, le1.endPointX - le1.startPointX);
+            float a2 = atan2(le2.endPointY - le2.startPointY, le2.endPointX - le2.startPointX);
+            float angDiff = fabs(a1 - a2); if (angDiff > M_PI) angDiff = 2*M_PI - angDiff;
+            if (angDiff > maxAngleDiff) continue;
+            // pixel endpoints
+            cv::Point2f p1s(le1.startPointX, le1.startPointY), p1e(le1.endPointX, le1.endPointY);
+            cv::Point2f p2s(le2.startPointX, le2.startPointY), p2e(le2.endPointX, le2.endPointY);
+            // Decide branch: Stereo (have stereo camera) -> RGB-D -> Mono
+            bool created = false;
+            Eigen::Vector3f S3D, E3D;
+            Eigen::Vector3f colS(1,1,1), colE(1,1,1);
+            // // -----------------------
+            // // 1) Stereo path (if stereo camera and stereo depth available)
+            // // -----------------------
+            // // NOTE: we assume KeyFrame provides UnprojectStereoLine(int idx, Eigen::Vector3f &Xs, Eigen::Vector3f &Xe, Eigen::Vector3f &colorS, Eigen::Vector3f &colorE)
+            // // If your KeyFrame API differs, replace with appropriate calls (UnprojectStereo for endpoints or use mvuRight/mvDepth arrays).
+            // bool didStereo = false;
+            // if (mpCurrentKeyFrame->mpCamera2 && pKF2->mpCamera2)
+            // {
+            //     // Try to unproject stereo for both KFs if possible
+            //     bool bStereo1 = false, bStereo2 = false;
+            //     Eigen::Vector3f X1s, X1e, X2s, X2e;
+            //     Eigen::Vector3f c1s, c1e, c2s, c2e;
+            //     // NOTE: below are placeholder interfaces - adapt if your KeyFrame uses different function names/params.
+            //     // e.g., mpCurrentKeyFrame->UnprojectStereoLine(idx1, X1s, X1e, c1s, c1e)
+            //     // If you don't have per-line stereo depth, but have per-pixel disparity/depth, sample endpoints and call UnprojectStereo or UnprojectDepth.
+            //     bool ok1 = false, ok2 = false;
+            //     try {
+            //         // If your KeyFrame supports per-line stereo unprojection, use it
+            //         ok1 = mpCurrentKeyFrame->UnprojectStereoLine(idx1, X1s, X1e, c1s, c1e); // NOTE: implement if not exist
+            //     } catch (...) { ok1 = false; }
+            //     try {
+            //         ok2 = pKF2->UnprojectStereoLine(idx2, X2s, X2e, c2s, c2e); // NOTE: implement if not exist
+            //     } catch (...) { ok2 = false; }
+            //     if (ok1 && ok2)
+            //     {
+            //         // choose the more reliable stereo (like points: compare cosParallaxStereo1/2)
+            //         // compute cos parallax of endpoints rays (as in CreateNewMapPoints)
+            //         Eigen::Vector3f xn1s = mpCurrentKeyFrame->mpCamera->unprojectEig(p1s);
+            //         Eigen::Vector3f xn1e = mpCurrentKeyFrame->mpCamera->unprojectEig(p1e);
+            //         Eigen::Vector3f xn2s = pKF2->mpCamera->unprojectEig(p2s);
+            //         Eigen::Vector3f xn2e = pKF2->mpCamera->unprojectEig(p2e);
+            //         Eigen::Vector3f ray1s = Rcw1 * xn1s;
+            //         Eigen::Vector3f ray1e = Rcw1 * xn1e;
+            //         Eigen::Vector3f ray2s = Rcw2 * xn2s;
+            //         Eigen::Vector3f ray2e = Rcw2 * xn2e;
+            //         float cosParallaxRays_s = ray1s.dot(ray2s)/(ray1s.norm()*ray2s.norm());
+            //         float cosParallaxRays_e = ray1e.dot(ray2e)/(ray1e.norm()*ray2e.norm());
+            //         float cosParallaxRays = min(cosParallaxRays_s, cosParallaxRays_e);
+            //         // Compute stereo parallax approximations (safe fallbacks)
+            //         float cosParallaxStereo1 = cos(2*atan2(mpCurrentKeyFrame->mb/2, max(0.0001f, le1.lineLength)));
+            //         float cosParallaxStereo2 = cos(2*atan2(pKF2->mb/2, max(0.0001f, le2.lineLength)));
+            //         float cosParallaxStereo = min(cosParallaxStereo1, cosParallaxStereo2);
+            //         // Accept stereo-derived 3D line if geometry decent (similar to points)
+            //         if (cosParallaxRays < cosParallaxStereo && (cosParallaxRays > 0 || mbInertial))
+            //         {
+            //             // Create 3D endpoints from stereo unprojection
+            //             // Choose the KF with better stereo reliability - for line we can average endpoints from that KF
+            //             // We'll choose KF1 if its stereo is more reliable (example rule)
+            //             if (cosParallaxStereo1 < cosParallaxStereo2)
+            //             {
+            //                 S3D = X1s; E3D = X1e;
+            //                 colS = c1s; colE = c1e;
+            //             }
+            //             else
+            //             {
+            //                 S3D = X2s; E3D = X2e;
+            //                 colS = c2s; colE = c2e;
+            //             }
+            //             // final reprojection checks
+            //             if (!CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1)) { /* fallthrough */ }
+            //             else if (!CheckLineReprojection(pKF2, S3D, E3D, le2)) { /* fallthrough */ }
+            //             else {
+            //                 created = true;
+            //                 didStereo = true;
+            //             }
+            //         }
+            //     }
+            // } // end stereo block (to do next)
 
-            // === Step A：反投影两个端点 ===
-            Eigen::Vector3f x1s = mpCurrentKeyFrame->mpCamera->unprojectEig(le1_startPt);
-            Eigen::Vector3f x1e = mpCurrentKeyFrame->mpCamera->unprojectEig(le1_endPt);
+            if (!created)
+            {
+                // -----------------------
+                // 2) RGB-D path (depth images)
+                // -----------------------
+                // NOTE: assume KeyFrame can provide per-endpoint depth or per-pixel depth access.
+                // Example placeholders: UnprojectDepthLine(idx, Xs, Xe) or sample depth map at endpoints and unproject.
+                bool didRGBD = false;
+                Eigen::Vector3f Xd1s, Xd1e, Xd2s, Xd2e;
+                bool okd1 = false, okd2 = false;
+                try {
+                    okd1 = mpCurrentKeyFrame->UnprojectDepthLine(idx1, Xd1s, Xd1e); // implement if needed
+                } catch (...) { okd1 = false; }
+                try {
+                    okd2 = pKF2->UnprojectDepthLine(idx2, Xd2s, Xd2e);
+                } catch (...) { okd2 = false; }
 
-            Eigen::Vector3f x2s = pKF2->mpCamera->unprojectEig(le2_startPt);
-            Eigen::Vector3f x2e = pKF2->mpCamera->unprojectEig(le2_endPt);
+                if (okd1 || okd2)
+                {
+                    // Use whichever KF has valid depth (choose the more reliable)
+                    Eigen::Vector3f chosenS, chosenE;
+                    if (okd1 && !okd2) { chosenS = Xd1s; chosenE = Xd1e; }
+                    else if (!okd1 && okd2) { chosenS = Xd2s; chosenE = Xd2e; }
+                    else {
+                        // both exist: choose by parallax (use one with larger baseline->depth ratio)
+                        float dist1 = (Xd1s - Ow1).norm();
+                        float dist2 = (Xd2s - Ow2).norm();
+                        if (dist1 < dist2) { chosenS = Xd1s; chosenE = Xd1e; } else { chosenS = Xd2s; chosenE = Xd2e; }
+                    }
+                    // Reprojection checks
+                    if (CheckLineReprojection(mpCurrentKeyFrame, chosenS, chosenE, le1) &&
+                        CheckLineReprojection(pKF2, chosenS, chosenE, le2))
+                    {
+                        S3D = chosenS; E3D = chosenE;
+                        // optional color sampling
+                        didRGBD = true;
+                        created = true;
+                    }
+                }
+            } // end RGB-D
+            if (!created)
+            {
+                // // -----------------------
+                // // 3) Mono path (no depth) - rigorous triangulation
+                // // -----------------------
+                // // Method A: endpoint plane intersection -> project rays onto intersection line
+                // // Compute backprojected rays (normalized) in camera coords
+                // Eigen::Vector3f xn1s = cam1_base->unprojectEig(p1s);
+                // Eigen::Vector3f xn1e = cam1_base->unprojectEig(p1e);
+                // Eigen::Vector3f xn2s = cam2_base->unprojectEig(p2s);
+                // Eigen::Vector3f xn2e = cam2_base->unprojectEig(p2e);
+                // xn1s.normalize(); xn1e.normalize(); xn2s.normalize(); xn2e.normalize();
+                // // Build two planes (each plane goes through camera center and 3D line)
+                // Eigen::Vector4f pi1 = GeometricTools::ComputeLinePlane(xn1s, xn1e, Ow1);
+                // Eigen::Vector4f pi2 = GeometricTools::ComputeLinePlane(xn2s, xn2e, Ow2);
+                // Eigen::Vector3f L0, d;
+                // if (GeometricTools::IntersectPlanes(pi1, pi2, L0, d))
+                // {
+                //     d.normalize();
+                //     Eigen::Vector3f Ss = GeometricTools::ProjectRayToLine(xn1s, Ow1, L0, d);
+                //     Eigen::Vector3f Es = GeometricTools::ProjectRayToLine(xn1e, Ow1, L0, d);
+                //     // depth checks (in current poses)
+                //     float z1s = Rcw1.row(2).dot(Ss) + eigTcw1(2,3);
+                //     float z1e = Rcw1.row(2).dot(Es) + eigTcw1(2,3);
+                //     float z2s = Rcw2.row(2).dot(Ss) + eigTcw2(2,3);
+                //     float z2e = Rcw2.row(2).dot(Es) + eigTcw2(2,3);
+                //     if (z1s > 0 && z1e > 0 && z2s > 0 && z2e > 0)
+                //     {
+                //         // reprojection errors
+                //         if (CheckLineReprojection(mpCurrentKeyFrame, Ss, Es, le1) &&
+                //             CheckLineReprojection(pKF2, Ss, Es, le2))
+                //         {
+                //             // Additional ray residual check (optional)
+                //             // compute ray residual for endpoints (transform rays into common frame and compute nearest-point distance)
+                //             auto RayResidual = [&](const Eigen::Vector3f &dA, const Eigen::Vector3f &dB)->float
+                //             {
+                //                 Eigen::Vector3f w0 = (Tcw2 * Tcw1.inverse()).translation(); // approximate t21
+                //                 float a = dA.dot(dA);
+                //                 float b = dA.dot(dB);
+                //                 float c = dB.dot(dB);
+                //                 float d = dA.dot(w0);
+                //                 float e = dB.dot(w0);
+                //                 float denom = a*c - b*b;
+                //                 if (fabs(denom) < 1e-6f) return 1e6f;
+                //                 float s = (b*e - c*d) / denom;
+                //                 float t = (a*e - b*d) / denom;
+                //                 Eigen::Vector3f p1 = w0 + s * dA;
+                //                 Eigen::Vector3f p2 =       t * dB;
+                //                 return (p1 - p2).norm();
+                //             };
+                //             float r_s = RayResidual(Rcw1 * xn1s, Rcw2 * xn2s);
+                //             float r_e = RayResidual(Rcw1 * xn1e, Rcw2 * xn2e);
+                //             if (r_s + r_e < MAX_RAY_RES)
+                //             {
+                //                 S3D = Ss; E3D = Es;
+                //                 created = true;
+                //             }
+                //         }
+                //     }
+                // }
 
-            // === Step B：构造两个平面（两个 KeyFrame 中的两个图像线段）===
-            Eigen::Vector4f pi1 = GeometricTools::ComputeLinePlane(x1s, x1e, Ow1);
-            Eigen::Vector4f pi2 = GeometricTools::ComputeLinePlane(x2s, x2e, Ow2);
+            //     // Method B fallback: midpoint triangulation (if A failed)
+            //     if (!created)
+            //     {
+            //         cv::Point2f mid1((p1s.x + p1e.x) * 0.5f, (p1s.y + p1e.y) * 0.5f);
+            //         cv::Point2f mid2((p2s.x + p2e.x) * 0.5f, (p2s.y + p2e.y) * 0.5f);
+            //         Eigen::Vector3f xu1 = cam1_base->unprojectEig(mid1);
+            //         Eigen::Vector3f xu2 = cam2_base->unprojectEig(mid2);
+            //         xu1.normalize(); xu2.normalize();
+            //         Eigen::Vector3f x3Dmid;
+            //         if (GeometricTools::Triangulate(xu1, xu2, eigTcw1, eigTcw2, x3Dmid))
+            //         {
+            //             // form a small 3D segment along the local line direction (heuristic)
+            //             Eigen::Vector3f dir = (x3Dmid - Ow1).normalized();
+            //             float half = 0.5f; // 0.5 m fallback, consider adaptive based on scene depth
+            //             S3D = x3Dmid - half * dir;
+            //             E3D = x3Dmid + half * dir;
+            //             if (CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1) &&
+            //                 CheckLineReprojection(pKF2, S3D, E3D, le2))
+            //             {
+            //                 created = true;
+            //             }
+            //         }
+            //     }
+            //     // Method C fallback: Plücker triangulation (if available)
+            //     if (!created)
+            //     {
+            //         Eigen::Vector3f L0_p, d_p;
+            //         if (GeometricTools::TriangulatePluckerLine(xn1s, xn1e, xn2s, xn2e, T1w, T2w, L0_p, d_p))
+            //         {
+            //             d_p.normalize();
+            //             Eigen::Vector3f Sp = GeometricTools::ProjectRayToLine(xn1s, Ow1, L0_p, d_p);
+            //             Eigen::Vector3f Ep = GeometricTools::ProjectRayToLine(xn1e, Ow1, L0_p, d_p);
+            //             if (CheckLineReprojection(mpCurrentKeyFrame, Sp, Ep, le1) &&
+            //                 CheckLineReprojection(pKF2, Sp, Ep, le2))
+            //             {
+            //                 S3D = Sp; E3D = Ep;
+            //                 created = true;
+            //             }
+            //         }
+            //     }
+            } // end Mono branch
 
-            // === Step C：求平面交线 ===
-            Eigen::Vector3f L0, d;
-            if (!GeometricTools::IntersectPlanes(pi1, pi2, L0, d))
+            if (!created) continue;
+
+            // Final checks - front of cameras & scale consistency (copying the structure from CreateNewMapPoints)
+            float z1 = Rcw1.row(2).dot(S3D) + eigTcw1(2,3);
+            if (z1 <= 0) continue;
+            float z2 = Rcw2.row(2).dot(S3D) + eigTcw2(2,3);
+            if (z2 <= 0) continue;
+
+            // scale/length consistency - compute distances from cameras to one endpoint (S3D)
+            Eigen::Vector3f normal1 = S3D - Ow1;
+            Eigen::Vector3f normal2 = S3D - Ow2;
+            float dist1 = normal1.norm();
+            float dist2 = normal2.norm();
+            if (dist1 <= 0 || dist2 <= 0) continue;
+
+            // optional: avoid extremely far points if you have mThFarPoints like points code
+            if (mbFarPoints && (dist1 >= mThFarPoints || dist2 >= mThFarPoints)) continue;
+
+            // possible scale consistency check (soft)
+            const float ratioFactor = 1.5f * mpCurrentKeyFrame->mfScaleFactor;
+            // compute octave ratio using line's angle/scale? We'll reuse keyline octave if available:
+            float ratioOctave = 1.0f;
+            if (le1.octave >= 0 && le2.octave >= 0)
+                ratioOctave = mpCurrentKeyFrame->mvScaleFactors[le1.octave] / pKF2->mvScaleFactors[le2.octave];
+
+            float ratioDist = dist2 / dist1;
+            if (ratioDist * ratioFactor < ratioOctave || ratioDist > ratioOctave * ratioFactor)
                 continue;
 
-            d.normalize();
+            // sample color from current KF endpoints (clamped)
+            try {
+                //int us = std::clamp((int)std::round(le1.startPointX), 0, mpCurrentKeyFrame->imgLeftRGB.cols - 1);
+                //int vs = std::clamp((int)std::round(le1.startPointY), 0, mpCurrentKeyFrame->imgLeftRGB.rows - 1);
+                //int ue = std::clamp((int)std::round(le1.endPointX),   0, mpCurrentKeyFrame->imgLeftRGB.cols - 1);
+                //int ve = std::clamp((int)std::round(le1.endPointY),   0, mpCurrentKeyFrame->imgLeftRGB.rows - 1);
+                int us = std::max(0, std::min(static_cast<int>(std::round(le1.startPointX)), mpCurrentKeyFrame->imgLeftRGB.cols - 1));
+                int vs = std::max(0, std::min(static_cast<int>(std::round(le1.startPointY)), mpCurrentKeyFrame->imgLeftRGB.rows - 1));
+                int ue = std::max(0, std::min(static_cast<int>(std::round(le1.endPointX)),   mpCurrentKeyFrame->imgLeftRGB.cols - 1));
+                int ve = std::max(0, std::min(static_cast<int>(std::round(le1.endPointY)),   mpCurrentKeyFrame->imgLeftRGB.rows - 1));
+                const auto &cs = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(vs, us);
+                const auto &ce = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(ve, ue);
+                colS = Eigen::Vector3f(cs[0], cs[1], cs[2]);
+                colE = Eigen::Vector3f(ce[0], ce[1], ce[2]);
+            } catch(...) {}
 
-            // === Step D：投影端点射线到交线上 ===
-            Eigen::Vector3f s3D =
-                GeometricTools::ProjectRayToLine(x1s, Ow1, L0, d);
+            //// Final duplicate check before insertion (race conditions) to do next...
+            //if (mpCurrentKeyFrame->GetMapLine(idx1) || pKF2->GetMapLine(idx2)) continue;
 
-            Eigen::Vector3f e3D =
-                GeometricTools::ProjectRayToLine(x1e, Ow1, L0, d);
-
-            // 检查：深度必须为正
-            float z1s = Rcw1.row(2).dot(s3D) + eigTcw1(2,3);
-            float z1e = Rcw1.row(2).dot(e3D) + eigTcw1(2,3);
-            float z2s = Rcw2.row(2).dot(s3D) + eigTcw2(2,3);
-            float z2e = Rcw2.row(2).dot(e3D) + eigTcw2(2,3);
-
-            if (z1s<=0 || z1e<=0 || z2s<=0 || z2e<=0)
-                continue;
-
-            // 重投影误差检查
-            if (!CheckLineReprojection(mpCurrentKeyFrame, s3D, e3D, le1))
-                continue;
-            if (!CheckLineReprojection(pKF2, s3D, e3D, le2))
-                continue;
-            
-            std::pair<Eigen::Vector3f, Eigen::Vector3f> line_seg_color;
-            const int ls_u = static_cast<int>(std::round(le1.startPointX));
-            const int ls_v = static_cast<int>(std::round(le1.startPointY));
-            const int le_u = static_cast<int>(std::round(le1.endPointX));
-            const int le_v = static_cast<int>(std::round(le1.endPointY));
-            const auto& ls_color = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(ls_v, ls_u);
-            const auto& le_color = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(le_v, le_u);
-            line_seg_color.first.x() = ls_color[0];
-            line_seg_color.first.y() = ls_color[1];
-            line_seg_color.first.z() = ls_color[2];
-            line_seg_color.second.x() = le_color[0];
-            line_seg_color.second.y() = le_color[1];
-            line_seg_color.second.z() = le_color[2];
-
-            // === Step E：创建 MapLine ===
-            MapLine* pML = new MapLine(s3D, e3D, line_seg_color.first, line_seg_color.second, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
+            // Create MapLine and register observations
+            MapLine* pML = new MapLine(S3D, E3D, colS, colE, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
             pML->AddLineObservation(mpCurrentKeyFrame, idx1);
             pML->AddLineObservation(pKF2, idx2);
             mpCurrentKeyFrame->AddMapLine(pML, idx1);
             pKF2->AddMapLine(pML, idx2);
             pML->ComputeDistinctiveDescriptors();
+            pML->UpdateNormalAndDepth();
             mpAtlas->AddMapLine(pML);
             mlpRecentAddedMapLines.push_back(pML);
-        }
-    }
-    //debug the line 3D
-    //line_matcher.DebugDrawLineMatchesFrame
+        } // end for each matched idxPair
+    } // end for each neighbor KF
+
+    // debug visualization
+    int created_map_line_num = (int)mlpRecentAddedMapLines.size();
+    std::cerr << " created_map_line_num: " << created_map_line_num << std::endl;
+    //DebugRecentAddedMapLinesProjection();
 }
+
+
+// void LocalMapping::CreateNewMapLines()
+// {
+//     int nn = mbMonocular ? 30 : 10;
+//     vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+//     if (mbInertial)
+//     {
+//         KeyFrame* pKF = mpCurrentKeyFrame;
+//         int cnt = 0;
+//         while ((vpNeighKFs.size() <= nn) && pKF->mPrevKF && cnt++ < nn)
+//         {
+//             if (find(vpNeighKFs.begin(), vpNeighKFs.end(), pKF->mPrevKF) == vpNeighKFs.end())
+//                 vpNeighKFs.push_back(pKF->mPrevKF);
+//             pKF = pKF->mPrevKF;
+//         }
+//     }
+//     LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f,2.0f); // 类似 ORBmatcher 的线版本
+//     Sophus::SE3f Tcw1 = mpCurrentKeyFrame->GetPose();
+//     Eigen::Matrix<float,3,4> eigTcw1 = Tcw1.matrix3x4();
+//     Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+//     Eigen::Matrix3f Rcw1 = eigTcw1.block<3,3>(0,0);
+//     for (KeyFrame* pKF2 : vpNeighKFs)
+//     {
+//         if (CheckNewKeyFrames()) return;
+//         Sophus::SE3f Tcw2 = pKF2->GetPose();
+//         Eigen::Matrix<float,3,4> eigTcw2 = Tcw2.matrix3x4();
+//         Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
+//         Eigen::Matrix3f Rcw2 = eigTcw2.block<3,3>(0,0);
+//         float baseline = (Ow2 - Ow1).norm();
+//         if (mbMonocular)
+//         {
+//             float med = pKF2->ComputeSceneMedianDepth(2);
+//             if (baseline / med < 0.01f) continue;
+//         }
+//         else
+//         {
+//             if (baseline < pKF2->mb) continue;
+//         }
+//         std::vector<pair<int,int>> vMatchedIdx;
+//         //line_matcher.SearchForTriangulationLine(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         line_matcher.SearchForTriangulationLinesRobust(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         //line_matcher.SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         //line_matcher.SearchForTriangulationFused(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         //debug 线段匹配
+//         // 可视化
+//         //line_matcher.DebugShowTriangulationMatchesKF(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         for (auto &idxPair : vMatchedIdx)
+//         {
+//             int idx1 = idxPair.first;
+//             int idx2 = idxPair.second;
+//             const cv::line_descriptor::KeyLine &le1 = mpCurrentKeyFrame->mvKeyLines[idx1];
+//             const cv::line_descriptor::KeyLine &le2 = pKF2->mvKeyLines[idx2];
+//             cv::Point2f le1_startPt = cv::Point2f(le1.startPointX, le1.startPointY);
+//             cv::Point2f le1_endPt = cv::Point2f(le1.endPointX, le1.endPointY);
+//             cv::Point2f le2_startPt = cv::Point2f(le2.startPointX, le2.startPointY);
+//             cv::Point2f le2_endPt = cv::Point2f(le2.endPointX, le2.endPointY);
+//             //Get Color
+//             // === Step A：反投影两个端点 ===
+//             Eigen::Vector3f x1s = mpCurrentKeyFrame->mpCamera->unprojectEig(le1_startPt);
+//             Eigen::Vector3f x1e = mpCurrentKeyFrame->mpCamera->unprojectEig(le1_endPt);
+//             Eigen::Vector3f x2s = pKF2->mpCamera->unprojectEig(le2_startPt);
+//             Eigen::Vector3f x2e = pKF2->mpCamera->unprojectEig(le2_endPt);
+//             // === Step B：构造两个平面（两个 KeyFrame 中的两个图像线段）===
+//             Eigen::Vector4f pi1 = GeometricTools::ComputeLinePlane(x1s, x1e, Ow1);
+//             Eigen::Vector4f pi2 = GeometricTools::ComputeLinePlane(x2s, x2e, Ow2);
+//             // === Step C：求平面交线 ===
+//             Eigen::Vector3f L0, d;
+//             if (!GeometricTools::IntersectPlanes(pi1, pi2, L0, d))
+//                 continue;
+//             d.normalize();
+//             // === Step D：投影端点射线到交线上 ===
+//             Eigen::Vector3f s3D =
+//                 GeometricTools::ProjectRayToLine(x1s, Ow1, L0, d);
+//             Eigen::Vector3f e3D =
+//                 GeometricTools::ProjectRayToLine(x1e, Ow1, L0, d);
+//             // 检查：深度必须为正
+//             float z1s = Rcw1.row(2).dot(s3D) + eigTcw1(2,3);
+//             float z1e = Rcw1.row(2).dot(e3D) + eigTcw1(2,3);
+//             float z2s = Rcw2.row(2).dot(s3D) + eigTcw2(2,3);
+//             float z2e = Rcw2.row(2).dot(e3D) + eigTcw2(2,3);
+//             if (z1s<=0 || z1e<=0 || z2s<=0 || z2e<=0)
+//                 continue;
+//             // 重投影误差检查
+//             if (!CheckLineReprojection(mpCurrentKeyFrame, s3D, e3D, le1))
+//                 continue;
+//             if (!CheckLineReprojection(pKF2, s3D, e3D, le2))
+//                 continue;            
+//             std::pair<Eigen::Vector3f, Eigen::Vector3f> line_seg_color;
+//             const int ls_u = static_cast<int>(std::round(le1.startPointX));
+//             const int ls_v = static_cast<int>(std::round(le1.startPointY));
+//             const int le_u = static_cast<int>(std::round(le1.endPointX));
+//             const int le_v = static_cast<int>(std::round(le1.endPointY));
+//             const auto& ls_color = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(ls_v, ls_u);
+//             const auto& le_color = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(le_v, le_u);
+//             line_seg_color.first.x() = ls_color[0];
+//             line_seg_color.first.y() = ls_color[1];
+//             line_seg_color.first.z() = ls_color[2];
+//             line_seg_color.second.x() = le_color[0];
+//             line_seg_color.second.y() = le_color[1];
+//             line_seg_color.second.z() = le_color[2];
+//             // === Step E：创建 MapLine ===
+//             MapLine* pML = new MapLine(s3D, e3D, line_seg_color.first, line_seg_color.second, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
+//             pML->AddLineObservation(mpCurrentKeyFrame, idx1);
+//             pML->AddLineObservation(pKF2, idx2);
+//             mpCurrentKeyFrame->AddMapLine(pML, idx1);
+//             pKF2->AddMapLine(pML, idx2);
+//             pML->ComputeDistinctiveDescriptors();
+//             mpAtlas->AddMapLine(pML);
+//             mlpRecentAddedMapLines.push_back(pML);
+//         }
+//     }
+//     //debug the line 3D
+//     //line_matcher.DebugDrawLineMatchesFrame
+//     DebugRecentAddedMapLines();
+// }
 
 bool LocalMapping::CheckLineReprojection(
         KeyFrame* pKF,
@@ -1499,6 +1897,12 @@ void LocalMapping::SearchInNeighborsWithLine()
            pML->UpdateNormalAndDepth();
        }           
     }
+
+    //if(mpAtlas->KeyFramesInMap()>2)
+    //{
+    //    DebugCurrentFrameMapLinesProjection(mpCurrentKeyFrame->GetMapLineMatches());
+    //}
+    //算法没有问题，到这里是正确的。
     //debug一下线段匹配的情况
     ////debug draw
     //std::cerr << "TrackWithMotionModelWithLine->Point Matches: " <<  nmatches  << ";   TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
@@ -1700,6 +2104,286 @@ void LocalMapping::SearchInNeighborsWithLineNew()
     }
 }
 
+void LocalMapping::DebugRecentAddedMapLines()
+{
+    if (mlpRecentAddedMapLines.empty())
+    {
+        std::cout << "[DebugRecentAddedMapLines] No recent added map lines." << std::endl;
+        return;
+    }
+
+    int line_id = 0;
+
+    for (MapLine* pML : mlpRecentAddedMapLines)
+    {
+        if (!pML || pML->isBad())
+            continue;
+
+        std::cout << "\n===============================" << std::endl;
+        std::cout << "MapLine ID: " << line_id++ << std::endl;
+
+        // ---- 1. 打印 3D 端点 ----
+        auto X3D = pML->GetLineWorldPos();
+        Eigen::Vector3f P1 = X3D.first;
+        Eigen::Vector3f P2 = X3D.second;
+
+        std::cout << "  P1 = " << P1.transpose() << std::endl;
+        std::cout << "  P2 = " << P2.transpose() << std::endl;
+
+        // ---- 2. 打印颜色 ----
+        Eigen::Vector3f C1 = pML->GetLineColorRGB().first;
+        Eigen::Vector3f C2 = pML->GetLineColorRGB().second;
+
+        std::cout << "  ColorStart = " << C1.transpose() << std::endl;
+        std::cout << "  ColorEnd   = " << C2.transpose() << std::endl;
+
+        // ---- 3. 获取观测 ----
+        auto obs = pML->GetLineObservations();
+        std::cout << "  Observations (#KF) = " << obs.size() << std::endl;
+
+        // ---- 4. 遍历所有观察的 KeyFrame ----
+        int obs_idx = 0;
+        for (auto &kv : obs)
+        {
+            KeyFrame* pKF = kv.first;
+            std::tuple<int,int> tup = kv.second;
+
+            int idx_line = std::get<0>(tup);  // tuple 第一个：KeyLine index
+
+            std::cout << "    KF[" << obs_idx++ << "] ID = " << pKF->mnId
+                      << " idxLine = " << idx_line << std::endl;
+
+            if (!pKF) continue;
+
+            // ---- A. 获取 KeyLine ----
+            if (idx_line < 0 || idx_line >= pKF->mvKeyLines.size())
+            {
+                std::cout << "    [WARN] Invalid KeyLine index." << std::endl;
+                continue;
+            }
+            const auto &KL = pKF->mvKeyLines[idx_line];
+
+            // ---- B. 获取图像（RGB）----
+            cv::Mat img;
+            if (pKF->imgLeftRGB.channels() == 3)
+                img = pKF->imgLeftRGB.clone();
+            else
+                cv::cvtColor(pKF->imgLeftRGB, img, cv::COLOR_GRAY2BGR);
+
+            // ---- C. 画线，使用 MapLine 的颜色 ----
+            cv::Scalar col(
+                (int)(C2.x()*255),
+                (int)(C2.y()*255),
+                (int)(C2.z()*255)
+            );
+
+            cv::line(img,
+                     cv::Point2f(KL.startPointX, KL.startPointY),
+                     cv::Point2f(KL.endPointX, KL.endPointY),
+                     col, 2);
+
+            // ---- D. 显示 ----
+            std::string win_name = "ML " + std::to_string(line_id-1)
+                                   + " KF " + std::to_string(pKF->mnId)
+                                   + " idx " + std::to_string(idx_line);
+
+            cv::imshow(win_name, img);
+            cv::waitKey(0);
+        }
+    }
+
+    std::cout << "[DebugRecentAddedMapLines] Finished visualization." << std::endl;
+}
+
+void LocalMapping::DebugCurrentFrameMapLinesProjection(const std::vector<MapLine*>& current_keyframe_maplines)
+{
+    if (current_keyframe_maplines.empty())
+    {
+        std::cout << "[DebugCurrentFrameMapLinesProjection] No current_keyframe_maplines existed." << std::endl;
+        return;
+    }
+
+    int line_id = 0;
+
+    for (MapLine* pML : current_keyframe_maplines)
+    {
+        if (!pML || pML->isBad())
+            continue;
+
+        std::cout << "\n===============================" << std::endl;
+        std::cout << "MapLine ID: " << line_id++ << std::endl;
+
+        // 1. 取 3D 端点
+        auto X3D = pML->GetLineWorldPos();
+        Eigen::Vector3f P1 = X3D.first;
+        Eigen::Vector3f P2 = X3D.second;
+
+        std::cout << "  P1 = " << P1.transpose() << ", P2 = " << P2.transpose() << std::endl;
+
+        // 2. 取颜色
+        Eigen::Vector3f C1 = pML->GetLineColorRGB().first;
+        Eigen::Vector3f C2 = pML->GetLineColorRGB().second;
+
+        // 3. 获取观察 KeyFrames
+        auto obs = pML->GetLineObservations();
+        std::cout << "  Observations (#KF) = " << obs.size() << std::endl;
+
+        int obs_idx = 0;
+        for (auto &kv : obs)
+        {
+            KeyFrame* pKF = kv.first;
+            std::tuple<int,int> tup = kv.second;
+            int idx_line = std::get<0>(tup);
+
+            if (!pKF) continue;
+            if (idx_line < 0 || idx_line >= pKF->mvKeyLines.size()) continue;
+
+            const auto &KL = pKF->mvKeyLines[idx_line];
+
+            // 4. 投影 MapLine 到该 KeyFrame 图像
+            Sophus::SE3f Tcw = pKF->GetPose();
+            Eigen::Vector3f P1_cam = Tcw * P1; // P1 in camera coords
+            Eigen::Vector3f P2_cam = Tcw * P2;
+
+            cv::Point2f uv1 = pKF->mpCamera->project(cv::Point3f(P1_cam.x(), P1_cam.y(), P1_cam.z()));
+            cv::Point2f uv2 = pKF->mpCamera->project(cv::Point3f(P2_cam.x(), P2_cam.y(), P2_cam.z()));
+
+            // 5. 计算端点误差
+            cv::Point2f kpt_start(KL.startPointX, KL.startPointY);
+            cv::Point2f kpt_end(KL.endPointX, KL.endPointY);
+
+            float err_start = cv::norm(uv1 - kpt_start);
+            float err_end   = cv::norm(uv2 - kpt_end);
+
+            std::cout << "    KF[" << obs_idx++ << "] ID = " << pKF->mnId
+                      << " idxLine = " << idx_line
+                      << " errStart = " << err_start
+                      << " errEnd = " << err_end << std::endl;
+
+            // 6. 获取显示图像
+            cv::Mat img;
+            if (pKF->imgLeftRGB.channels() == 3)
+                img = pKF->imgLeftRGB.clone();
+            else
+                cv::cvtColor(pKF->imgLeftRGB, img, cv::COLOR_GRAY2BGR);
+
+            // 7. 画 KeyLine 原线段（红色）
+            cv::line(img, kpt_start, kpt_end, cv::Scalar(0,0,255), 1);
+
+            // 8. 画 MapLine 投影线（绿色）
+            cv::line(img, uv1, uv2, cv::Scalar(0,255,0), 2);
+
+
+            // 9. 显示端点颜色
+            cv::circle(img, uv1, 2, cv::Scalar(C1.x()*255,C1.y()*255,C1.z()*255), -1);
+            cv::circle(img, uv2, 2, cv::Scalar(C2.x()*255,C2.y()*255,C2.z()*255), -1);
+
+            // 10. 显示窗口
+            std::string win_name = "ML " + std::to_string(line_id-1)
+                                   + " KF " + std::to_string(pKF->mnId)
+                                   + " idx " + std::to_string(idx_line);
+            cv::imshow(win_name, img);
+            cv::waitKey(0);
+        }
+    }
+
+    std::cout << "[DebugRecentAddedMapLinesProjection] Finished visualization." << std::endl;
+}
+
+void LocalMapping::DebugRecentAddedMapLinesProjection()
+{
+    if (mlpRecentAddedMapLines.empty())
+    {
+        std::cout << "[DebugRecentAddedMapLinesProjection] No recent added map lines." << std::endl;
+        return;
+    }
+
+    int line_id = 0;
+
+    for (MapLine* pML : mlpRecentAddedMapLines)
+    {
+        if (!pML || pML->isBad())
+            continue;
+
+        std::cout << "\n===============================" << std::endl;
+        std::cout << "MapLine ID: " << line_id++ << std::endl;
+
+        // 1. 取 3D 端点
+        auto X3D = pML->GetLineWorldPos();
+        Eigen::Vector3f P1 = X3D.first;
+        Eigen::Vector3f P2 = X3D.second;
+
+        std::cout << "  P1 = " << P1.transpose() << ", P2 = " << P2.transpose() << std::endl;
+
+        // 2. 取颜色
+        Eigen::Vector3f C1 = pML->GetLineColorRGB().first;
+        Eigen::Vector3f C2 = pML->GetLineColorRGB().second;
+
+        // 3. 获取观察 KeyFrames
+        auto obs = pML->GetLineObservations();
+        std::cout << "  Observations (#KF) = " << obs.size() << std::endl;
+
+        int obs_idx = 0;
+        for (auto &kv : obs)
+        {
+            KeyFrame* pKF = kv.first;
+            std::tuple<int,int> tup = kv.second;
+            int idx_line = std::get<0>(tup);
+
+            if (!pKF) continue;
+            if (idx_line < 0 || idx_line >= pKF->mvKeyLines.size()) continue;
+
+            const auto &KL = pKF->mvKeyLines[idx_line];
+
+            // 4. 投影 MapLine 到该 KeyFrame 图像
+            Sophus::SE3f Tcw = pKF->GetPose();
+            Eigen::Vector3f P1_cam = Tcw * P1; // P1 in camera coords
+            Eigen::Vector3f P2_cam = Tcw * P2;
+
+            cv::Point2f uv1 = pKF->mpCamera->project(cv::Point3f(P1_cam.x(), P1_cam.y(), P1_cam.z()));
+            cv::Point2f uv2 = pKF->mpCamera->project(cv::Point3f(P2_cam.x(), P2_cam.y(), P2_cam.z()));
+
+            // 5. 计算端点误差
+            cv::Point2f kpt_start(KL.startPointX, KL.startPointY);
+            cv::Point2f kpt_end(KL.endPointX, KL.endPointY);
+
+            float err_start = cv::norm(uv1 - kpt_start);
+            float err_end   = cv::norm(uv2 - kpt_end);
+
+            std::cout << "    KF[" << obs_idx++ << "] ID = " << pKF->mnId
+                      << " idxLine = " << idx_line
+                      << " errStart = " << err_start
+                      << " errEnd = " << err_end << std::endl;
+
+            // 6. 获取显示图像
+            cv::Mat img;
+            if (pKF->imgLeftRGB.channels() == 3)
+                img = pKF->imgLeftRGB.clone();
+            else
+                cv::cvtColor(pKF->imgLeftRGB, img, cv::COLOR_GRAY2BGR);
+
+            // 7. 画 KeyLine 原线段（红色）
+            cv::line(img, kpt_start, kpt_end, cv::Scalar(0,0,255), 1);
+
+            // 8. 画 MapLine 投影线（绿色）
+            cv::line(img, uv1, uv2, cv::Scalar(0,255,0), 2);
+
+
+            // 9. 显示端点颜色
+            cv::circle(img, uv1, 2, cv::Scalar(C1.x()*255,C1.y()*255,C1.z()*255), -1);
+            cv::circle(img, uv2, 2, cv::Scalar(C2.x()*255,C2.y()*255,C2.z()*255), -1);
+
+            // 10. 显示窗口
+            std::string win_name = "ML " + std::to_string(line_id-1)
+                                   + " KF " + std::to_string(pKF->mnId)
+                                   + " idx " + std::to_string(idx_line);
+            cv::imshow(win_name, img);
+            cv::waitKey(0);
+        }
+    }
+
+    std::cout << "[DebugRecentAddedMapLinesProjection] Finished visualization." << std::endl;
+}
 
 
 void LocalMapping::RequestStop()

@@ -148,6 +148,12 @@ protected:
     void SearchInNeighborsWithLineNew();
     void KeyFrameCulling();
 
+    //--------------------debug functions----------------------//
+    void DebugRecentAddedMapLines();
+    void DebugCurrentFrameMapLinesProjection(const std::vector<MapLine*>& current_keyframe_maplines);
+    void DebugRecentAddedMapLinesProjection();
+    //--------------------end debug functions----------------------//
+
     bool CheckLineReprojection(KeyFrame* pKF, const Eigen::Vector3f &X3Ds, const Eigen::Vector3f &X3De, const cv::line_descriptor::KeyLine &kline);
 
     System *mpSystem;
