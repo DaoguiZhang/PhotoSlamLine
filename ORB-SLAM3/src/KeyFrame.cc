@@ -1779,4 +1779,17 @@ bool KeyFrame::GetLineEndpoints(int lineIdx, cv::Point2f &s_out, cv::Point2f &e_
     return false;
 }
 
+bool KeyFrame::GetLineEndPointEigen(int lineIdx, Eigen::Vector2f& s_out, Eigen::Vector2f& e_out)
+{
+    if(lineIdx < mvKeyLines.size() && lineIdx >= 0)
+    {
+        s_out[0] = mvKeyLines[lineIdx].startPointX;
+        s_out[1] = mvKeyLines[lineIdx].startPointY;
+        e_out[0] = mvKeyLines[lineIdx].endPointX;
+        e_out[1] = mvKeyLines[lineIdx].endPointY;
+        return true;
+    }
+    return false;
+}
+
 } //namespace ORB_SLAM

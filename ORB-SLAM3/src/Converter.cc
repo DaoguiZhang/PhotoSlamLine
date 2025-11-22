@@ -311,7 +311,7 @@ Sophus::Sim3f Converter::toSophus(const g2o::Sim3& S) {
                          S.translation().cast<float>());
 }
 
-void LineSegmentToPlucker(
+void Converter::LineSegmentToPlucker(
     const Eigen::Vector3d& P1,
     const Eigen::Vector3d& P2,
     Eigen::Vector3d& n,
@@ -322,6 +322,20 @@ void LineSegmentToPlucker(
 
     // 法向量部分
     n = P1.cross(v);
+}
+
+Eigen::Vector3f Converter::getLineFromSegment2D(const Eigen::Vector2f& sl,
+                                   const Eigen::Vector2f& el)
+{
+    float x1 = sl.x(), y1 = sl.y();
+    float x2 = el.x(), y2 = el.y();
+
+    Eigen::Vector3f line;
+    line[0] = y1 - y2;        // a
+    line[1] = x2 - x1;        // b
+    line[2] = x1 * y2 - x2 * y1;  // c
+
+    return line;  // ax + by + c = 0
 }
 
 } //namespace ORB_SLAM

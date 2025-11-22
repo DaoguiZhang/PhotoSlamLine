@@ -225,6 +225,8 @@ public:
     std::vector<KeyFrame*> GetCovisiblesByWeight(const int &w);
     int GetWeight(KeyFrame* pKF);
 
+    //const std::vector<cv::line_descriptor::KeyLine>& GetLineEndpoints
+
     // Spanning tree functions
     void AddChild(KeyFrame* pKF);
     void EraseChild(KeyFrame* pKF);
@@ -273,6 +275,7 @@ public:
     void GetKeypointInfo(std::vector<float> &pixelsUndist, std::vector<float> &pointsLocal);
     void GetKeyLineInfo(std::vector<float> &pixelsUndist,std::vector<float> &pointsLocal);
     bool GetLineEndpoints(int lineIdx, cv::Point2f &s_out, cv::Point2f &e_out);
+    bool GetLineEndPointEigen(int lineIdx, Eigen::Vector2f& s_out, Eigen::Vector2f& e_out);
 
     //keyLine functions(modified by zdg)
     std::vector<size_t> GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 

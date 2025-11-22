@@ -905,6 +905,9 @@ void MapLine::UpdateFromPluckerLine()
         BackprojectPixelToWorldRay(pKF, s2d, o1, d1);
         BackprojectPixelToWorldRay(pKF, e2d, o2, d2);
 
+        d1.normalize();
+        d2.normalize();
+
         // --- 求射线与 Plücker 直线的最近点 ---
         float sp, tp;
         Eigen::Vector3f pr, pl;

@@ -4574,7 +4574,7 @@ bool Tracking::TrackWithMotionModelWithLine()
         }
     }
 
-    std::cerr << "After outlier rejection: Point Matches: " <<  nmatchesMap  << ";   Line Matches: " << nLinematchesMap << std::endl;
+    //std::cerr << "After outlier rejection: Point Matches: " <<  nmatchesMap  << ";   Line Matches: " << nLinematchesMap << std::endl;
 
     if(mbOnlyTracking)
     {
@@ -5627,7 +5627,7 @@ void Tracking::SearchLocalPointsAndLine()
             }
         }
     }
-    std::cerr << "Initial Matches: Points: " << initialPointMatches << ", Lines: " << initialLineMatches << std::endl;
+    //std::cerr << "Initial Matches: Points: " << initialPointMatches << ", Lines: " << initialLineMatches << std::endl;
     //std::cerr << "0000 After cleaning: Tracked Local Map Points: " << mvpLocalMapPoints.size() << ", Tracked Local Map Lines: " << mvpLocalMapLines.size() << std::endl;
     // ============ [2] 投影局部地图点 ============
     int nToMatchPoints = 0;
@@ -5681,7 +5681,7 @@ void Tracking::SearchLocalPointsAndLine()
                                cv::Point2f(pML->mLeTrackProjX, pML->mLeTrackProjY));
         }
     }
-    std::cerr << "projection: To Match Points: " << nToMatchPoints << ", To Match Lines: " << nToMatchLines << std::endl;
+    //std::cerr << "projection: To Match Points: " << nToMatchPoints << ", To Match Lines: " << nToMatchLines << std::endl;
 
     ////debug
     //std::cerr << "Local Map Lines Seen in Frame: " << LocalMapLinesSeenInFrame.size() << ", Not Seen in Frame: " << LocalMapLinesNotSeenInFrame.size() << std::endl;

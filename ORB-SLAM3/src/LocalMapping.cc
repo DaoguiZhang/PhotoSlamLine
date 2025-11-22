@@ -400,12 +400,12 @@ void LocalMapping::RunWithLine()
                     else
                     {
                         MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
-                        Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
-                        //修改LocalBundleAdjustment，把这个写完，明天调试这些代码，如果能调试好，几乎所有都做好了。后面对于全局的相机优化，是否再弄一下，需要调整一下。
+                        //Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
+                        ///修改LocalBundleAdjustment，把这个写完，明天调试这些代码，如果能调试好，几乎所有都做好了。后面对于全局的相机优化，是否再弄一下，需要调整一下。
                         //Optimizer::LocalBundleAdjustmentWithLine(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
-                        //Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
                         b_doneLBA = true;
-                        std::cerr << "Local bundle adjustment num_MPs, num_MLs: " << num_MPs_BA << ", " <<  num_MLs_BA << std::endl;
+                        std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;
                         mpAtlas->pushMappingOperation(opr);
                     }
 

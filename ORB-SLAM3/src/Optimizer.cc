@@ -3180,39 +3180,40 @@ void Optimizer::LocalBundleAdjustmentWithLinesPluckerOld(
             nEdges++;
         }
     }
+
     // -----------------------------
     // Step 8: MapLine 顶点 + EdgeSE3ProjectPluckerLine_PoseAndLine 边
     // -----------------------------
-    std::vector<EdgeSE3ProjectPluckerLine_PoseAndLine*> vpEdgesLine;
-    std::vector<KeyFrame*> vpEdgeKFLine;
-    std::vector<MapLine*> vpMapLineEdge;
-    for(MapLine* pML : lLocalMapLines)
-    {
-        VertexLinePlucker* vLine = new VertexLinePlucker();
-        vLine->setEstimate(pML->GetPluckerLine());
-        vLine->setId(pML->mnId + maxKFid + 1 + lLocalMapPoints.size());
-        vLine->setMarginalized(true);
-        optimizer.addVertex(vLine);
-        for(auto& obs : pML->GetLineObservations())
-        {
-            KeyFrame* pKFi = obs.first;
-            if(pKFi->isBad()) continue;
-            EdgeSE3ProjectPluckerLine_PoseAndLine* e = new EdgeSE3ProjectPluckerLine_PoseAndLine();
-            e->setVertex(0, optimizer.vertex(pKFi->mnId));
-            e->setVertex(1, vLine);
-            e->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
-            Eigen::Vector3f ob_line_projected_pnt = pML->GetProjectedLineABC(pKFi);
-            e->SetObservedLineABC(ob_line_projected_pnt[0],ob_line_projected_pnt[1], ob_line_projected_pnt[2]);
-            g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber();
-            e->setRobustKernel(rk);
-            rk->setDelta(3.0);
-            optimizer.addEdge(e);
-            vpEdgesLine.push_back(e);
-            vpEdgeKFLine.push_back(pKFi);
-            vpMapLineEdge.push_back(pML);
-            nEdges++;
-        }
-    }
+    // std::vector<EdgeSE3ProjectPluckerLine_PoseAndLine*> vpEdgesLine;
+    // std::vector<KeyFrame*> vpEdgeKFLine;
+    // std::vector<MapLine*> vpMapLineEdge;
+    // for(MapLine* pML : lLocalMapLines)
+    // {
+    //     VertexLinePlucker* vLine = new VertexLinePlucker();
+    //     vLine->setEstimate(pML->GetPluckerLine());
+    //     vLine->setId(pML->mnId + maxKFid + 1 + lLocalMapPoints.size());
+    //     vLine->setMarginalized(true);
+    //     optimizer.addVertex(vLine);
+    //     for(auto& obs : pML->GetLineObservations())
+    //     {
+    //         KeyFrame* pKFi = obs.first;
+    //         if(pKFi->isBad()) continue;
+    //         EdgeSE3ProjectPluckerLine_PoseAndLine* e = new EdgeSE3ProjectPluckerLine_PoseAndLine();
+    //         e->setVertex(0, optimizer.vertex(pKFi->mnId));
+    //         e->setVertex(1, vLine);
+    //         e->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
+    //         Eigen::Vector3f ob_line_projected_pnt = pML->GetProjectedLineABC(pKFi);
+    //         e->SetObservedLineABC(ob_line_projected_pnt[0],ob_line_projected_pnt[1], ob_line_projected_pnt[2]);
+    //         g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber();
+    //         e->setRobustKernel(rk);
+    //         rk->setDelta(3.0);
+    //         optimizer.addEdge(e);
+    //         vpEdgesLine.push_back(e);
+    //         vpEdgeKFLine.push_back(pKFi);
+    //         vpMapLineEdge.push_back(pML);
+    //         nEdges++;
+    //     }
+    // }
     num_MPs = lLocalMapPoints.size();
     num_lines = lLocalMapLines.size();
     num_edges = nEdges;
@@ -3238,17 +3239,17 @@ void Optimizer::LocalBundleAdjustmentWithLinesPluckerOld(
         }
     }
 
-    for(size_t i=0; i<vpEdgesLine.size(); i++)
-    {
-        auto e = vpEdgesLine[i];
-        auto pML = vpMapLineEdge[i];
-        if(e->chi2()>9.0)
-        {
-            KeyFrame* pKFi = vpEdgeKFLine[i];
-            pKFi->EraseMapLineMatch(pML);
-            pML->EraseLineObservation(pKFi);
-        }
-    }
+    // for(size_t i=0; i<vpEdgesLine.size(); i++)
+    // {
+    //     auto e = vpEdgesLine[i];
+    //     auto pML = vpMapLineEdge[i];
+    //     if(e->chi2()>9.0)
+    //     {
+    //         KeyFrame* pKFi = vpEdgeKFLine[i];
+    //         pKFi->EraseMapLineMatch(pML);
+    //         pML->EraseLineObservation(pKFi);
+    //     }
+    // }
     // -----------------------------
     // Step 11: 更新关键帧 + MapPoint + MapLine
     // -----------------------------
@@ -3270,30 +3271,601 @@ void Optimizer::LocalBundleAdjustmentWithLinesPluckerOld(
             opr.addMapPoint(pMP);
         }
     }
-    for(MapLine* pML : lLocalMapLines)
+    // for(MapLine* pML : lLocalMapLines)
+    // {
+    //     VertexLinePlucker* vLine = static_cast<VertexLinePlucker*>(optimizer.vertex(pML->mnId + maxKFid + 1 + lLocalMapPoints.size()));
+    //     // 1) 写回 Plücker
+    //     pML->SetPluckerLine(vLine->estimate());
+    //     // 2) **用优化后的 Plücker + 各 KeyFrame 观测反投影来重建/更新世界端点**
+    //     //    这个函数在 MapLine 类内部实现（你之前实现的 UpdateFromPluckerLine / UpdateFromPlucker）
+    //     //    请确保 MapLine 中实现了这个函数并且线程安全（会读取 Plücker、遍历观测、写入端点）
+    //     pML->UpdateFromPluckerLine();  
+    //     // 3) 更新描述子（基于新的端点/Plücker）
+    //     pML->ComputeDistinctiveDescriptors();
+    //     pML->UpdateNormalAndDepth();
+    //     if(!pML->isRetrived())
+    //     {
+    //         pML->setRetrived(true);
+    //         opr.addMapLine(pML);
+    //     }
+    // }
+    pMap->IncreaseChangeIndex();
+}
+
+void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
+    KeyFrame *pKF, 
+    bool* pbStopFlag, 
+    Map* pMap, 
+    int& num_fixedKF, 
+    int& num_OptKF, 
+    int& num_MPs, 
+    int& num_lines,
+    int& num_edges,
+    MappingOperation& opr)
+{
+    // --- This function is adapted from the original LocalBundleAdjustment ---
+    // Goal: keep all existing KeyFrame and MapPoint vertices exactly as before
+    // and *only add MapLine (Plucker) vertices + corresponding line projection edges*.
+    // The original pose and point vertices are left unchanged.
+
+    // Local KeyFrames: First Breath Search from Current Keyframe
+    list<KeyFrame*> lLocalKeyFrames;
+
+    lLocalKeyFrames.push_back(pKF);
+    pKF->mnBALocalForKF = pKF->mnId;
+    Map* pCurrentMap = pKF->GetMap();
+
+    const vector<KeyFrame*> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    for(int i=0, iend=vNeighKFs.size(); i<iend; i++)
     {
-        VertexLinePlucker* vLine = static_cast<VertexLinePlucker*>(optimizer.vertex(pML->mnId + maxKFid + 1 + lLocalMapPoints.size()));
-        // 1) 写回 Plücker
-        pML->SetPluckerLine(vLine->estimate());
-        // 2) **用优化后的 Plücker + 各 KeyFrame 观测反投影来重建/更新世界端点**
-        //    这个函数在 MapLine 类内部实现（你之前实现的 UpdateFromPluckerLine / UpdateFromPlucker）
-        //    请确保 MapLine 中实现了这个函数并且线程安全（会读取 Plücker、遍历观测、写入端点）
-        pML->UpdateFromPluckerLine();  
-        // 3) 更新描述子（基于新的端点/Plücker）
-        pML->ComputeDistinctiveDescriptors();
-        pML->UpdateNormalAndDepth();
-        if(!pML->isRetrived())
+        KeyFrame* pKFi = vNeighKFs[i];
+        pKFi->mnBALocalForKF = pKF->mnId;
+        if(!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+            lLocalKeyFrames.push_back(pKFi);
+    }
+
+    // Local MapPoints seen in Local Keyframes
+    num_fixedKF = 0;
+    list<MapPoint*> lLocalMapPoints;
+    for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin() , lend=lLocalKeyFrames.end(); lit!=lend; lit++)
+    {
+        KeyFrame* pKFi = *lit;
+        if(pKFi->mnId==pMap->GetInitKFid())
         {
-            pML->setRetrived(true);
-            opr.addMapLine(pML);
+            num_fixedKF = 1;
+        }
+        vector<MapPoint*> vpMPs = pKFi->GetMapPointMatches();
+        for(vector<MapPoint*>::iterator vit=vpMPs.begin(), vend=vpMPs.end(); vit!=vend; vit++)
+        {
+            MapPoint* pMP = *vit;
+            if(pMP)
+                if(!pMP->isBad() && pMP->GetMap() == pCurrentMap)
+                {
+                    if(pMP->mnBALocalForKF!=pKF->mnId)
+                    {
+                        lLocalMapPoints.push_back(pMP);
+                        pMP->mnBALocalForKF=pKF->mnId;
+                    }
+                }
         }
     }
+
+    // Local MapLines seen in Local Keyframes
+    list<MapLine*> lLocalMapLines;
+    for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin() , lend=lLocalKeyFrames.end(); lit!=lend; lit++)
+    {
+        KeyFrame* pKFi = *lit;
+        vector<MapLine*> vpMLs = pKFi->GetMapLineMatches(); // <-- assumes KeyFrame::GetMapLineMatches() exists
+        for(size_t i=0;i<vpMLs.size();i++){
+            MapLine* pML = vpMLs[i];
+            if(pML && !pML->isBad() && pML->GetMap() == pCurrentMap)
+            {
+                if(pML->mnBALocalForKF!=pKF->mnId)
+                {
+                    lLocalMapLines.push_back(pML);
+                    pML->mnBALocalForKF = pKF->mnId;
+                }
+            }
+        }
+    }
+
+    // Fixed Keyframes. Keyframes that see Local MapPoints/MapLines but that are not Local Keyframes
+    list<KeyFrame*> lFixedCameras;
+    for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
+    {
+        map<KeyFrame*,tuple<int,int>> observations = (*lit)->GetObservations();
+        for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
+        {
+            KeyFrame* pKFi = mit->first;
+
+            if(pKFi->mnBALocalForKF!=pKF->mnId && pKFi->mnBAFixedForKF!=pKF->mnId )
+            {                
+                pKFi->mnBAFixedForKF=pKF->mnId;
+                if(!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+                    lFixedCameras.push_back(pKFi);
+            }
+        }
+    }
+
+    // // Also consider MapLine observations when building fixed cameras
+    for(MapLine* pML : lLocalMapLines)
+    {
+        for(auto& obs : pML->GetLineObservations())
+        {
+            KeyFrame* pKFi = obs.first;
+            if(pKFi->mnBALocalForKF != pKF->mnId && pKFi->mnBAFixedForKF != pKF->mnId)
+            {
+                pKFi->mnBAFixedForKF = pKF->mnId;
+                if(!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+                    lFixedCameras.push_back(pKFi);
+            }
+        }
+    }
+
+    num_fixedKF = lFixedCameras.size() + num_fixedKF;
+
+    if(num_fixedKF == 0)
+    {
+        Verbose::PrintMess("LM-LBA: There are 0 fixed KF in the optimizations, LBA aborted", Verbose::VERBOSITY_NORMAL);
+        return;
+    }
+
+    // Setup optimizer (same as original)
+    g2o::SparseOptimizer optimizer;
+    g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
+
+    linearSolver = new g2o::LinearSolverEigen<g2o::BlockSolver_6_3::PoseMatrixType>();
+
+    g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    if (pMap->IsInertial())
+        solver->setUserLambdaInit(100.0);
+
+    optimizer.setAlgorithm(solver);
+    optimizer.setVerbose(false);
+
+    if(pbStopFlag)
+        optimizer.setForceStopFlag(pbStopFlag);
+
+    unsigned long maxKFid = 0;
+
+    // DEBUG LBA
+    pCurrentMap->msOptKFs.clear();
+    pCurrentMap->msFixedKFs.clear();
+
+    // Set Local KeyFrame vertices (unchanged)
+    for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(), lend=lLocalKeyFrames.end(); lit!=lend; lit++)
+    {
+        KeyFrame* pKFi = *lit;
+        g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+        Sophus::SE3<float> Tcw = pKFi->GetPose();
+        vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(), Tcw.translation().cast<double>()));
+        vSE3->setId(pKFi->mnId);
+        vSE3->setFixed(pKFi->mnId==pMap->GetInitKFid());
+        optimizer.addVertex(vSE3);
+        if(pKFi->mnId>maxKFid)
+            maxKFid=pKFi->mnId;
+        // DEBUG LBA
+        pCurrentMap->msOptKFs.insert(pKFi->mnId);
+    }
+    num_OptKF = lLocalKeyFrames.size();
+
+    // Set Fixed KeyFrame vertices (unchanged)
+    for(list<KeyFrame*>::iterator lit=lFixedCameras.begin(), lend=lFixedCameras.end(); lit!=lend; lit++)
+    {
+        KeyFrame* pKFi = *lit;
+        g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+        Sophus::SE3<float> Tcw = pKFi->GetPose();
+        vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(),Tcw.translation().cast<double>()));
+        vSE3->setId(pKFi->mnId);
+        vSE3->setFixed(true);
+        optimizer.addVertex(vSE3);
+        if(pKFi->mnId>maxKFid)
+            maxKFid=pKFi->mnId;
+        // DEBUG LBA
+        pCurrentMap->msFixedKFs.insert(pKFi->mnId);
+    }
+
+    // Set MapPoint vertices (unchanged)
+    const int nExpectedSize = (lLocalKeyFrames.size()+lFixedCameras.size())*lLocalMapPoints.size();
+
+    vector<ORB_SLAM3::EdgeSE3ProjectXYZ*> vpEdgesMono;
+    vpEdgesMono.reserve(nExpectedSize);
+
+    vector<ORB_SLAM3::EdgeSE3ProjectXYZToBody*> vpEdgesBody;
+    vpEdgesBody.reserve(nExpectedSize);
+
+    vector<KeyFrame*> vpEdgeKFMono;
+    vpEdgeKFMono.reserve(nExpectedSize);
+
+    vector<KeyFrame*> vpEdgeKFBody;
+    vpEdgeKFBody.reserve(nExpectedSize);
+
+    vector<MapPoint*> vpMapPointEdgeMono;
+    vpMapPointEdgeMono.reserve(nExpectedSize);
+
+    vector<MapPoint*> vpMapPointEdgeBody;
+    vpMapPointEdgeBody.reserve(nExpectedSize);
+
+    vector<g2o::EdgeStereoSE3ProjectXYZ*> vpEdgesStereo;
+    vpEdgesStereo.reserve(nExpectedSize);
+
+    vector<KeyFrame*> vpEdgeKFStereo;
+    vpEdgeKFStereo.reserve(nExpectedSize);
+
+    vector<MapPoint*> vpMapPointEdgeStereo;
+    vpMapPointEdgeStereo.reserve(nExpectedSize);
+
+    const float thHuberMono = sqrt(5.991);
+    const float thHuberStereo = sqrt(7.815);
+
+    int nPoints = 0;
+
+    int nEdges = 0;
+
+    for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
+    {
+        MapPoint* pMP = *lit;
+        g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
+        vPoint->setEstimate(pMP->GetWorldPos().cast<double>());
+        int id = pMP->mnId+maxKFid+1;
+        vPoint->setId(id);
+        vPoint->setMarginalized(true);
+        optimizer.addVertex(vPoint);
+        nPoints++;
+
+        const map<KeyFrame*,tuple<int,int>> observations = pMP->GetObservations();
+
+        //Set edges (unchanged)
+        for(map<KeyFrame*,tuple<int,int>>::const_iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
+        {
+            KeyFrame* pKFi = mit->first;
+
+            if(!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+            {
+                const int leftIndex = get<0>(mit->second);
+
+                // Monocular observation
+                if(leftIndex != -1 && pKFi->mvuRight[get<0>(mit->second)]<0)
+                {
+                    const cv::KeyPoint &kpUn = pKFi->mvKeysUn[leftIndex];
+                    Eigen::Matrix<double,2,1> obs;
+                    obs << kpUn.pt.x, kpUn.pt.y;
+
+                    ORB_SLAM3::EdgeSE3ProjectXYZ* e = new ORB_SLAM3::EdgeSE3ProjectXYZ();
+
+                    e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                    e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                    e->setMeasurement(obs);
+                    const float &invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
+                    e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
+
+                    g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+                    e->setRobustKernel(rk);
+                    rk->setDelta(thHuberMono);
+
+                    e->pCamera = pKFi->mpCamera;
+
+                    optimizer.addEdge(e);
+                    vpEdgesMono.push_back(e);
+                    vpEdgeKFMono.push_back(pKFi);
+                    vpMapPointEdgeMono.push_back(pMP);
+
+                    nEdges++;
+                }
+                else if(leftIndex != -1 && pKFi->mvuRight[get<0>(mit->second)]>=0)// Stereo observation
+                {
+                    const cv::KeyPoint &kpUn = pKFi->mvKeysUn[leftIndex];
+                    Eigen::Matrix<double,3,1> obs;
+                    const float kp_ur = pKFi->mvuRight[get<0>(mit->second)];
+                    obs << kpUn.pt.x, kpUn.pt.y, kp_ur;
+
+                    g2o::EdgeStereoSE3ProjectXYZ* e = new g2o::EdgeStereoSE3ProjectXYZ();
+
+                    e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                    e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                    e->setMeasurement(obs);
+                    const float &invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
+                    Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2;
+                    e->setInformation(Info);
+
+                    g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+                    e->setRobustKernel(rk);
+                    rk->setDelta(thHuberStereo);
+
+                    e->fx = pKFi->fx;
+                    e->fy = pKFi->fy;
+                    e->cx = pKFi->cx;
+                    e->cy = pKFi->cy;
+                    e->bf = pKFi->mbf;
+
+                    optimizer.addEdge(e);
+                    vpEdgesStereo.push_back(e);
+                    vpEdgeKFStereo.push_back(pKFi);
+                    vpMapPointEdgeStereo.push_back(pMP);
+
+                    nEdges++;
+                }
+
+                if(pKFi->mpCamera2){
+                    int rightIndex = get<1>(mit->second);
+
+                    if(rightIndex != -1 ){
+                        rightIndex -= pKFi->NLeft;
+
+                        Eigen::Matrix<double,2,1> obs;
+                        cv::KeyPoint kp = pKFi->mvKeysRight[rightIndex];
+                        obs << kp.pt.x, kp.pt.y;
+
+                        ORB_SLAM3::EdgeSE3ProjectXYZToBody *e = new ORB_SLAM3::EdgeSE3ProjectXYZToBody();
+
+                        e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                        e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                        e->setMeasurement(obs);
+                        const float &invSigma2 = pKFi->mvInvLevelSigma2[kp.octave];
+                        e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
+
+                        g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+                        e->setRobustKernel(rk);
+                        rk->setDelta(thHuberMono);
+
+                        Sophus::SE3f Trl = pKFi-> GetRelativePoseTrl();
+                        e->mTrl = g2o::SE3Quat(Trl.unit_quaternion().cast<double>(), Trl.translation().cast<double>());
+
+                        e->pCamera = pKFi->mpCamera2;
+
+                        optimizer.addEdge(e);
+                        vpEdgesBody.push_back(e);
+                        vpEdgeKFBody.push_back(pKFi);
+                        vpMapPointEdgeBody.push_back(pMP);
+
+                        nEdges++;
+                    }
+                }
+            }
+        }
+    }
+
+    //std::cerr << "maxKFid=" << maxKFid << ", lastPointId=" << (maxMapPointId + maxKFid + 1)
+    //      << ", nextLineStart=" << lineIdOffset << ", nPoints=" << nPoints << ", nLines=" << nLines << "\n";
+
+    // --- NEW SECTION: add MapLine (Plucker) vertices and edges ---
+    // Keep all the existing vertices unchanged. We only add new vertices for MapLines
+    //Prepare containers for line edges
+    //-----------------------------
+    //Step 8: MapLine 顶点 + EdgeSE3ProjectPluckerLine_PoseAndLine 边
+    //-----------------------------
+    std::vector<EdgeSE3ProjectPluckerLine_PoseAndLine*> vpEdgesLine;
+    std::vector<KeyFrame*> vpEdgeKFLine;
+    std::vector<MapLine*> vpMapLineEdge;
+    // Compute a safe offset for line vertex ids so they do not collide with point ids used above
+    int maxMapPointId = 0;
+    for(list<MapPoint*>::iterator mit=lLocalMapPoints.begin(), mend=lLocalMapPoints.end(); mit!=mend; mit++){
+        if((*mit)->mnId > maxMapPointId) maxMapPointId = (*mit)->mnId;
+    }
+    int lineIdOffset = static_cast<int>(maxKFid) + maxMapPointId + 2; // +2 safety
+    int nLines = 0;
+
+    for(MapLine* pML : lLocalMapLines)
+    {
+        ORB_SLAM3::VertexLinePlucker* vLine = new ORB_SLAM3::VertexLinePlucker();
+        Eigen::Matrix<double,6,1> Lw =  pML->GetPluckerLine();
+        std::cerr << "vLine->Lw: " << Lw.transpose() << std::endl;
+        vLine->setEstimate(pML->GetPluckerLine());  //获取plucker的公式 //这个很重要
+        //打印出来，用于处理数据
+        int idLine = pML->mnId + lineIdOffset;
+        vLine->setId(idLine);
+        optimizer.addVertex(vLine);
+        nLines++;
+        for(auto& obs : pML->GetLineObservations())
+        {
+            KeyFrame* pKFi = obs.first;
+            if(!pKFi||pKFi->isBad()) continue;
+            EdgeSE3ProjectPluckerLine_PoseAndLine* e = new EdgeSE3ProjectPluckerLine_PoseAndLine();
+            e->setVertex(0, optimizer.vertex(pKFi->mnId));
+            e->setVertex(1, optimizer.vertex(idLine));
+            e->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
+            int obline_idx = get<0>(obs.second);
+            Eigen::Vector2f sl, el; //end points
+            if(!pKFi->GetLineEndPointEigen(obline_idx, sl, el))
+            {
+                continue;
+            }
+            Eigen::Vector3f abc_fn = Converter::getLineFromSegment2D(sl, el);
+            float abc_n = std::sqrt(abc_fn[0]*abc_fn[0] + abc_fn[1]*abc_fn[1]);
+            abc_fn /= abc_n;
+            e->SetObservedLineABC(abc_fn[0],abc_fn[1], abc_fn[2]);
+            //std::cerr <<"abc_fn:  " << abc_fn.transpose() << std::endl; //debug
+            g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber();
+            e->setRobustKernel(rk);
+            rk->setDelta(3.0);
+            optimizer.addEdge(e);
+            vpEdgesLine.push_back(e);
+            vpEdgeKFLine.push_back(pKFi);
+            vpMapLineEdge.push_back(pML);
+            nEdges++;
+        }
+    }
+
+    //std::cerr << "maxKFid=" << maxKFid << ", lastPointId=" << (maxMapPointId + maxKFid + 1)
+    //      << ", nextLineStart=" << lineIdOffset << ", nPoints=" << nPoints << ", nLines=" << nLines << "\n";
+    //---------------------end add new vertices for MapLines---------------------------------//
+
+    if(pbStopFlag)
+        if(*pbStopFlag)
+            return;
+
+    optimizer.initializeOptimization();
+    optimizer.optimize(10);
+
+    vector<pair<KeyFrame*,MapPoint*> > vToErase;
+    vToErase.reserve(vpEdgesMono.size()+vpEdgesBody.size()+vpEdgesStereo.size());
+
+    // Check inlier observations for points (unchanged)
+    for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
+    {
+        ORB_SLAM3::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
+        MapPoint* pMP = vpMapPointEdgeMono[i];
+
+        if(pMP->isBad())
+            continue;
+
+        if(e->chi2()>5.991 || !e->isDepthPositive())
+        {
+            KeyFrame* pKFi = vpEdgeKFMono[i];
+            vToErase.push_back(make_pair(pKFi,pMP));
+        }
+    }
+
+    for(size_t i=0, iend=vpEdgesBody.size(); i<iend;i++)
+    {
+        ORB_SLAM3::EdgeSE3ProjectXYZToBody* e = vpEdgesBody[i];
+        MapPoint* pMP = vpMapPointEdgeBody[i];
+
+        if(pMP->isBad())
+            continue;
+
+        if(e->chi2()>5.991 || !e->isDepthPositive())
+        {
+            KeyFrame* pKFi = vpEdgeKFBody[i];
+            vToErase.push_back(make_pair(pKFi,pMP));
+        }
+    }
+
+    for(size_t i=0, iend=vpEdgesStereo.size(); i<iend;i++)
+    {
+        g2o::EdgeStereoSE3ProjectXYZ* e = vpEdgesStereo[i];
+        MapPoint* pMP = vpMapPointEdgeStereo[i];
+
+        if(pMP->isBad())
+            continue;
+
+        if(e->chi2()>7.815 || !e->isDepthPositive())
+        {
+            KeyFrame* pKFi = vpEdgeKFStereo[i];
+            vToErase.push_back(make_pair(pKFi,pMP));
+        }
+    }
+
+    // Check inlier observations for lines
+    vector<pair<KeyFrame*,MapLine*>> vLineToErase;
+    for(size_t i=0, iend=vpMapLineEdge.size(); i<iend; i++){
+        ORB_SLAM3::EdgeSE3ProjectPluckerLine_PoseAndLine* e = vpEdgesLine[i];
+        MapLine* pML = vpMapLineEdge[i];
+        if(pML->isBad()) continue;
+        // chi2 threshold for line edges may differ; we use 5.991 as default
+        if(e->chi2()>5.991)
+        {
+            KeyFrame* pKFi = vpEdgeKFLine[i];
+            vLineToErase.push_back(make_pair(pKFi,pML));
+        }
+    }
+    // Get Map Mutex
+    //unique_lock<mutex> lock(pMap->mMutexMapUpdate);
+    if(!vToErase.empty())
+    {
+        for(size_t i=0;i<vToErase.size();i++)
+        {
+            KeyFrame* pKFi = vToErase[i].first;
+            MapPoint* pMPi = vToErase[i].second;
+            pKFi->EraseMapPointMatch(pMPi);
+            pMPi->EraseObservation(pKFi);
+        }
+    }
+    if(!vLineToErase.empty()){
+        for(size_t i=0;i<vLineToErase.size();i++){
+            KeyFrame* pKFi = vLineToErase[i].first;
+            MapLine* pMLi = vLineToErase[i].second;
+            pKFi->EraseMapLineMatch(pMLi); // 
+            pMLi->EraseLineObservation(pKFi);
+        }
+    }
+
+    // Recover optimized data
+    //Keyframes
+    opr.reserveKeyFrames(lLocalKeyFrames.size());
+    for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(), lend=lLocalKeyFrames.end(); lit!=lend; lit++)
+    {
+        KeyFrame* pKFi = *lit;
+        g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKFi->mnId));
+        g2o::SE3Quat SE3quat = vSE3->estimate();
+        Sophus::SE3f Tiw(SE3quat.rotation().cast<float>(), SE3quat.translation().cast<float>());
+        pKFi->SetPose(Tiw);
+
+        opr.addKeyFrame(pKFi);
+    }
+
+    //Points
+    opr.reserveMapPoints(lLocalMapPoints.size());
+    for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
+    {
+        MapPoint* pMP = *lit;
+        g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->mnId+maxKFid+1));
+        pMP->SetWorldPos(vPoint->estimate().cast<float>());
+        pMP->UpdateNormalAndDepth();
+
+        if (!pMP->isRetrived()) {
+            pMP->setRetrived(true);
+            opr.addMapPoint(pMP);
+        }
+    }
+
+    //Lines: recover optimized plucker and update MapLine world representation
+    for(MapLine* pML : lLocalMapLines)
+    {
+        int idLine = pML->mnId + lineIdOffset;
+        ORB_SLAM3::VertexLinePlucker* vLine = static_cast<ORB_SLAM3::VertexLinePlucker*>(optimizer.vertex(idLine));
+        if(vLine)
+        {
+            // 1) 写回 Plücker
+            pML->SetPluckerLine(vLine->estimate());
+            // 2) **用优化后的 Plücker + 各 KeyFrame 观测反投影来重建/更新世界端点**
+            //    这个函数在 MapLine 类内部实现（你之前实现的 UpdateFromPluckerLine / UpdateFromPlucker）
+            //    请确保 MapLine 中实现了这个函数并且线程安全（会读取 Plücker、遍历观测、写入端点）
+            pML->UpdateFromPluckerLine();  
+            // 3) 更新描述子（基于新的端点/Plücker）
+            pML->ComputeDistinctiveDescriptors();
+            pML->UpdateNormalAndDepth();
+            if(!pML->isRetrived())
+            {
+                pML->setRetrived(true);
+                opr.addMapLine(pML);
+            }
+        }
+    }
+
+    // //Lines: recover optimized plucker and update MapLine world representation
+    // opr.reserveMapLines(lLocalMapLines.size());
+    // for(list<MapLine*>::iterator lit=lLocalMapLines.begin(), lend=lLocalMapLines.end(); lit!=lend; lit++)
+    // {
+    //     MapLine* pML = *lit;
+    //     int idLine = pML->mnId + lineIdOffset;
+    //     ORB_SLAM3::VertexLinePlucker* vLine = static_cast<ORB_SLAM3::VertexLinePlucker*>(optimizer.vertex(idLine));
+    //     if(vLine){
+    //         Eigen::Matrix<double,6,1> pluckerOpt = vLine->estimate();
+    //         pML->SetPlucker(pluckerOpt.cast<float>());
+    //         pML->UpdateDirectionAndDepth(); // <-- assumed helper to refresh cached values
+    //         if (!pML->isRetrived()) {
+    //             pML->setRetrived(true);
+    //             opr.addMapLine(pML);
+    //         }
+    //     }
+    // }
+
+    // --- 14. statistics output ---
+    num_OptKF = lLocalKeyFrames.size();
+    num_MPs = lLocalMapPoints.size();
+    num_lines = nLines;
+    num_edges = nEdges;
+
     pMap->IncreaseChangeIndex();
 }
 
 
 
-void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
+
+void Optimizer::LocalBundleAdjustmentWithLinesPluckerBack(
     KeyFrame *pKF, 
     bool* pbStopFlag, 
     Map* pMap, 
@@ -3491,42 +4063,40 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
     // -----------------------------
     // Step 8: MapLine 顶点 + EdgeSE3ProjectPluckerLine_PoseAndLine 边
     // -----------------------------
-    std::vector<EdgeSE3ProjectPluckerLine_PoseAndLine*> vpEdgesLine;
-    std::vector<KeyFrame*> vpEdgeKFLine;
-    std::vector<MapLine*> vpMapLineEdge;
-    for(MapLine* pML : lLocalMapLines)
-    {
-        VertexLinePlucker* vLine = new VertexLinePlucker();
-        vLine->setEstimate(pML->GetPluckerLine());
-
-        currentId++;
-        int g2oLineId = (int)currentId;
-        vLine->setId(g2oLineId);
-        mapLineId2G2oId[pML->mnId] = g2oLineId;
-
-        //vLine->setId(pML->mnId + maxKFid + 1 + lLocalMapPoints.size());
-        vLine->setMarginalized(true);
-        optimizer.addVertex(vLine);
-        for(auto& obs : pML->GetLineObservations())
-        {
-            KeyFrame* pKFi = obs.first;
-            if(pKFi->isBad()) continue;
-            EdgeSE3ProjectPluckerLine_PoseAndLine* e = new EdgeSE3ProjectPluckerLine_PoseAndLine();
-            e->setVertex(0, optimizer.vertex(pKFi->mnId));
-            e->setVertex(1, vLine);
-            e->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
-            Eigen::Vector3f ob_line_projected_pnt = pML->GetProjectedLineABC(pKFi);
-            e->SetObservedLineABC(ob_line_projected_pnt[0],ob_line_projected_pnt[1], ob_line_projected_pnt[2]);
-            g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber();
-            e->setRobustKernel(rk);
-            rk->setDelta(3.0);
-            optimizer.addEdge(e);
-            vpEdgesLine.push_back(e);
-            vpEdgeKFLine.push_back(pKFi);
-            vpMapLineEdge.push_back(pML);
-            nEdges++;
-        }
-    }
+    // std::vector<EdgeSE3ProjectPluckerLine_PoseAndLine*> vpEdgesLine;
+    // std::vector<KeyFrame*> vpEdgeKFLine;
+    // std::vector<MapLine*> vpMapLineEdge;
+    // for(MapLine* pML : lLocalMapLines)
+    // {
+    //     VertexLinePlucker* vLine = new VertexLinePlucker();
+    //     vLine->setEstimate(pML->GetPluckerLine());
+    //     currentId++;
+    //     int g2oLineId = (int)currentId;
+    //     vLine->setId(g2oLineId);
+    //     mapLineId2G2oId[pML->mnId] = g2oLineId;
+    //     //vLine->setId(pML->mnId + maxKFid + 1 + lLocalMapPoints.size());
+    //     vLine->setMarginalized(true);
+    //     optimizer.addVertex(vLine);
+    //     for(auto& obs : pML->GetLineObservations())
+    //     {
+    //         KeyFrame* pKFi = obs.first;
+    //         if(pKFi->isBad()) continue;
+    //         EdgeSE3ProjectPluckerLine_PoseAndLine* e = new EdgeSE3ProjectPluckerLine_PoseAndLine();
+    //         e->setVertex(0, optimizer.vertex(pKFi->mnId));
+    //         e->setVertex(1, vLine);
+    //         e->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
+    //         Eigen::Vector3f ob_line_projected_pnt = pML->GetProjectedLineABC(pKFi);
+    //         e->SetObservedLineABC(ob_line_projected_pnt[0],ob_line_projected_pnt[1], ob_line_projected_pnt[2]);
+    //         g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber();
+    //         e->setRobustKernel(rk);
+    //         rk->setDelta(3.0);
+    //         optimizer.addEdge(e);
+    //         vpEdgesLine.push_back(e);
+    //         vpEdgeKFLine.push_back(pKFi);
+    //         vpMapLineEdge.push_back(pML);
+    //         nEdges++;
+    //     }
+    // }
     num_MPs = lLocalMapPoints.size();
     num_lines = lLocalMapLines.size();
     num_edges = nEdges;
@@ -3554,17 +4124,17 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
         }
     }
 
-    for(size_t i=0; i<vpEdgesLine.size(); i++)
-    {
-        auto e = vpEdgesLine[i];
-        auto pML = vpMapLineEdge[i];
-        if(e->chi2()>9.0)
-        {
-            KeyFrame* pKFi = vpEdgeKFLine[i];
-            pKFi->EraseMapLineMatch(pML);
-            pML->EraseLineObservation(pKFi);
-        }
-    }
+    // for(size_t i=0; i<vpEdgesLine.size(); i++)
+    // {
+    //     auto e = vpEdgesLine[i];
+    //     auto pML = vpMapLineEdge[i];
+    //     if(e->chi2()>9.0)
+    //     {
+    //         KeyFrame* pKFi = vpEdgeKFLine[i];
+    //         pKFi->EraseMapLineMatch(pML);
+    //         pML->EraseLineObservation(pKFi);
+    //     }
+    // }
     // -----------------------------
     // Step 11: 更新关键帧 + MapPoint + MapLine
     // -----------------------------
@@ -3587,25 +4157,25 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
             opr.addMapPoint(pMP);
         }
     }
-    for(MapLine* pML : lLocalMapLines)
-    {
-        int g2oId = mapLineId2G2oId[pML->mnId];
-        VertexLinePlucker* vLine = static_cast<VertexLinePlucker*>(optimizer.vertex(g2oId));
-        // 1) 写回 Plücker
-        pML->SetPluckerLine(vLine->estimate());
-        // 2) **用优化后的 Plücker + 各 KeyFrame 观测反投影来重建/更新世界端点**
-        //    这个函数在 MapLine 类内部实现（你之前实现的 UpdateFromPluckerLine / UpdateFromPlucker）
-        //    请确保 MapLine 中实现了这个函数并且线程安全（会读取 Plücker、遍历观测、写入端点）
-        pML->UpdateFromPluckerLine();  
-        // 3) 更新描述子（基于新的端点/Plücker）
-        pML->ComputeDistinctiveDescriptors();
-        pML->UpdateNormalAndDepth();
-        if(!pML->isRetrived())
-        {
-            pML->setRetrived(true);
-            opr.addMapLine(pML);
-        }
-    }
+    // for(MapLine* pML : lLocalMapLines)
+    // {
+    //     int g2oId = mapLineId2G2oId[pML->mnId];
+    //     VertexLinePlucker* vLine = static_cast<VertexLinePlucker*>(optimizer.vertex(g2oId));
+    //     // 1) 写回 Plücker
+    //     pML->SetPluckerLine(vLine->estimate());
+    //     // 2) **用优化后的 Plücker + 各 KeyFrame 观测反投影来重建/更新世界端点**
+    //     //    这个函数在 MapLine 类内部实现（你之前实现的 UpdateFromPluckerLine / UpdateFromPlucker）
+    //     //    请确保 MapLine 中实现了这个函数并且线程安全（会读取 Plücker、遍历观测、写入端点）
+    //     pML->UpdateFromPluckerLine();  
+    //     // 3) 更新描述子（基于新的端点/Plücker）
+    //     pML->ComputeDistinctiveDescriptors();
+    //     pML->UpdateNormalAndDepth();
+    //     if(!pML->isRetrived())
+    //     {
+    //         pML->setRetrived(true);
+    //         opr.addMapLine(pML);
+    //     }
+    // }
     pMap->IncreaseChangeIndex();
     }
 }
