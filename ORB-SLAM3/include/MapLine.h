@@ -151,6 +151,7 @@ public:
     }
 
     void ComputeDistinctiveDescriptors();
+    void ComputePluckerLineFromWorldLine(); //initial, if world line end pnts exist
 
     cv::Mat GetDescriptor();
     cv::Mat GetDescriptorAt(int i);
@@ -222,6 +223,8 @@ public:
     
     //Important
     void UpdateFromPluckerLine();
+
+    bool  UpdatePluckerFromBackProjectLines();  //to do next
 
 
 public:

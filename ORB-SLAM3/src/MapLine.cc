@@ -37,6 +37,7 @@ MapLine::MapLine():
     mbRetrived(false)
 {
     mpLineReplaced = static_cast<MapLine*>(NULL);
+    mWorldPlucker.setZero();
     // MapLines can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
     unique_lock<mutex> lock(mpMap->mMutexLineCreation);//指的是啥？我暂且忘记了？？？
      mnId=nNextId++;
@@ -55,6 +56,7 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos, con
     //set line position and color
     SetLineWorldPos(LsPos, LePos);
     SetLineColorRGB(LsColor, LeColor);
+    ComputePluckerLineFromWorldLine();
 
     mLineNormalVector.setZero();
 
@@ -98,6 +100,7 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Ma
     //set line position
     SetLineWorldPos(LsPos, LePos);
     //SetLineColorRGB(LsColor, LeColor);
+    ComputePluckerLineFromWorldLine();
 
     Eigen::Vector3f Ow;
     if(pFrame -> NLleft == -1 || idxF < pFrame -> NLleft){
@@ -446,6 +449,7 @@ void MapLine::Replace(MapLine* pML)
     pML->IncreaseFound(nfound);
     pML->IncreaseVisible(nvisible);
     pML->ComputeDistinctiveDescriptors();
+    pML->ComputePluckerLineFromWorldLine();
     if (mpMap)
     {
         mpMap->EraseMapLine(this);
@@ -546,6 +550,21 @@ void MapLine::ComputeDistinctiveDescriptors()
         unique_lock<mutex> lock(mMutexFeatures);
         mLineDescriptor = vDescriptors[BestIdx].clone();
     }
+}
+
+void MapLine::ComputePluckerLineFromWorldLine()
+{
+    Eigen::Vector3d ls = mLineWorldPos.head<3>().cast<double>();
+    Eigen::Vector3d le = mLineWorldPos.tail<3>().cast<double>();
+    if((ls-le).norm() < 1e-8)
+    {
+        mWorldPlucker.setZero();
+        return;
+    }
+    Eigen::Vector3d plu_n, plu_v;
+    Converter::LineSegmentToPlucker(ls, le, plu_n, plu_v);
+    mWorldPlucker.head<3>() = plu_n;
+    mWorldPlucker.tail<3>() = plu_v;
 }
 
 Map* MapLine::GetMap()
@@ -934,6 +953,13 @@ void MapLine::UpdateFromPluckerLine()
     }
 }
 
+bool  MapLine::UpdatePluckerFromBackProjectLines()
+{
+    // ---- 2) 遍历所有观测（KeyFrame → line idx） ----
+    std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int> > observations = GetLineObservations();
+
+    return true;
+}
 
 #if 0
 

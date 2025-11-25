@@ -324,6 +324,48 @@ void Converter::LineSegmentToPlucker(
     n = P1.cross(v);
 }
 
+void Converter::LineSegmentToPlucker_Stable(
+    const Eigen::Vector3d& P1,
+    const Eigen::Vector3d& P2,
+    Eigen::Vector3d& n,
+    Eigen::Vector3d& v)
+{
+    v = P2 - P1;
+    double norm_v = v.norm();
+
+    // ---- Step 1: 避免零长度线段 ----
+    if (norm_v < 1e-9)
+    {
+        // 用一个默认方向，避免崩溃
+        v = Eigen::Vector3d(1.0, 0.0, 0.0);
+        n = P1.cross(v);
+        return;
+    }
+
+    // ---- Step 2: 方向稳定化 ----
+    // 保证 direction 一致性（避免 BA 震荡）
+    if (v(2) < 0.0 || (v(2) == 0.0 && v(1) < 0.0))
+        v = -v;
+
+    // ---- Step 3: 求 n ----
+    n = P1.cross(v);
+
+    // ---- Step 4: 避免 n 太小（P1几乎共线的退化情况） ----
+    if (n.norm() < 1e-9)
+    {
+        // 选择一个和 v 垂直的稳定向量
+        Eigen::Vector3d perp;
+        if (fabs(v.x()) > fabs(v.y()))
+            perp = Eigen::Vector3d(-v.z(), 0, v.x());
+        else
+            perp = Eigen::Vector3d(0, v.z(), -v.y());
+
+        perp.normalize();
+        n = perp.cross(v);
+    }
+}
+
+
 Eigen::Vector3f Converter::getLineFromSegment2D(const Eigen::Vector2f& sl,
                                    const Eigen::Vector2f& el)
 {

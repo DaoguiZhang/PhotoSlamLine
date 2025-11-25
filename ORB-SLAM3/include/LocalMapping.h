@@ -184,6 +184,7 @@ protected:
 
     std::list<MapPoint*> mlpRecentAddedMapPoints;
     std::list<MapLine*> mlpRecentAddedMapLines;
+    //bool first_
 
     std::mutex mMutexNewKFs;
 

@@ -80,6 +80,11 @@ public:
         const Eigen::Vector3d& P2,
         Eigen::Vector3d& n,
         Eigen::Vector3d& v);
+    void LineSegmentToPlucker_Stable(
+        const Eigen::Vector3d& P1,
+        const Eigen::Vector3d& P2,
+        Eigen::Vector3d& n,
+        Eigen::Vector3d& v);
 
     static Eigen::Vector3f getLineFromSegment2D(const Eigen::Vector2f& sl,
                                    const Eigen::Vector2f& el);
