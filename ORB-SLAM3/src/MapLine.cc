@@ -893,6 +893,31 @@ void MapLine::SetPluckerLineNew(const Eigen::Matrix<double,6,1>& plk)
     }
 }
 
+float MapLine::GetObservationDepth0(KeyFrame* pKf, int idx)
+{
+    return (pKf->GetObservatonLineLsDepth(idx));
+}
+
+float MapLine::GetObservationDepth1(KeyFrame* pKf, int idx)
+{
+    return (pKf->GetObservatonLineLeDepth(idx));
+}
+
+void MapLine::SetObservationLineLsDepth(KeyFrame* pKf, int idx, float dv)
+{
+    pKf->SetObservationLineLsDepth(idx, dv);
+}
+
+void MapLine::SetObservationLineLeDepth(KeyFrame* pKf, int idx, float dv)
+{
+    pKf->SetObservationLineLeDepth(idx, dv);
+}
+
+bool MapLine::HasCachedWorldObservationLineEndPoints()
+{
+    return false;   //TO do Next
+}
+
 void MapLine::UpdateFromPluckerLine()
 {
     // ---- 1) 获取 Plücker 参数（优化后） ----
@@ -951,6 +976,11 @@ void MapLine::UpdateFromPluckerLine()
         // ---- 4) 写回 MapLine ----
         SetLineWorldPos(P1, P2);
     }
+}
+
+void MapLine::UpdateWorldEndpointsFromObservationLineDepth()
+{
+    std::cerr << "to do next..." << std::endl;
 }
 
 bool  MapLine::UpdatePluckerFromBackProjectLines()

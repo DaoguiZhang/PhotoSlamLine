@@ -157,7 +157,15 @@ public:
     cv::Mat GetDescriptorAt(int i);
     cv::Mat GetLineDescriptor();
 
+    float GetObservationDepth0(KeyFrame* pKf, int idx);
+    float GetObservationDepth1(KeyFrame* pKf, int idx);
+
+    void SetObservationLineLsDepth(KeyFrame* pKf, int idx, float dv);
+    void SetObservationLineLeDepth(KeyFrame* pKf, int idx, float dv);
+
     void UpdateNormalAndDepth();
+
+    bool HasCachedWorldObservationLineEndPoints();
     //End Point
     //bool UnprojectStereoLine(const KeyFrame* pKF,const cv::line_descriptor::KeyLine &kl,Eigen::Matrix<float,6,1> &Lw);
     //bool UnprojectStereoLinePlucker(const KeyFrame* pKF,const cv::line_descriptor::KeyLine &kl,Eigen::Matrix<float,6,1> &Lw);
@@ -223,6 +231,8 @@ public:
     
     //Important
     void UpdateFromPluckerLine();
+
+    void UpdateWorldEndpointsFromObservationLineDepth();
 
     bool  UpdatePluckerFromBackProjectLines();  //to do next
 

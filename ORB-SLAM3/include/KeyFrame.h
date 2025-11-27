@@ -277,6 +277,12 @@ public:
     bool GetLineEndpoints(int lineIdx, cv::Point2f &s_out, cv::Point2f &e_out);
     bool GetLineEndPointEigen(int lineIdx, Eigen::Vector2f& s_out, Eigen::Vector2f& e_out);
 
+    float GetObservatonLineLsDepth(int idx);
+    float GetObservatonLineLeDepth(int idx);
+
+    void SetObservationLineLsDepth(int idx, float dv);
+    void SetObservationLineLeDepth(int idx, float dv);
+
     //keyLine functions(modified by zdg)
     std::vector<size_t> GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
         const float  &r, const int minLevel=-1, const int maxLevel=-1, const bool bRight = false) const;
@@ -398,6 +404,10 @@ public:
 
     float mfScale;
 
+    Eigen::Matrix3d GetCamKinv();
+
+    Eigen::Vector3d UnprojectToNormalizedPlane(const Eigen::Vector2d &pixel);
+
     // Calibration parameters
     const float fx, fy, cx, cy, invfx, invfy, mbf, mb, mThDepth;
     cv::Mat mDistCoef;
@@ -419,7 +429,8 @@ public:
     const std::vector<cv::line_descriptor::KeyLine> mvKeyLines;
     const std::vector<cv::line_descriptor::KeyLine> mvKeyLinesUn;
     const std::vector<std::pair<float, float> > mvuLineRight; // negative value for monocular lines
-    const std::vector<std::pair<float,float> > mvLineDepth; // negative value for monocular lines
+    const std::vector<std::pair<float,float> > mvLineDepth; // negative value for monocular lines; if has depth image. compute it from depth image
+    std::vector<std::pair<float, float> > mvLineDepthOpti;    //compute depth from local map boundle adjustment, Update while opti
     const cv::Mat mLineDescriptors, mLineDescriptorsRight;
     std::vector<Eigen::Vector3f> mvKeyLineFunctions; // Key lines functions in the keyframe
 

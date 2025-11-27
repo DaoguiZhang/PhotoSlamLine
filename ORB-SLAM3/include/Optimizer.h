@@ -71,7 +71,9 @@ public:
     void static LocalBundleAdjustmentWithLinesPluckerOld(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPlucker(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPluckerBack(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
-
+    void static LocalBundleAdjustmentWithLinesPlucker_Alternating(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges,MappingOperation& opr);
+    void static OptimizeOneIterationLocalBundleAdjustmentLinesPlucker(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int num_iter,std::list<KeyFrame*> pLocalKeyFrames,std::list<MapPoint*> pLocalMapPoints,
+        std::list<MapLine*> pLocalMapLines, std::list<KeyFrame*> pFixedCameras, int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges);
     int static PoseOptimization(Frame* pFrame);
     //int static PoseOptimizationWithLineEndLine(Frame* pFrame);
     int static PoseOptimizationWithLine(Frame* pFrame);

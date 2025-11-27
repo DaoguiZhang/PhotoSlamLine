@@ -1723,6 +1723,524 @@ private:
     Eigen::Vector3d v_c;  // Plucker v in camera frame
 };
 
+
+//TO CHECK NEXT
+class EdgeSE3ProjectCameraEndPointToPluckerLine
+    : public g2o::BaseMultiEdge<3, Eigen::Vector3d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectCameraEndPointToPluckerLine()
+    {
+        resize(2); // 0: SE3 pose (Tcw), 1: Plucker line (n_w, v_w)
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    // Set the observed 3D endpoint in the camera coordinate (p_c_obs)
+    inline void setMeasurement(const Eigen::Vector3d& p) { _measurement = p; }
+
+    void computeError() override
+    {
+        using g2o::VertexSE3Expmap;
+        const VertexSE3Expmap* vPose = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexLinePlucker* vLine = static_cast<const VertexLinePlucker*>(_vertices[1]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix<double,6,1> Lw = vLine->estimate();
+        Eigen::Vector3d n_w = Lw.head<3>(), v_w = Lw.tail<3>();
+
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        // transform line to camera frame
+        Eigen::Vector3d v_c = Rcw * v_w;
+        Eigen::Vector3d n_c = Rcw * n_w + tcw.cross(v_c);
+
+        // choose a point on line: p0 = (v x n) / (v.v)
+        double s = v_c.dot(v_c);
+        Eigen::Vector3d p0_c = Eigen::Vector3d::Zero();
+        if (s > 1e-12) p0_c = v_c.cross(n_c) / s;
+
+        Eigen::Vector3d p = _measurement;
+        Eigen::Vector3d r = p.cross(v_c) - p0_c.cross(v_c); // (p - p0) x v_c
+        _error = r;
+    }
+
+    // numeric-differentiation for the small 3x3 blocks, combined with analytic blocks for pose/line transforms
+    void linearizeOplus() override
+    {
+        using g2o::VertexSE3Expmap;
+        const VertexSE3Expmap* vPose = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexLinePlucker* vLine = static_cast<const VertexLinePlucker*>(_vertices[1]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix<double,6,1> Lw = vLine->estimate();
+        Eigen::Vector3d n_w = Lw.head<3>(), v_w = Lw.tail<3>();
+
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        // intermediates
+        Eigen::Vector3d v_c = Rcw * v_w;
+        Eigen::Vector3d n_c = Rcw * n_w + tcw.cross(v_c);
+        double s = v_c.dot(v_c);
+        Eigen::Vector3d p0_c = Eigen::Vector3d::Zero();
+        if (s > 1e-12) p0_c = v_c.cross(n_c) / s;
+        Eigen::Vector3d p = _measurement;
+
+        // compute residual again (for safety)
+        Eigen::Vector3d r = p.cross(v_c) - p0_c.cross(v_c);
+
+        // ---------- compute partials of r wrt v_c and n_c (3x3 blocks)
+        // Use small finite difference for these 3x3 blocks (robust & short)
+        Eigen::Matrix<double,3,3> Jr_vc = Eigen::Matrix<double,3,3>::Zero();
+        Eigen::Matrix<double,3,3> Jr_nc = Eigen::Matrix<double,3,3>::Zero();
+        const double eps = 1e-8;
+        for (int i = 0; i < 3; ++i) {
+            Eigen::Vector3d dv = Eigen::Vector3d::Zero(); dv[i] = eps;
+            Eigen::Vector3d vcp = v_c + dv;
+            Eigen::Vector3d ncp = n_c;
+            double sp = vcp.dot(vcp);
+            Eigen::Vector3d p0p = Eigen::Vector3d::Zero();
+            if (sp > 1e-12) p0p = vcp.cross(ncp) / sp;
+            Eigen::Vector3d rp = p.cross(vcp) - p0p.cross(vcp);
+            Jr_vc.col(i) = (rp - r) / eps;
+
+            Eigen::Vector3d dn = Eigen::Vector3d::Zero(); dn[i] = eps;
+            vcp = v_c; ncp = n_c + dn;
+            sp = vcp.dot(vcp);
+            p0p = Eigen::Vector3d::Zero();
+            if (sp > 1e-12) p0p = vcp.cross(ncp) / sp;
+            rp = p.cross(vcp) - p0p.cross(vcp);
+            Jr_nc.col(i) = (rp - r) / eps;
+        }
+
+        // ---------- compute analytic Jacobians of v_c,n_c wrt pose (6) and wrt line parameters (n_w,v_w) (6)
+        // stack [v_c; n_c] (6x1)
+        // For pose (using left perturbation: exp(dxi) * Tcw)
+        // compute numeric directional derivatives for [v_c; n_c] wrt 6-dof twist
+        Eigen::Matrix<double,6,6> J_vn_pose; J_vn_pose.setZero();
+        {
+            const double eps2 = 1e-7;
+            Eigen::Matrix<double,6,1> base;
+            base.block<3,1>(0,0) = v_c;
+            base.block<3,1>(3,0) = n_c;
+            for (int i = 0; i < 6; ++i) {
+                Eigen::Matrix<double,6,1> xi = Eigen::Matrix<double,6,1>::Zero();
+                xi(i) = eps2;
+                Eigen::Matrix3d dR = Eigen::Matrix3d::Identity();
+                Eigen::Vector3d dt = tcw;
+                if (i < 3) {
+                    // small rotation left-multiplied
+                    Eigen::Vector3d w = xi.segment<3>(0);
+                    Eigen::Matrix3d W; W << 0,-w(2),w(1), w(2),0,-w(0), -w(1),w(0),0;
+                    dR = (Eigen::Matrix3d::Identity() + W); // linear approx of exp(W)
+                    // apply dR * Rcw
+                    dR = dR * Rcw;
+                } else {
+                    dR = Rcw;
+                    dt(i-3) += eps2;
+                }
+                Eigen::Vector3d vcp = dR * v_w;
+                Eigen::Vector3d ncp = dR * n_w + dt.cross(vcp);
+                Eigen::Matrix<double,6,1> vp; vp.block<3,1>(0,0)=vcp; vp.block<3,1>(3,0)=ncp;
+                J_vn_pose.col(i) = (vp - base) / eps2;
+            }
+        }
+
+        // For line parameters [n_w; v_w] (columns order: n_w(3), v_w(3)):
+        Eigen::Matrix<double,6,6> J_vn_line; J_vn_line.setZero();
+        // rows 0..2 -> v_c, rows 3..5 -> n_c
+        // dv_c/dn_w = 0 ; dv_c/dv_w = Rcw
+        J_vn_line.block<3,3>(0,0).setZero();
+        J_vn_line.block<3,3>(0,3) = Rcw;
+        // dn_c/dn_w = Rcw ; dn_c/dv_w = skew(tcw) * Rcw
+        Eigen::Matrix3d S_t; S_t << 0,-tcw(2),tcw(1), tcw(2),0,-tcw(0), -tcw(1),tcw(0),0;
+        J_vn_line.block<3,3>(3,0) = Rcw;
+        J_vn_line.block<3,3>(3,3) = S_t * Rcw;
+
+        // ---------- compose: Jr_pose = [Jr_vc Jr_nc] * J_vn_pose
+        Eigen::Matrix<double,3,6> Jpose = Eigen::Matrix<double,3,6>::Zero();
+        Eigen::Matrix<double,3,6> Jr_vn; Jr_vn.setZero();
+        Jr_vn.block<3,3>(0,0) = Jr_vc;
+        Jr_vn.block<3,3>(0,3) = Jr_nc;
+        Jpose = Jr_vn * J_vn_pose;
+
+        // ---------- compose: Jr_line = Jr_vn * J_vn_line
+        Eigen::Matrix<double,3,6> Jline = Jr_vn * J_vn_line;
+
+        _jacobianOplus[0] = Jpose;
+        _jacobianOplus[1] = Jline;
+    }
+
+protected:
+    Eigen::Vector3d _measurement; // p_c_obs
+};
+
+
+// Edge: 连接 4 个顶点： pose (SE3), line (Plucker), depth0, depth1
+// 残差：4-dim = [2 dims for endpoint0, 2 dims for endpoint1]
+class EdgeLineEndpointOnPluckerLine
+    : public g2o::BaseMultiEdge<4, Eigen::Vector4d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    // 构造时传入两个像素端点的方向向量（K^-1 * [u,v,1]），保持常量
+    // dir0, dir1: Eigen::Vector3d (camera-frame ray directions, not normalized required)
+    EdgeLineEndpointOnPluckerLine(const Eigen::Vector3d& dir0,
+                                  const Eigen::Vector3d& dir1)
+        : _dir0(dir0), _dir1(dir1)
+    {
+        resize(4); // pose, line, depth0, depth1
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    // 设置观测（不需要额外 measurement，因为 dir 已包含像素位置）
+    inline void setCameraIntrinsics(double fx,double fy,double cx,double cy) {
+        fx_ = fx; fy_ = fy; cx_ = cx; cy_ = cy;
+    }
+
+    // compute two orthonormal basis vectors perpendicular to v (camera-frame)
+    void build_orthonormal_basis(const Eigen::Vector3d& v,
+                                 Eigen::Vector3d& e1,
+                                 Eigen::Vector3d& e2) const
+    {
+        // choose a vector not parallel to v
+        Eigen::Vector3d tmp = (std::abs(v.z()) < 0.9) ? Eigen::Vector3d(0,0,1) : Eigen::Vector3d(0,1,0);
+        e1 = v.cross(tmp);
+        if (e1.norm() < 1e-12) {
+            tmp = Eigen::Vector3d(1,0,0);
+            e1 = v.cross(tmp);
+        }
+        e1.normalize();
+        e2 = v.cross(e1);
+        e2.normalize();
+    }
+
+    void computeError() override
+    {
+        using g2o::VertexSE3Expmap;
+        const VertexSE3Expmap* vPose = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexLinePlucker* vLine = static_cast<const VertexLinePlucker*>(_vertices[1]);
+        const VertexDepth* vD0 = static_cast<const VertexDepth*>(_vertices[2]);
+        const VertexDepth* vD1 = static_cast<const VertexDepth*>(_vertices[3]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        const Eigen::Matrix<double,6,1> Lw = vLine->estimate();
+        const double d0 = vD0->estimate();
+        const double d1 = vD1->estimate();
+
+        Eigen::Vector3d n_w = Lw.head<3>(), v_w = Lw.tail<3>();
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        // transform line to camera frame
+        Eigen::Vector3d v_c = Rcw * v_w;
+        Eigen::Vector3d n_c = Rcw * n_w + tcw.cross(v_c);
+
+        // point on line p0 = (v x n) / (v.v)
+        double s = v_c.dot(v_c);
+        Eigen::Vector3d p0 = Eigen::Vector3d::Zero();
+        if (s > 1e-12) p0 = v_c.cross(n_c) / s;
+
+        // endpoints in camera frame: p_ci = di * dir_i
+        Eigen::Vector3d p0_c = d0 * _dir0;
+        Eigen::Vector3d p1_c = d1 * _dir1;
+
+        // two orthonormal basis e1,e2 perpendicular to v_c
+        Eigen::Vector3d e1, e2;
+        build_orthonormal_basis(v_c, e1, e2);
+
+        // residuals: projection of (p_ci - p0) on e1,e2
+        Eigen::Vector2d r0, r1;
+        Eigen::Vector3d delta0 = p0_c - p0;
+        Eigen::Vector3d delta1 = p1_c - p0;
+        r0(0) = e1.dot(delta0);
+        r0(1) = e2.dot(delta0);
+        r1(0) = e1.dot(delta1);
+        r1(1) = e2.dot(delta1);
+
+        _error.resize(4);
+        _error(0) = r0(0); _error(1) = r0(1);
+        _error(2) = r1(0); _error(3) = r1(1);
+    }
+
+    void linearizeOplus() override
+    {
+        using g2o::VertexSE3Expmap;
+        const VertexSE3Expmap* vPose = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexLinePlucker* vLine = static_cast<const VertexLinePlucker*>(_vertices[1]);
+        const VertexDepth* vD0 = static_cast<const VertexDepth*>(_vertices[2]);
+        const VertexDepth* vD1 = static_cast<const VertexDepth*>(_vertices[3]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix<double,6,1> Lw = vLine->estimate();
+        double d0 = vD0->estimate();
+        double d1 = vD1->estimate();
+
+        Eigen::Vector3d n_w = Lw.head<3>(), v_w = Lw.tail<3>();
+        Eigen::Matrix3d Rcw = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d tcw = Tcw.translation();
+
+        // intermediates (same as computeError)
+        Eigen::Vector3d v_c = Rcw * v_w;
+        Eigen::Vector3d n_c = Rcw * n_w + tcw.cross(v_c);
+        double s = v_c.dot(v_c);
+        Eigen::Vector3d p0 = Eigen::Vector3d::Zero();
+        if (s > 1e-12) p0 = v_c.cross(n_c) / s;
+
+        Eigen::Vector3d p0_c = d0 * _dir0;
+        Eigen::Vector3d p1_c = d1 * _dir1;
+
+        Eigen::Vector3d e1, e2;
+        build_orthonormal_basis(v_c, e1, e2);
+
+        // matrix that projects a 3-vector r_vec into residual components for endpoint i:
+        // res_i = [e1^T; e2^T] * (p_ci - p0)
+        Eigen::Matrix<double,2,3> P;
+        P.row(0) = e1.transpose();
+        P.row(1) = e2.transpose();
+
+        // ---------- partial wrt depths (analytic)
+        // dr/d(d0) for endpoint0: P * dir0
+        Eigen::Matrix<double,2,1> dr0_dd0 = P * _dir0;
+        Eigen::Matrix<double,2,1> dr1_dd1 = P * _dir1; // but note endpoint1 uses p1_c - p0, p0 also depends on line
+
+        // We'll compose chains: dr/dpose, dr/dline via d(p0)/d(v_c,n_c) and dr/dv_c,dn_c etc.
+        // To reduce algebra errors, compute Jr_vc (3x3) and Jr_nc (3x3) numeric for function r_vec = p_ci - p0 (only p0 depends on v_c,n_c)
+        // For both endpoints, rvec_i = p_ci - p0 (p_ci depends on depth only)
+        // We compute numeric derivatives of p0 wrt v_c and n_c, then Dr = -d p0/d(...)
+
+        // compute numeric derivatives of p0 wrt v_c and n_c
+        Eigen::Matrix<double,3,3> dp0_dvc; dp0_dvc.setZero();
+        Eigen::Matrix<double,3,3> dp0_dnc; dp0_dnc.setZero();
+        const double eps = 1e-8;
+        for (int k = 0; k < 3; ++k) {
+            Eigen::Vector3d dv = Eigen::Vector3d::Zero(); dv(k) = eps;
+            Eigen::Vector3d vcp = v_c + dv;
+            Eigen::Vector3d ncp = n_c;
+            double sp = vcp.dot(vcp);
+            Eigen::Vector3d p0p = Eigen::Vector3d::Zero();
+            if (sp > 1e-12) p0p = vcp.cross(ncp) / sp;
+            dp0_dvc.col(k) = (p0p - p0) / eps;
+
+            dv = Eigen::Vector3d::Zero(); dv(k) = eps;
+            vcp = v_c; ncp = n_c + dv;
+            sp = vcp.dot(vcp);
+            p0p = Eigen::Vector3d::Zero();
+            if (sp > 1e-12) p0p = vcp.cross(ncp) / sp;
+            dp0_dnc.col(k) = (p0p - p0) / eps;
+        }
+
+        // For endpoint i: rvec_i = p_ci - p0
+        // drvec_i/dv_c = - dp0_dvc  (3x3)
+        // drvec_i/dn_c = - dp0_dnc
+
+        Eigen::Matrix<double,3,6> drvec_dvn; drvec_dvn.setZero();
+        drvec_dvn.block<3,3>(0,0) = -dp0_dvc;
+        drvec_dvn.block<3,3>(0,3) = -dp0_dnc;
+
+        // Now relate [v_c;n_c] to pose (6) and to world line parameters (n_w,v_w)
+        // Compose pose jacobians numerically (directional derivatives) for [v_c; n_c] (6x6)
+        Eigen::Matrix<double,6,6> J_vn_pose; J_vn_pose.setZero();
+        {
+            const double eps2 = 1e-7;
+            Eigen::Matrix<double,6,1> base; base.block<3,1>(0,0)=v_c; base.block<3,1>(3,0)=n_c;
+            for (int i = 0; i < 6; ++i) {
+                Eigen::Matrix<double,6,1> xi = Eigen::Matrix<double,6,1>::Zero();
+                xi(i) = eps2;
+                Eigen::Matrix3d R2 = Rcw;
+                Eigen::Vector3d t2 = tcw;
+                if (i < 3) {
+                    Eigen::Vector3d w = xi.segment<3>(0);
+                    Eigen::Matrix3d W; W << 0,-w(2),w(1), w(2),0,-w(0), -w(1),w(0),0;
+                    R2 = (Eigen::Matrix3d::Identity() + W) * Rcw; // left-mult approx
+                } else {
+                    t2(i-3) += eps2;
+                }
+                Eigen::Vector3d vcp = R2 * v_w;
+                Eigen::Vector3d ncp = R2 * n_w + t2.cross(vcp);
+                Eigen::Matrix<double,6,1> vp; vp.block<3,1>(0,0)=vcp; vp.block<3,1>(3,0)=ncp;
+                J_vn_pose.col(i) = (vp - base) / eps2;
+            }
+        }
+
+        // Compose line jacobians: [v_c; n_c] wrt line [n_w; v_w] (6x6)
+        Eigen::Matrix<double,6,6> J_vn_line; J_vn_line.setZero();
+        // ordering: rows (v_c(3); n_c(3)), cols (n_w(3); v_w(3))
+        // dv_c/dn_w = 0 ; dv_c/dv_w = Rcw
+        J_vn_line.block<3,3>(0,0).setZero();
+        J_vn_line.block<3,3>(0,3) = Rcw;
+        // dn_c/dn_w = Rcw ; dn_c/dv_w = skew(tcw) * Rcw
+        Eigen::Matrix3d S_t; S_t << 0,-tcw(2),tcw(1), tcw(2),0,-tcw(0), -tcw(1),tcw(0),0;
+        J_vn_line.block<3,3>(3,0) = Rcw;
+        J_vn_line.block<3,3>(3,3) = S_t * Rcw;
+
+        // Now assemble Jacobians for each endpoint
+        // dr_i / dpose = P * drvec_i/d[ v_c;n_c ] * J_vn_pose
+        Eigen::Matrix<double,2,6> Jr0_pose = P * drvec_dvn * J_vn_pose;
+        Eigen::Matrix<double,2,6> Jr1_pose = P * drvec_dvn * J_vn_pose;
+
+        // dr_i / dline = P * drvec * J_vn_line
+        Eigen::Matrix<double,2,6> Jr0_line = P * drvec_dvn * J_vn_line;
+        Eigen::Matrix<double,2,6> Jr1_line = P * drvec_dvn * J_vn_line;
+
+        // dr0/dd0 = P * dir0 (analytic)
+        Eigen::Matrix<double,2,1> Jr0_d0 = P * _dir0;
+        // dr1/dd1 = P * dir1 (analytic)
+        Eigen::Matrix<double,2,1> Jr1_d1 = P * _dir1;
+
+        // Finally fill _jacobianOplus in the same vertex order
+        // vertex 0: pose
+        _jacobianOplus[0].setZero();
+        _jacobianOplus[0].block<2,6>(0,0) = Jr0_pose;
+        _jacobianOplus[0].block<2,6>(2,0) = Jr1_pose;
+
+        // vertex 1: line (6)
+        _jacobianOplus[1].setZero();
+        _jacobianOplus[1].block<2,6>(0,0) = Jr0_line;
+        _jacobianOplus[1].block<2,6>(2,0) = Jr1_line;
+
+        // vertex 2: depth0 (1)
+        _jacobianOplus[2].setZero();
+        _jacobianOplus[2].block<2,1>(0,0) = Jr0_d0;
+
+        // vertex 3: depth1 (1)
+        _jacobianOplus[3].setZero();
+        _jacobianOplus[3].block<2,1>(2,0) = Jr1_d1;
+    }
+
+protected:
+    Eigen::Vector3d _dir0, _dir1; // K^-1 * [u,v,1] (ray directions in camera frame)
+    double fx_=0, fy_=0, cx_=0, cy_=0;
+};
+
+
+//这是迭代的line slam的方法，需要改成这个方法，试试方法
+class EdgePointToPluckerLine : public g2o::BaseMultiEdge<3, Eigen::Vector3d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgePointToPluckerLine(const Eigen::Vector2d& px, const Eigen::Matrix3d& K_inv)
+        : px_(px), K_inv_(K_inv)
+    {
+        resize(3); // vertex order: pose, depth, line
+    }
+
+    bool read(std::istream& /*is*/) override { return false; }
+    bool write(std::ostream& /*os*/) const override { return false; }
+
+    inline Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
+    {
+        Eigen::Matrix3d S;
+        S <<     0, -v.z(),  v.y(),
+               v.z(),     0, -v.x(),
+              -v.y(),  v.x(),     0;
+        return S;
+    }
+
+    // -----------------------------------------------------------------------
+    //                         Compute Error
+    // -----------------------------------------------------------------------
+    void computeError() override
+    {
+        const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        const auto* vDepth = static_cast<const VertexDepth*>(_vertices[1]);
+        const auto* vLine  = static_cast<const VertexLinePlucker*>(_vertices[2]);
+
+        double d = vDepth->estimate();
+
+        Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_(0), px_(1), 1.0); // camera ray (unscaled)
+        Eigen::Vector3d pc  = d * ray; // point in camera frame
+
+        // Use explicit R and t of Twc = Tcw^{-1}: pw = R_wc * pc + t_wc
+        Eigen::Matrix3d Rwc = vPose->estimate().inverse().rotation().toRotationMatrix();
+        Eigen::Vector3d twc = vPose->estimate().inverse().translation();
+        Eigen::Vector3d pw  = Rwc * pc + twc; // world point
+
+        Eigen::Vector3d n = vLine->estimate().head<3>();
+        Eigen::Vector3d v = vLine->estimate().tail<3>();
+        Eigen::Vector3d vnorm = v.normalized();
+        Eigen::Vector3d p0 = vnorm.cross(n); // a point on the line
+
+        // residual = (pw - p0) x vnorm
+        _error = (pw - p0).cross(vnorm);
+    }
+
+    // -----------------------------------------------------------------------
+    //                         Jacobian
+    // -----------------------------------------------------------------------
+    void linearizeOplus() override
+    {
+        const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        const auto* vDepth = static_cast<const VertexDepth*>(_vertices[1]);
+        const auto* vLine  = static_cast<const VertexLinePlucker*>(_vertices[2]);
+
+        double d = vDepth->estimate();
+
+        Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_(0), px_(1), 1.0);
+        Eigen::Vector3d pc  = d * ray;
+
+        // Twc = Tcw^{-1}
+        Eigen::Matrix3d Rwc = vPose->estimate().inverse().rotation().toRotationMatrix();
+        Eigen::Vector3d twc = vPose->estimate().inverse().translation();
+        Eigen::Vector3d pw  = Rwc * pc + twc;
+
+        Eigen::Vector3d n = vLine->estimate().head<3>();
+        Eigen::Vector3d v = vLine->estimate().tail<3>();
+        Eigen::Vector3d vnorm = v.normalized();
+        Eigen::Vector3d p0 = vnorm.cross(n);
+
+        // ---------------- 1) depth Jacobian ----------------
+        // pw = Rwc * (d * ray) + twc  => dpw/dd = Rwc * ray
+        Eigen::Vector3d dpw_dd = Rwc * ray;
+        // dr/dd = (dpw/dd) x vnorm
+        Eigen::Matrix<double,3,1> Jd = skew(dpw_dd) * vnorm; // same as dpw_dd.cross(vnorm)
+        _jacobianOplus[1].setZero();
+        _jacobianOplus[1].block<3,1>(0,0) = Jd;
+
+        // ---------------- 2) pose Jacobian ----------------
+        // We use small-left-multiplicative perturbation xi = [rho; phi] on Tcw.
+        // For pw = Twc * pc = Rwc*pc + twc:
+        // d(pw)/d(trans) = I
+        // d(pw)/d(rot)   = - Rwc * skew(pc)  (standard result)
+        Eigen::Matrix<double,3,6> Jpose;
+        Jpose.setZero();
+
+        // dr/dt = (d/dt (pw)) x vnorm = I x vnorm = skew(d t) * vnorm => linear map equals -skew(vnorm)
+        // As linear operator mapping delta_t to delta_r: delta_r = delta_t x vnorm = skew(delta_t) * vnorm = -skew(vnorm) * delta_t
+        Jpose.block<3,3>(0,0) = -skew(vnorm);
+
+        // dr/domega = (d(pw)/domega) x vnorm = ( - Rwc * skew(pc) )_cols -> use matrix multiply
+        Eigen::Matrix3d d_pw_domega = - Rwc * skew(pc); // 3x3
+        // delta_r = S(delta_pw) * vnorm => for small parameter, J = S(vnorm) * ??? using identity:
+        // S(A) vnorm = - S(vnorm) A  (applied column-wise). So J_omega = -skew(vnorm) * d_pw_domega
+        Jpose.block<3,3>(0,3) = -skew(vnorm) * d_pw_domega;
+
+        _jacobianOplus[0] = Jpose;
+
+        // ---------------- 3) line Jacobian ----------------
+        // In the alternating scheme we typically fix the Plücker line during pose+depth optimize.
+        // So set zero. If you want line optimization too, implement analytic jacobian here.
+        _jacobianOplus[2].setZero();
+
+        // Note: if vertex 2 is NOT fixed and you implement its jacobian, g2o will use it and then call
+        // the VertexLinePlucker::oplusImpl(...) where you already enforce n·v=0.
+    }
+
+private:
+    Eigen::Vector2d px_;
+    Eigen::Matrix3d K_inv_;
+};
+
+
 }
 
 #endif //ORB_SLAM3_OPTIMIZABLETYPES_H

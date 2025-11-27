@@ -380,4 +380,55 @@ Eigen::Vector3f Converter::getLineFromSegment2D(const Eigen::Vector2f& sl,
     return line;  // ax + by + c = 0
 }
 
+
+/*******************************************************
+ *  用 SVD 拟合 Plücker Line
+ *******************************************************/
+Eigen::Matrix<double,6,1> Converter::FitPluckerLineFromPoints(const std::vector<Eigen::Vector3d>& pts)
+{
+    // 质心
+    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+    for(auto& p : pts) mean += p;
+    mean /= pts.size();
+
+    // SVD 方向
+    Eigen::MatrixXd M(pts.size(), 3);
+    for(int i=0;i<pts.size();++i) M.row(i) = pts[i] - mean;
+
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(M, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    Eigen::Vector3d v = svd.matrixV().col(0); // 方向向量（最大主成分）
+
+    // Plücker
+    Eigen::Vector3d p0 = mean;
+    Eigen::Vector3d n  = p0.cross(v);
+
+    Eigen::Matrix<double,6,1> L;
+    L.head<3>() = n;
+    L.tail<3>() = v;
+    return L;
+}
+
+
+// Utility: compute PCA on points and return explained ratio of first principal component
+double Converter::FirstPCVarianceRatio(const std::vector<Eigen::Vector3d>& pts)
+{
+    if(pts.size() < 2) return 0.0;
+    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+    for(const auto &p : pts) mean += p;
+    mean /= double(pts.size());
+    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+    for(const auto &p : pts)
+    {
+        Eigen::Vector3d d = p - mean;
+        cov += d * d.transpose();
+    }
+    cov /= double(pts.size());
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
+    Eigen::Vector3d vals = es.eigenvalues(); // ascending
+    double sum = vals.sum();
+    if(sum <= 0) return 0.0;
+    double first = vals(2);
+    return first / sum; // fraction explained by first PC
+}
+
 } //namespace ORB_SLAM

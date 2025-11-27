@@ -364,6 +364,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     //std::cerr <<"NL: " << NL << std::endl;
     UndistortKeyLines();
     ComputeLineStereoFromRGBD(imDepth);
+    mvLineDepthOpti = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
     mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
     mvbLineOutlier = std::vector<bool>(NL, false);
     // if(!mvKeyLines.empty())
@@ -581,6 +582,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     {
         mvuLineRight.emplace_back(std::make_pair(-1,-1));
         mvLineDepth.emplace_back(std::make_pair(-1,-1));
+        mvLineDepthOpti.emplace_back(std::make_pair(-1,-1));
     }
     mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
     mvbLineOutlier = std::vector<bool>(NL, false);

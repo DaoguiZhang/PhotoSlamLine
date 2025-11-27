@@ -320,6 +320,7 @@ public:
     std::vector<float> mvDepth;
     std::vector<std::pair<float,float> > mvuLineRight; // "Mon
     std::vector<std::pair<float,float> > mvLineDepth;   // First:depth from left keyline, second:depth from right keyline
+    std::vector<std::pair<float, float> > mvLineDepthOpti;
     std::vector<float> mvLineDepthConfidence;
 
     //Corresonding stereo coordinate and depth for each line keypoint

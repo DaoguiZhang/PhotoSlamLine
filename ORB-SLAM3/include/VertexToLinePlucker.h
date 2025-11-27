@@ -16,6 +16,17 @@
 namespace ORB_SLAM3
 {
 
+// ---------- 简单的 1D depth 顶点（存标量 depth） ----------
+class VertexDepth : public g2o::BaseVertex<1, double> {
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+    VertexDepth() {}
+    bool read(std::istream& ) override { return false; }
+    bool write(std::ostream& ) const override { return false; }
+    void setToOriginImpl() override { _estimate = 1.0; }
+    void oplusImpl(const double* update) override { _estimate += update[0]; }
+};
+
 class VertexLinePluckerOld : public g2o::BaseVertex<6, Eigen::Matrix<double,6,1>>
 {
 public:

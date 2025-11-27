@@ -34,7 +34,7 @@ KeyFrame::KeyFrame():
         fx(0), fy(0), cx(0), cy(0), invfx(0), invfy(0), mnPlaceRecognitionQuery(0), mnPlaceRecognitionWords(0), mPlaceRecognitionScore(0),
         mbf(0), mb(0), mThDepth(0), N(0), NL(0), mvKeys(static_cast<vector<cv::KeyPoint> >(NULL)), mvKeysUn(static_cast<vector<cv::KeyPoint> >(NULL)),
         mvKeyLines(static_cast<vector<cv::line_descriptor::KeyLine> >(NULL)), mvKeyLinesUn(static_cast<vector<cv::line_descriptor::KeyLine> >(NULL)),
-        mvuLineRight(static_cast<vector<std::pair<float,float> > >(NULL)), mvLineDepth(static_cast<vector<std::pair<float,float>> >(NULL)),
+        mvuLineRight(static_cast<vector<std::pair<float,float> > >(NULL)), mvLineDepth(static_cast<vector<std::pair<float,float>> >(NULL)),mvLineDepthOpti(static_cast<vector<std::pair<float,float>> >(NULL)),
         mvuRight(static_cast<vector<float> >(NULL)), mvDepth(static_cast<vector<float> >(NULL)), mnScaleLevels(0), mfScaleFactor(0),
         mfLogScaleFactor(0), mvScaleFactors(0), mvLevelSigma2(0), mvInvLevelSigma2(0), mnMinX(0), mnMinY(0), mnMaxX(0),
         mnMaxY(0), mPrevKF(static_cast<KeyFrame*>(NULL)), mNextKF(static_cast<KeyFrame*>(NULL)), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
@@ -52,7 +52,7 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
     mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), NL(F.NL), mvKeys(F.mvKeys), mvKeysUn(F.mvKeysUn),
     mvKeyLines(F.mvKeyLines), mvKeyLinesUn(F.mvKeyLinesUn),
-    mvuLineRight(F.mvuLineRight), mvLineDepth(F.mvLineDepth),
+    mvuLineRight(F.mvuLineRight), mvLineDepth(F.mvLineDepth),mvLineDepthOpti(F.mvLineDepthOpti),    //Copy from the frame
     mLineDescriptors(F.mLineDescriptors.clone()),
     mvuRight(F.mvuRight), mvDepth(F.mvDepth), mDescriptors(F.mDescriptors.clone()),
     mBowVec(F.mBowVec), mFeatVec(F.mFeatVec), mnScaleLevels(F.mnScaleLevels), mfScaleFactor(F.mfScaleFactor),
@@ -83,6 +83,7 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
         }
     }
 
+    mvLineDepthOpti = mvLineDepth;  //initial...
 
 
     if(!F.HasVelocity()) {
@@ -1791,5 +1792,75 @@ bool KeyFrame::GetLineEndPointEigen(int lineIdx, Eigen::Vector2f& s_out, Eigen::
     }
     return false;
 }
+
+float KeyFrame::GetObservatonLineLsDepth(int idx)
+{
+    if(idx >=0 && idx < mvLineDepthOpti.size())
+    {
+        return mvLineDepthOpti[idx].first;
+    }
+    else
+    {
+        return -1.0;
+    }
+}
+
+float KeyFrame::GetObservatonLineLeDepth(int idx)
+{
+    if(idx >=0 && idx < mvLineDepthOpti.size())
+    {
+        return mvLineDepthOpti[idx].second;
+    }
+    else
+    {
+        return -1.0;
+    }
+}
+
+void KeyFrame::SetObservationLineLsDepth(int idx, float dv)
+{
+     if(idx >=0 && idx < mvLineDepthOpti.size())
+     {
+        mvLineDepthOpti[idx].first = dv;
+     }
+}
+
+void KeyFrame::SetObservationLineLeDepth(int idx, float dv)
+{
+     if(idx >=0 && idx < mvLineDepthOpti.size())
+     {
+        mvLineDepthOpti[idx].second = dv;
+     }
+}
+
+Eigen::Matrix3d KeyFrame::GetCamKinv()
+{
+    Eigen::Matrix3d Kinv = Eigen::Matrix3d::Identity();
+
+    // 相机内参矩阵:
+    // K = [ fx  0  cx
+    //        0  fy cy
+    //        0   0  1 ]
+    // K^-1 =
+    // [ 1/fx     0    -cx/fx
+    //      0   1/fy   -cy/fy
+    //      0     0        1 ]
+    Kinv(0,0) = 1.0 / fx;
+    Kinv(1,1) = 1.0 / fy;
+    Kinv(0,2) = -cx / fx;
+    Kinv(1,2) = -cy / fy;
+
+    return Kinv;
+}
+
+Eigen::Vector3d KeyFrame::UnprojectToNormalizedPlane(const Eigen::Vector2d &pixel)
+{
+    Eigen::Vector3d ray;
+    ray[0] = (pixel[0] - fx) / fx;
+    ray[1] = (pixel[1] - cy) / fy;
+    ray[2] = 1.0;
+    return ray;
+}
+
 
 } //namespace ORB_SLAM

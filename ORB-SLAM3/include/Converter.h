@@ -28,6 +28,7 @@
 
 #include "Thirdparty/Sophus/sophus/geometry.hpp"
 #include "Thirdparty/Sophus/sophus/sim3.hpp"
+#include <vector>
 
 namespace ORB_SLAM3
 {
@@ -88,6 +89,10 @@ public:
 
     static Eigen::Vector3f getLineFromSegment2D(const Eigen::Vector2f& sl,
                                    const Eigen::Vector2f& el);
+
+    static Eigen::Matrix<double,6,1> FitPluckerLineFromPoints(const std::vector<Eigen::Vector3d>& pts);
+
+    static double FirstPCVarianceRatio(const std::vector<Eigen::Vector3d>& pts);
 };
 
 }// namespace ORB_SLAM
