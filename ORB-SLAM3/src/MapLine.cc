@@ -27,6 +27,8 @@ namespace ORB_SLAM3
 
 long unsigned int MapLine::nNextId=0;
 mutex MapLine::mGlobalMutex;
+static const float MIN_DEPTH_V = 0.01f; // 1cm
+static const float MAX_DEPTH_V = 100.0f; // 100m
 
 //constructors
 MapLine::MapLine():
@@ -980,14 +982,104 @@ void MapLine::UpdateFromPluckerLine()
 
 void MapLine::UpdateWorldEndpointsFromObservationLineDepth()
 {
-    std::cerr << "to do next..." << std::endl;
+    // --- Validate whole MapLine with PCA using all back-projected points ---
+    std::vector<Eigen::Vector3d> all_pts;
+    for(const auto &obs : this->GetLineObservations())
+    {
+        KeyFrame* pKFi = obs.first; int idx = get<0>(obs.second);
+        if(!pKFi || pKFi->isBad()) continue;
+        float newd0 = GetObservationDepth0(pKFi, idx);
+        float newd1 = GetObservationDepth1(pKFi, idx);
+        Eigen::Vector2f sl, el; if(!pKFi->GetLineEndPointEigen(idx, sl, el)) continue;
+        // --- Validate whole MapLine with PCA using all back-projected points ---
+        if(!(newd0>MIN_DEPTH_V && newd0<MAX_DEPTH_V && newd1>MIN_DEPTH_V && newd1<MAX_DEPTH_V)) continue;
+        Eigen::Vector3d r0 = pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(sl[0], sl[1]));
+        Eigen::Vector3d r1 = pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(el[0], el[1]));
+        g2o::SE3Quat Tcw = g2o::SE3Quat(pKFi->GetPose().unit_quaternion().cast<double>(), pKFi->GetPose().translation().cast<double>());
+        g2o::SE3Quat Twc = Tcw.inverse();
+        Eigen::Vector3d pw0 = Twc * (double(newd0) * r0);
+        Eigen::Vector3d pw1 = Twc * (double(newd1) * r1);
+        all_pts.push_back(pw0); all_pts.push_back(pw1);
+    }
+    // high confidence: recompute Plucker using more stable world points and commit endpoints
+    Eigen::Matrix<double,6,1> Lw = Converter::FitPluckerLineFromPoints(all_pts);
+    if(Lw.allFinite())
+    {
+        SetPluckerLine(Lw); // commit improved plucker
+        // Optionally update endpoints (two extreme projections along line)
+        UpdateWorldEndpointsFromObservationPntsAndPluckerLine(Lw, all_pts); //use the all points
+    }
+    // double ratio = Converter::FirstPCVarianceRatio(all_pts);
+    // if(all_pts.size() >= 4 && ratio < LINE_COLINEARITY_LOW)
+    // {
+    //     // Mark line as bad: too inconsistent
+    //     pML->SetBadFlag();
+    //     // erase all observations to be safe
+    //     for(const auto& obs : pML->GetLineObservations())
+    //     {
+    //         KeyFrame* pKFi = obs.first; if(!pKFi) continue;
+    //         pKFi->EraseMapLineMatch(pML);
+    //         pML->EraseLineObservation(pKFi);
+    //     }
+    // }
+    // else if(all_pts.size() >= 2 && ratio > LINE_COLINEARITY_HIGH)
+    // {   
+    // }
 }
+
+void MapLine::UpdateWorldEndpointsFromObservationPntsAndPluckerLine(const Eigen::Matrix<double,6,1>& Lw,const std::vector<Eigen::Vector3d>& pnts_3d,double lower_q,double upper_q)
+{
+    if (pnts_3d.size() < 2)
+        return; // cannot update
+    // --- 1. Extract Plücker components ---
+    Eigen::Vector3d n = Lw.head<3>();
+    Eigen::Vector3d v = Lw.tail<3>();
+    const double v2 = v.squaredNorm();
+    if (v2 < 1e-10)
+        return;
+    Eigen::Vector3d v_norm = v.normalized();
+    // --- 2. Compute a reference point P0 on the line ---
+    //     P0 = (n × v) / ||v||²
+    Eigen::Vector3d P0 = n.cross(v) / v2;
+    // --- 3. Project all points to line (scalar t values) ---
+    std::vector<double> ts;
+    ts.reserve(pnts_3d.size());
+    for (const auto& p : pnts_3d)
+        ts.push_back((p - P0).dot(v_norm));
+    if (ts.size() < 2)
+        return;
+    // --- 4. Robust percentile filtering ---
+    std::sort(ts.begin(), ts.end());
+    auto get_percentile = [&](double q)
+    {
+        if (ts.empty()) return 0.0;
+        double idx = q * (ts.size() - 1);
+        size_t lo = (size_t)std::floor(idx);
+        size_t hi = (size_t)std::ceil(idx);
+        double t = ts[lo];
+        if (hi > lo)
+            t += (ts[hi] - ts[lo]) * (idx - lo);
+        return t;
+    };
+    double tmin = get_percentile(lower_q);  // e.g. q = 0.05
+    double tmax = get_percentile(upper_q);  // e.g. q = 0.95
+    if (tmax < tmin)
+        std::swap(tmin, tmax);
+    // --- 5. Compute endpoints on line ---
+    Eigen::Vector3d p1 = P0 + tmin * v_norm;
+    Eigen::Vector3d p2 = P0 + tmax * v_norm;
+    // --- 6. Store ---
+    mLsWorldPos = p1.cast<float>();
+    mLeWorldPos   = p2.cast<float>();
+    mLineWorldPos.head<3>() = mLsWorldPos;
+    mLineWorldPos.tail<3>() = mLeWorldPos;
+}
+
 
 bool  MapLine::UpdatePluckerFromBackProjectLines()
 {
     // ---- 2) 遍历所有观测（KeyFrame → line idx） ----
-    std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int> > observations = GetLineObservations();
-
+    //std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int> > observations = GetLineObservations();
     return true;
 }
 

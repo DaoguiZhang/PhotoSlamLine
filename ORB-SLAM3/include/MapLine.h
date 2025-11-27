@@ -234,6 +234,15 @@ public:
 
     void UpdateWorldEndpointsFromObservationLineDepth();
 
+    //Lw,和pnts_3d 更新mLineWorldPos
+    //void UpdateWorldEndpointsFromObservationPntsAndPluckerLine(const Eigen::Matrix<double,6,1>& Lw, std::vector<Eigen::Vector3d>& pnts_3d);
+
+    void UpdateWorldEndpointsFromObservationPntsAndPluckerLine(
+        const Eigen::Matrix<double,6,1>& Lw,
+        const std::vector<Eigen::Vector3d>& pnts_3d,
+        double lower_q = 0.05,
+        double upper_q =  0.95);
+
     bool  UpdatePluckerFromBackProjectLines();  //to do next
 
 

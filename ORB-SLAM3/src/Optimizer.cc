@@ -41,6 +41,7 @@
 #include<mutex>
 
 #include "OptimizableTypes.h"
+#include "util_slam.h"
 
 
 namespace ORB_SLAM3
@@ -4139,7 +4140,6 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
             vPoint->setMarginalized(true);
             optimizer.addVertex(vPoint);
             nPoints++;
-
             const map<KeyFrame*, tuple<int,int>> observations = pMP->GetObservations();
             for(auto mit = observations.begin(); mit != observations.end(); ++mit)
             {
@@ -4153,21 +4153,16 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
                         const cv::KeyPoint &kpUn = pKFi->mvKeysUn[leftIndex];
                         Eigen::Matrix<double,2,1> obs;
                         obs << kpUn.pt.x, kpUn.pt.y;
-
                         ORB_SLAM3::EdgeSE3ProjectXYZ* e = new ORB_SLAM3::EdgeSE3ProjectXYZ();
-
                         e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
                         e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
                         e->setMeasurement(obs);
                         const float &invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
                         e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
-
                         g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                         e->setRobustKernel(rk);
                         rk->setDelta(thHuberMono);
-
                         e->pCamera = pKFi->mpCamera;
-
                         optimizer.addEdge(e);
                         vpEdgesMono.push_back(e);
                         vpEdgeKFMono.push_back(pKFi);
@@ -4181,26 +4176,21 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
                         Eigen::Matrix<double,3,1> obs;
                         const float kp_ur = pKFi->mvuRight[get<0>(mit->second)];
                         obs << kpUn.pt.x, kpUn.pt.y, kp_ur;
-
                         g2o::EdgeStereoSE3ProjectXYZ* e = new g2o::EdgeStereoSE3ProjectXYZ();
-
                         e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
                         e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
                         e->setMeasurement(obs);
                         const float &invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
                         Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2;
                         e->setInformation(Info);
-
                         g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                         e->setRobustKernel(rk);
                         rk->setDelta(thHuberStereo);
-
                         e->fx = pKFi->fx;
                         e->fy = pKFi->fy;
                         e->cx = pKFi->cx;
                         e->cy = pKFi->cy;
                         e->bf = pKFi->mbf;
-
                         optimizer.addEdge(e);
                         vpEdgesStereo.push_back(e);
                         vpEdgeKFStereo.push_back(pKFi);
@@ -4234,6 +4224,14 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
             }
         }
         maxMapLineId++;
+        int max_all_offset = lineIdOffset + maxMapLineId;
+        // now start allocating new ids(depth d0, d1) from max_all_offset + 1
+        int nextId = max_all_offset + 1;
+        // map to store the depth vertex ids for each (MapLine, KeyFrame, idx)
+        std::unordered_map<size_t, pair<int,int>> depthIdMap; // key as hash of tuple, value pair<idD0,idD1>
+        //size_t key = MakeDepthKey(pML, pKFi, idx);
+        //depthIdMap[key] = std::make_pair(idD0, idD1);
+
         for(MapLine* pML : lLocalMapLines)
         {
             Eigen::Matrix<double,6,1> Lw =  pML->GetPluckerLine();
@@ -4262,7 +4260,14 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
             int idLine = pML->mnId + lineIdOffset;
             vLine->setId(idLine);
             vLine->setFixed(true);
-            optimizer.addVertex(vLine);
+            //optimizer.addVertex(vLine);
+            // defensive check
+            if(optimizer.vertex(idLine) != nullptr){
+                std::cerr << "Warning: line vertex id " << idLine << " already exists! Skipping add.\n";
+                continue;
+            } else {
+                optimizer.addVertex(vLine);
+            }
             nLines++;
             // 外层 Alternating Loop 的策略：本轮固定 Line
             // 2) 为此 MapLine 的每个观测添加 Depth-Vertex + EdgePointToPluckerLine
@@ -4274,57 +4279,77 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
                 int idx = std::get<0>(obsPair.second);
                 Eigen::Vector2f sl, el;
                 if(!pKFi->GetLineEndPointEigen(idx, sl, el)) continue;
-
                 // 3D 点深度（可以从前一轮估计或初始化）
                 float d0 = pML->GetObservationDepth0(pKFi, idx);
                 float d1 = pML->GetObservationDepth1(pKFi, idx);    //to copy from initial depth image
                 //------------------------------------------------------------------
                 // A) 为两个 endpoint 分别创建深度顶点 VertexDepth
                 //------------------------------------------------------------------
+                // allocate ids
+                int idD0 = nextId++;
+                int idD1 = nextId++;
                 VertexDepth* vD0 = new VertexDepth();
                 vD0->setEstimate(d0);
-                //int idD0 = idLine + 20000 + idx*2;
-                int idD0 = idLine + maxMapLineId + idx*2;
                 vD0->setId(idD0);
-                optimizer.addVertex(vD0);
                 VertexDepth* vD1 = new VertexDepth();
                 vD1->setEstimate(d1);
-                //int idD1 = idLine + 20000 + idx*2 + 1;
-                int idD1 = idLine + maxMapLineId + idx*2 + 1;
                 vD1->setId(idD1);
-                optimizer.addVertex(vD1);
+                if(optimizer.vertex(idD0) != nullptr){
+                    std::cerr << "Warning: depth vertex idD0 " << idD0 << " already exists! Skipping add.\n";
+                    delete vD0;
+                } else {
+                    optimizer.addVertex(vD0);
+                }
+                if(optimizer.vertex(idD1) != nullptr){
+                    std::cerr << "Warning: depth vertex idD1 " << idD1 << " already exists! Skipping add.\n";
+                    delete vD1;
+                } else {
+                    optimizer.addVertex(vD1);
+                }
                 vDepths.push_back(vD0);
                 vDepths.push_back(vD1);
-
+                // store the depth ids in map for later retrieval
+                size_t key = UtilSlam::MakeDepthKey(pML, pKFi, idx);
+                depthIdMap[key] = make_pair(idD0, idD1);
+                Eigen::Matrix3d kinv = pKFi->GetCamKinv();
                 //------------------------------------------------------------------
                 // B) 第一个端点 p0 的 EdgePointToPluckerLine
                 //------------------------------------------------------------------
-                Eigen::Matrix3d kinv = pKFi->GetCamKinv();
                 EdgePointToPluckerLine* e0 = new EdgePointToPluckerLine(Eigen::Vector2d(sl[0], sl[1]), kinv);
-                e0->setVertex(0, optimizer.vertex(pKFi->mnId));      // pose
-                e0->setVertex(1, vD0);                               // depth
-                e0->setVertex(2, vLine);                             // plucker line (fixed in this iteration)
-                e0->setMeasurement(Eigen::Vector3d::Zero());
-                e0->setInformation(Eigen::Matrix3d::Identity());
-                optimizer.addEdge(e0);
-                vpEdgesLine.push_back(e0);
-                vpEdgeKFLine.push_back(pKFi);
-                vpMapLineEdge.push_back(pML);
+                // set vertices by id (pose must already be added)
+                if(optimizer.vertex(pKFi->mnId) == nullptr){
+                    std::cerr << "Error: pose vertex for KF " << pKFi->mnId << " not found in optimizer!\n";
+                    // skip creating this edge defensively
+                    delete e0;
+                } else {
+                    e0->setVertex(0, optimizer.vertex(pKFi->mnId));      // pose
+                    e0->setVertex(1, optimizer.vertex(idD0));            // depth
+                    e0->setVertex(2, optimizer.vertex(idLine));          // plucker line (fixed in this iteration)
+                    e0->setMeasurement(Eigen::Vector3d::Zero());
+                    e0->setInformation(Eigen::Matrix3d::Identity());
+                    optimizer.addEdge(e0);
+                    vpEdgesLine.push_back(e0);
+                    vpEdgeKFLine.push_back(pKFi);
+                    vpMapLineEdge.push_back(pML);
+                }
+                
                 //------------------------------------------------------------------
                 // C) 第二个端点 p1 的 EdgePointToPluckerLine
                 //------------------------------------------------------------------
                 EdgePointToPluckerLine* e1 = new EdgePointToPluckerLine(Eigen::Vector2d(el[0], el[1]), kinv);
-
-                e1->setVertex(0, optimizer.vertex(pKFi->mnId));      // pose
-                e1->setVertex(1, vD1);                               // depth
-                e1->setVertex(2, vLine);                             // plucker line (fixed in this iteration)
-                e1->setMeasurement(Eigen::Vector3d::Zero());
-                e1->setInformation(Eigen::Matrix3d::Identity());
-
-                optimizer.addEdge(e1);
-                vpEdgesLine.push_back(e1);
-                vpEdgeKFLine.push_back(pKFi);
-                vpMapLineEdge.push_back(pML);
+                if(optimizer.vertex(pKFi->mnId) == nullptr){
+                    delete e1;
+                } else {
+                    e1->setVertex(0, optimizer.vertex(pKFi->mnId));      // pose
+                    e1->setVertex(1, optimizer.vertex(idD1));            // depth
+                    e1->setVertex(2, optimizer.vertex(idLine));          // plucker line
+                    e1->setMeasurement(Eigen::Vector3d::Zero());
+                    e1->setInformation(Eigen::Matrix3d::Identity());
+                    optimizer.addEdge(e1);
+                    vpEdgesLine.push_back(e1);
+                    vpEdgeKFLine.push_back(pKFi);
+                    vpMapLineEdge.push_back(pML);
+                }
             }
         }
 
@@ -4445,9 +4470,16 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
             {
                 KeyFrame* pKFi = obs.first; int idx = get<0>(obs.second);
                 if(!pKFi || pKFi->isBad()) continue;
-                int idLine = pML->mnId + lineIdOffset;
-                int idD0 = idLine + maxMapLineId + idx*2;
-                int idD1 = idLine + maxMapLineId + idx*2 + 1;
+                
+                // 使用统一 key 找 ID
+                size_t key = UtilSlam::MakeDepthKey(pML, pKFi, idx);
+                auto it = depthIdMap.find(key);
+                if(it == depthIdMap.end())
+                    continue; // 本轮没有加入 optimizer 的情况
+
+                int idD0 = it->second.first;
+                int idD1 = it->second.second;
+
                 VertexDepth* vD0 = dynamic_cast<VertexDepth*>(optimizer.vertex(idD0));
                 VertexDepth* vD1 = dynamic_cast<VertexDepth*>(optimizer.vertex(idD1));
                 if(!vD0 || !vD1) continue;
@@ -4516,12 +4548,12 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
                 {
                     pML->SetPluckerLine(Lw); // commit improved plucker
                     // Optionally update endpoints (two extreme projections along line)
-                    pML->UpdateWorldEndpointsFromObservationLineDepth(); //use the depth to do it
+                    pML->UpdateWorldEndpointsFromObservationPntsAndPluckerLine(Lw, all_pts); //use the all points
 
                 }   
             }
+        
         }
-
     }
     //update into Opr
     for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(), lend=lLocalKeyFrames.end(); lit!=lend; lit++)

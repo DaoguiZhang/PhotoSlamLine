@@ -57,6 +57,7 @@ ${Pangolin_INCLUDE_DIRS}
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 
 add_library(${PROJECT_NAME} SHARED
+src/util_slam.cc
 src/MapExporter.cc
 src/LineExtractor.cc
 src/LSDextractor.cc
@@ -91,6 +92,7 @@ src/GeometricTools.cc
 src/TwoViewReconstruction.cc
 src/Config.cc
 src/Settings.cc
+include/util_slam.h
 include/MapExporter.h
 include/CommonTypeORB.h
 include/VertexToLinePlucker.h
