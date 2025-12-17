@@ -40,6 +40,15 @@
 #include "Thirdparty/g2o/g2o/core/robust_kernel_impl.h"
 #include "Thirdparty/g2o/g2o/solvers/linear_solver_dense.h"
 
+#include <Thirdparty/g2o/g2o/core/base_edge.h> // BaseEdge 定义了 Edge 接口
+#include <Thirdparty/g2o/g2o/core/base_unary_edge.h> 
+#include <Thirdparty/g2o/g2o/core/base_binary_edge.h> 
+#include <Thirdparty/g2o/g2o/core/base_multi_edge.h>
+
+#include "OptimizableTypes.h"
+#include "util_slam.h"
+
+
 namespace ORB_SLAM3
 {
 
@@ -70,8 +79,21 @@ public:
     
     void static LocalBundleAdjustmentWithLinesPluckerOld(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPlucker(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
+    //debug function
+    void static TestPluckerLinesBundleEdge();
+    void static CheckJacobianNumerical();
+    void static TestNumericalJacobian_PointToPlucker();
+    //end debug function
     void static LocalBundleAdjustmentWithLinesPluckerBack(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
+    void static CheckDuplicateVertexID(g2o::SparseOptimizer& optimizer);
     void static LocalBundleAdjustmentWithLinesPlucker_Alternating(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges,MappingOperation& opr);
+    void static LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges,MappingOperation& opr);
+    static VertexDepth* FindDepthVertex_SchemeB(
+        MapLine* pML,
+        KeyFrame* pKFi,
+        int endpoint,
+        const std::map<std::tuple<MapLine*, KeyFrame*, int>, VertexDepth*>& depthVertexMap);
+
     void static OptimizeOneIterationLocalBundleAdjustmentLinesPlucker(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int num_iter,std::list<KeyFrame*> pLocalKeyFrames,std::list<MapPoint*> pLocalMapPoints,
         std::list<MapLine*> pLocalMapLines, std::list<KeyFrame*> pFixedCameras, int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges);
     int static PoseOptimization(Frame* pFrame);
@@ -126,6 +148,8 @@ public:
     void static InertialOptimization(Map *pMap, Eigen::Matrix3d &Rwg, double &scale);
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+//protected:
+//    std::map<std::tuple<MapLine*, KeyFrame*, int /*lineIdx*/, int /*endpoint*/>, VertexDepth*> mDepthVertexMap;
 };
 
 } //namespace ORB_SLAM3

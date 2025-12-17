@@ -329,4 +329,117 @@ namespace ORB_SLAM3 {
         return os.good();
     }
 
+
+
+// 适用于：EdgePointToPluckerLinePoseAndDepthNew
+// 用法： checkJacobian_zdg(edge, 0); 或 checkJacobian_zdg(edge, 1);
+// 兼容 ORB-SLAM3 的 Jacobian 数值检查函数
+// ORB-SLAM3 环境兼容版：无 oplus()、无 dimension()
+bool checkJacobian_zdg(
+    g2o::BaseBinaryEdge<3, Eigen::Vector3d,
+                        g2o::VertexSE3Expmap, VertexDepth>* edge,
+    int vertex_idx)
+{
+    if (!edge) {
+        std::cerr << "[checkJacobian_zdg] ❌ Edge is null!" << std::endl;
+        return false;
+    }
+
+    auto* v = edge->vertex(vertex_idx);
+    if (!v) {
+        std::cerr << "[checkJacobian_zdg] ❌ Vertex(" << vertex_idx << ") is null!" << std::endl;
+        return false;
+    }
+
+    bool isPose = (vertex_idx == 0);
+    const int dim = isPose ? 6 : 1;
+    const double eps = 1e-6;
+
+    Eigen::MatrixXd J_num(3, dim);
+    Eigen::MatrixXd J_ana(3, dim);
+
+    // ---------------- 检查 dynamic_cast 是否成功 ----------------
+    g2o::VertexSE3Expmap* vPose = nullptr;
+    VertexDepth* vDepth = nullptr;
+
+    if (isPose) {
+        vPose = dynamic_cast<g2o::VertexSE3Expmap*>(v);
+        if (!vPose) {
+            std::cerr << "❌ dynamic_cast to VertexSE3Expmap failed! Actual typeid: "
+                      << typeid(*v).name() << std::endl;
+            return false;
+        }
+    } else {
+        vDepth = dynamic_cast<VertexDepth*>(v);
+        if (!vDepth) {
+            std::cerr << "❌ dynamic_cast to VertexDepth failed! Actual typeid: "
+                      << typeid(*v).name() << std::endl;
+            return false;
+        }
+    }
+
+    // ---------------- 获取解析 Jacobian ----------------
+    edge->linearizeOplus();
+    if (isPose)
+        J_ana = edge->jacobianOplusXi();
+    else
+        J_ana = edge->jacobianOplusXj();
+
+    // ---------------- 备份当前估计 ----------------
+    g2o::SE3Quat pose_backup;
+    double depth_backup = 0.0;
+    if (isPose)
+        pose_backup = vPose->estimate();
+    else
+        depth_backup = vDepth->estimate();
+
+    // ---------------- 数值差分 ----------------
+    for (int i = 0; i < dim; ++i) {
+        Eigen::VectorXd update = Eigen::VectorXd::Zero(dim);
+        update[i] = eps;
+
+        // +ε
+        if (isPose) vPose->oplusImpl(update.data());
+        else vDepth->oplusImpl(update.data());
+        edge->computeError();
+        Eigen::Vector3d e_plus = edge->error();
+
+        // 恢复
+        if (isPose) vPose->setEstimate(pose_backup);
+        else vDepth->setEstimate(depth_backup);
+
+        // -ε
+        update[i] = -eps;
+        if (isPose) vPose->oplusImpl(update.data());
+        else vDepth->oplusImpl(update.data());
+        edge->computeError();
+        Eigen::Vector3d e_minus = edge->error();
+
+        // 恢复
+        if (isPose) vPose->setEstimate(pose_backup);
+        else vDepth->setEstimate(depth_backup);
+
+        J_num.col(i) = (e_plus - e_minus) / (2.0 * eps);
+    }
+
+    // ---------------- 差异比较 ----------------
+    Eigen::MatrixXd Diff = J_ana - J_num;
+    double max_diff = Diff.cwiseAbs().maxCoeff();
+    const double threshold = 1e-5;
+
+    if (max_diff > threshold || !J_ana.allFinite() || !J_num.allFinite()) {
+        std::cerr << "---------------------------------------------" << std::endl;
+        std::cerr << "❌ FAILED: Max difference = " << max_diff << std::endl;
+        std::cerr << "--- Analytic Jacobian ---" << std::endl << J_ana << std::endl;
+        std::cerr << "--- Numerical Jacobian ---" << std::endl << J_num << std::endl;
+        std::cerr << "--- Diff ---" << std::endl << Diff << std::endl;
+        std::cerr << "---------------------------------------------" << std::endl;
+        return false;
+    }
+
+    std::cout << "✅ Jacobian check passed. Max diff = " << max_diff << std::endl;
+    return true;
+}
+
+
 }

@@ -1513,7 +1513,8 @@ class EdgeStereoSE3ProjectPluckerLine_PoseOnly
     : public g2o::BaseUnaryEdge<4, Eigen::Vector4d, g2o::VertexSE3Expmap>
 {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+    //EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     EdgeStereoSE3ProjectPluckerLine_PoseOnly()
         : fx(0), fy(0), cx(0), cy(0), bf(0) 
@@ -2239,6 +2240,787 @@ private:
     Eigen::Vector2d px_;
     Eigen::Matrix3d K_inv_;
 };
+
+
+// EdgePointToPluckerLinePoseAndDepth
+//  — 优化相机 pose (VertexSE3Expmap) 和 单个端点深度 (VertexDepth)
+//  — Plücker 直线作为固定测量 (Eigen::Matrix<float,6,1>)
+//  — 使用 BaseMultiEdge，vertices order: [pose, depth]
+//  — 残差为 3D 向量 (point-to-line cross-product)
+// 注意：适配你的 g2o 版本时，确保 VertexDepth 类型已定义且继承自 g2o::BaseVertex 或类似。
+class EdgePointToPluckerLinePoseAndDepth : public g2o::BaseMultiEdge<3, Eigen::Vector3d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+    /**
+     * @param px   image endpoint (u,v) in pixels
+     * @param K_inv 3x3 inverse camera intrinsics (double)
+     * @param plucker_line 6x1 float: [n(3); v(3)]  (固定测量)
+     */
+    EdgePointToPluckerLinePoseAndDepth(
+        const Eigen::Vector2d& px,
+        const Eigen::Matrix3d& K_inv,
+        const Eigen::Matrix<double,6,1>& plucker_line)
+        : px_(px), K_inv_(K_inv), plucker_line_(plucker_line)
+    {
+        // 2 vertices: 0: pose (VertexSE3Expmap), 1: depth (VertexDepth)
+        resize(2);
+        // 初始化雅可比矩阵大小并清零
+        _jacobianOplus[0].resize(3,6);
+        _jacobianOplus[0].setZero();
+        _jacobianOplus[1].resize(3,1);
+        _jacobianOplus[1].setZero();
+    }
+    bool read(std::istream& /*is*/) override { return false; }
+    bool write(std::ostream& /*os*/) const override { return false; }
+    // skew / cross-product matrix
+    inline Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
+    {
+        Eigen::Matrix3d S;
+        S <<     0.0, -v.z(),  v.y(),
+               v.z(),   0.0, -v.x(),
+              -v.y(),  v.x(),   0.0;
+        return S;
+    }
+    // -------------------- computeError --------------------
+    void computeError() override
+    {
+        // vertex cast
+        const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        const auto* vDepth = static_cast<const VertexDepth*>(_vertices[1]);
+        // safe read depth
+        double d = vDepth->estimate();
+        //std::cerr <<"d: " << d << std::endl;
+        //std::cerr << "plucker_line_: " << plucker_line_.transpose() << std::endl;
+        if(!(d > 0.0 && std::isfinite(d))) d = 1e-3; // clamp to small positive
+        // backproject ray (camera frame)
+        Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_(0), px_(1), 1.0); // camera ray (double)
+        Eigen::Vector3d pc  = d * ray; // point in camera frame
+        // Twc = inverse(Tcw)
+        g2o::SE3Quat Tcw_est = vPose->estimate();
+        g2o::SE3Quat Twc = Tcw_est.inverse();
+        Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
+        Eigen::Vector3d twc = Twc.translation();
+        Eigen::Vector3d pw = Rwc * pc + twc; // world point
+        // plucker (fixed) -> cast float->double for stable computation
+        Eigen::Vector3d n = plucker_line_.head<3>();
+        Eigen::Vector3d v = plucker_line_.tail<3>();
+        // safety for direction vector v
+        double vnorm_len = v.norm();
+        if(!std::isfinite(vnorm_len) || vnorm_len < 1e-9) {
+            // fallback to a safe direction (arbitrary but finite)
+            v = Eigen::Vector3d(1.0, 0.0, 0.0);
+            vnorm_len = 1.0;
+        }
+        Eigen::Vector3d vnorm = v / vnorm_len;
+        Eigen::Vector3d p0 = vnorm.cross(n); // a point on the line (world)
+        // residual: 3D vector — point-to-line cross product
+        _error = (pw - p0).cross(vnorm);
+        Eigen::Vector3d test_error = (pw - p0).cross(vnorm);
+        //std::cerr <<"test_error:  " << test_error.transpose() << std::endl;
+        // safety: if any NaN/Inf arises, zero the error (prevents g2o crash)
+        if(!(std::isfinite(_error[0]) && std::isfinite(_error[1]) && std::isfinite(_error[2])))
+        {
+            _error.setZero();
+        }
+    }
+    // -------------------- linearizeOplus --------------------
+    // fill _jacobianOplus[0] (pose: 3x6) and _jacobianOplus[1] (depth: 3x1)
+    void linearizeOplus() override
+    {
+        // defensive
+        if(_vertices[0] == nullptr || _vertices[1] == nullptr) {
+            _jacobianOplus[0].setZero();
+            _jacobianOplus[1].setZero();
+            return;
+        }
+        const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        const auto* vDepth = static_cast<const VertexDepth*>(_vertices[1]);
+        // safe depth
+        double d = vDepth->estimate();
+        if(!(d > 0.0 && std::isfinite(d))) d = 1e-3;
+        // ray and pc
+        Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_(0), px_(1), 1.0);
+        Eigen::Vector3d pc  = d * ray;
+        // Twc, Rwc
+        g2o::SE3Quat Tcw_est = vPose->estimate();
+        g2o::SE3Quat Twc = Tcw_est.inverse();
+        Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
+        // plucker line (fixed)
+        Eigen::Vector3d n = plucker_line_.head<3>();
+        Eigen::Vector3d v = plucker_line_.tail<3>();
+        //std::cerr <<"n: " << n.transpose() << std::endl;
+        //std::cerr <<"v: " << v.transpose() << std::endl;
+        double vnorm_len = v.norm();
+        if(!std::isfinite(vnorm_len) || vnorm_len < 1e-9) {
+            v = Eigen::Vector3d(1.0, 0.0, 0.0);
+            vnorm_len = 1.0;
+        }
+        Eigen::Vector3d vnorm = v / vnorm_len;
+        // ----- depth jacobian (3x1) -----
+        // dpw/dd = Rwc * ray
+        Eigen::Vector3d dpw_dd = Rwc * ray;
+        //std::cerr << "dpw_dd: " << dpw_dd.transpose() << std::endl;
+        // dr/dd = (dpw/dd) x vnorm = skew(dpw_dd) * vnorm
+        _jacobianOplus[1].setZero();
+        Eigen::Matrix<double,3,1> Jd = skew(dpw_dd) * vnorm;
+        //std::cerr << "JD: " << Jd.transpose() << std::endl;
+        //_jacobianOplus[1].block<3,1>(0,0) = Jd;
+        _jacobianOplus[1].col(0) = Jd;
+        // _jacobianOplus[1](0,0) = Jd(0,0);
+        // std::cerr << "_jacobianOplus[1](0,0): " << _jacobianOplus[1](0,0) << std::endl;
+        // _jacobianOplus[1](1,0) = Jd(1,0);
+        // _jacobianOplus[1](2,0) = Jd(2,0);
+        //std::cerr << "JD: END" << std::endl;
+        // ----- pose jacobian (3x6) -----
+        // d(pw)/d(delta_t) = I
+        // d(pw)/d(delta_phi) = - Rwc * skew(pc)
+        Eigen::Matrix<double,3,6> Jpose; Jpose.setZero();
+        //std::cerr << "111111" << std::endl;
+        // translation part: dr/dt = [vnorm]_x  (we write as -skew(vnorm) for consistency)
+        Jpose.block<3,3>(0,0) = -skew(vnorm);
+        //std::cerr << "pc: " << pc.transpose() << std::endl;
+        // rotation part:
+        Eigen::Matrix3d d_pw_domega = - Rwc * skew(pc); // 3x3
+        Jpose.block<3,3>(0,3) = -skew(vnorm) * d_pw_domega;
+        //std::cerr << "d_pw_domega: " << d_pw_domega.transpose() << std::endl;
+        //std::cerr << "Jpose: " << Jpose << std::endl;
+        // assign Jpose → jacobianOplus[0] safely
+        _jacobianOplus[0] = Jpose;
+        //std::cerr << "Jpose End: " << Jpose << std::endl;
+        // // Safety: if some jacobian entries are NaN/Inf, clamp to zero to avoid optimizer crash
+        // for(int i=0;i<3;i++){
+        //     for(int j=0;j<6;j++){
+        //         if(!std::isfinite(_jacobianOplus[0](i,j))) _jacobianOplus[0](i,j) = 0.0;
+        //     }
+        //     if(!std::isfinite(_jacobianOplus[1](i,0))) _jacobianOplus[1](i,0) = 0.0;
+        // }
+        //std::cerr << "........all end......." << std::endl;
+    }
+private:
+    Eigen::Vector2d px_;                       // image pixel endpoint (u,v)
+    Eigen::Matrix3d K_inv_;                    // inverse intrinsics (double)
+    Eigen::Matrix<double,6,1> plucker_line_;    // fixed plucker measurement (double)
+};
+
+
+class EdgeSimpleSE3Depth
+    : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
+                                 g2o::VertexSE3Expmap,
+                                 VertexDepth>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    void computeError() override
+    {
+        const auto* v0 =
+            static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        const auto* v1 =
+            static_cast<const VertexDepth*>(_vertices[1]);
+
+        const Eigen::Vector3d t = v0->estimate().translation();
+        const double d = v1->estimate();
+
+        // 非常简单、稳定的 error
+        _error = t + Eigen::Vector3d(d, d, d) - _measurement;
+    }
+
+    void linearizeOplus() override
+    {
+        // --- w.r.t. pose (6D) ---
+        _jacobianOplusXi.setZero();
+        _jacobianOplusXi.block<3,3>(0,3).setIdentity(); // dt / dtranslation
+
+        // --- w.r.t. depth (1D) ---
+        _jacobianOplusXj.setZero();
+        _jacobianOplusXj.col(0).setOnes();
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+};
+
+
+// void computeError() override
+    // {
+    //     auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
+    //     auto* vDepth = static_cast<const VertexDepth*>(vertex(1));
+    //     // 确保顶点存在
+    //     if(!vPose || !vDepth){ _error.setZero(); return; }
+    //     double d = vDepth->estimate();
+    //     // 深度检查
+    //     if(!(d>0 && std::isfinite(d))) d = 1e-3;
+    //     // 1. 投影射线 (归一化平面)
+    //     Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_[0], px_[1], 1.0);
+    //     // 2. 相机坐标系下的点
+    //     Eigen::Vector3d pc = d * ray;
+    //     // 3. 世界坐标系下的点
+    //     g2o::SE3Quat Tcw = vPose->estimate();
+    //     g2o::SE3Quat Twc = Tcw.inverse();
+    //     Eigen::Vector3d pw = Twc.map(pc);
+    //     // 4. Plucker 线参数
+    //     Eigen::Vector3d n = Lw_.head<3>(); // 矩
+    //     Eigen::Vector3d v = Lw_.tail<3>(); // 方向
+    //     double vn = v.norm();
+    //     if(vn<1e-9 || !std::isfinite(vn)){ v=Eigen::Vector3d(1,0,0); vn=1.0; } // 检查并默认
+    //     Eigen::Vector3d vnorm = v/vn; // 方向单位向量
+    //     // 5. 直线上的一个点 p0 = (v x n) / ||v||^2
+    //     Eigen::Vector3d p0 = v.cross(n)/(vn*vn);
+    //     // 6. 误差：点到直线的垂直距离 r = (pw - p0) x vnorm
+    //     Eigen::Vector3d r = (pw - p0).cross(vnorm);
+    //     if(!r.allFinite()) _error.setZero();
+    //     else _error = r;
+    // }
+
+// =======================================================
+// Edge: Point to Plucker Line (3D Error)
+// Debug-safe version for Jacobian checking
+// =======================================================
+// class EdgePointToPluckerLinePoseAndDepthNew
+//     : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
+//                                  g2o::VertexSE3Expmap, VertexDepth>
+// {
+// public:
+//     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+//     virtual ~EdgePointToPluckerLinePoseAndDepthNew() = default;
+
+//     EdgePointToPluckerLinePoseAndDepthNew(
+//         const Eigen::Vector2d& px,
+//         const Eigen::Matrix3d& K_inv,
+//         const Eigen::Matrix<double,6,1>& plucker)
+//         : px_(px), K_inv_(K_inv), Lw_(plucker)
+//     {
+//         dbg_J_pose.setZero();
+//         dbg_J_depth.setZero();
+//         dbg_jac_updated = false;
+//     }
+
+//     bool read(std::istream&) override { return false; }
+//     bool write(std::ostream&) const override { return false; }
+
+//     Eigen::Matrix<double,3,6> dbg_J_pose;   //debug jacobian
+//     Eigen::Matrix<double,3,1> dbg_J_depth;
+//     bool dbg_jac_updated = false;
+
+
+// private:
+//     // ---- debug macro ----
+// #ifndef JAC_CHECK_DEBUG
+// #define JAC_CHECK_DEBUG 1
+// #endif
+
+// #if JAC_CHECK_DEBUG
+// #define STEP(tag) \
+//     do { std::cout << "[EDGE] " << (tag) << " @L" << __LINE__ << std::endl; } while(0)
+// #else
+// #define STEP(tag) do {} while(0)
+// #endif
+
+//     static inline Eigen::Matrix3d skew(const Eigen::Vector3d& v)
+//     {
+//         Eigen::Matrix3d S;
+//         S << 0.0,   -v.z(),  v.y(),
+//              v.z(),  0.0,   -v.x(),
+//             -v.y(),  v.x(),  0.0;
+//         return S;
+//     }
+
+// public:
+//     void computeError() override
+//     {
+//         STEP("computeError.begin");
+
+//         const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
+//         const auto* vDepth = static_cast<const VertexDepth*>(vertex(1));
+//         if(!vPose || !vDepth){
+//             _error.setZero();
+//             STEP("computeError.nullVertex");
+//             return;
+//         }
+
+//         double d = vDepth->estimate();
+//         if(!(d > 0.0) || !std::isfinite(d)){
+//             // 不要 assert 直接炸；调试时更希望继续跑完看到更多信息
+//             d = 1e-3;
+//         }
+
+//         STEP("computeError.ray");
+//         const Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
+//         if(!ray.allFinite()){
+//             _error.setZero();
+//             STEP("computeError.ray.nan");
+//             return;
+//         }
+
+//         STEP("computeError.pc");
+//         const Eigen::Vector3d pc = d * ray;
+
+//         STEP("computeError.Twc");
+//         const g2o::SE3Quat Twc = vPose->estimate().inverse();
+
+//         STEP("computeError.pw");
+//         const Eigen::Vector3d pw = Twc.map(pc);
+//         if(!pw.allFinite()){
+//             _error.setZero();
+//             STEP("computeError.pw.nan");
+//             return;
+//         }
+
+//         STEP("computeError.line");
+//         Eigen::Vector3d n = Lw_.head<3>();
+//         Eigen::Vector3d v = Lw_.tail<3>();
+//         if(!n.allFinite() || !v.allFinite()){
+//             _error.setZero();
+//             STEP("computeError.line.nan");
+//             return;
+//         }
+
+//         double vn = v.norm();
+//         if(!(vn > 1e-9) || !std::isfinite(vn)){
+//             // 退化线：给一个默认方向，保证不炸
+//             v  = Eigen::Vector3d(1,0,0);
+//             vn = 1.0;
+//         }
+//         const Eigen::Vector3d vnorm = v / vn;
+
+//         STEP("computeError.p0");
+//         const Eigen::Vector3d p0 = v.cross(n) / (vn * vn);
+
+//         STEP("computeError.r");
+//         const Eigen::Vector3d r = (pw - p0).cross(vnorm);
+//         if(!r.allFinite()){
+//             _error.setZero();
+//             STEP("computeError.r.nan");
+//             return;
+//         }
+
+//         _error = r;
+//         STEP("computeError.end");
+//     }
+
+//     void linearizeOplus() override
+//     {
+//         STEP("linearize.begin");
+
+//         const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
+//         const auto* vDepth = static_cast<const VertexDepth*>(vertex(1));
+//         if(!vPose || !vDepth){
+//             _jacobianOplusXi.setZero();
+//             _jacobianOplusXj.setZero();
+//             STEP("linearize.nullVertex");
+//             return;
+//         }
+
+//         // ---------- 强制检查 Jacobian 尺寸（非常关键） ----------
+//         // g2o 正常情况下：Xi=3x6, Xj=3x1
+//         if(_jacobianOplusXi.rows()!=3 || _jacobianOplusXi.cols()!=6 ||
+//            _jacobianOplusXj.rows()!=3 || _jacobianOplusXj.cols()!=1)
+//         {
+// #if JAC_CHECK_DEBUG
+//             std::cout << "[EDGE] JXi size=" << _jacobianOplusXi.rows()
+//                       << "x" << _jacobianOplusXi.cols()
+//                       << "  JXj size=" << _jacobianOplusXj.rows()
+//                       << "x" << _jacobianOplusXj.cols() << std::endl;
+// #endif
+//             _jacobianOplusXi.setZero();
+//             _jacobianOplusXj.setZero();
+//             STEP("linearize.badJacSize");
+//             return;
+//         }
+
+//         STEP("linearize.inputs");
+
+//         double d = vDepth->estimate();
+//         if(!(d > 0.0) || !std::isfinite(d)) d = 1e-3;
+
+//         const Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
+//         if(!ray.allFinite()){
+//             _jacobianOplusXi.setZero();
+//             _jacobianOplusXj.setZero();
+//             STEP("linearize.ray.nan");
+//             return;
+//         }
+
+//         const Eigen::Vector3d pc = d * ray;
+
+//         STEP("linearize.Rwc");
+//         const g2o::SE3Quat Twc = vPose->estimate().inverse();
+//         const Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
+//         if(!Rwc.allFinite()){
+//             _jacobianOplusXi.setZero();
+//             _jacobianOplusXj.setZero();
+//             STEP("linearize.Rwc.nan");
+//             return;
+//         }
+
+//         STEP("linearize.vnorm");
+//         Eigen::Vector3d v = Lw_.tail<3>();
+//         double vn = v.norm();
+//         if(!(vn > 1e-9) || !std::isfinite(vn)){
+//             v  = Eigen::Vector3d(1,0,0);
+//             vn = 1.0;
+//         }
+//         const Eigen::Vector3d vnorm = v / vn;
+
+//         STEP("linearize.R");
+//         const Eigen::Matrix3d R = skew(vnorm); // e = [v]x (pw - p0)
+
+//         // ---------- Pose Jacobian ----------
+//         STEP("linearize.dpw_dxi");
+//         Eigen::Matrix<double,3,6> dpw_dxi;
+//         dpw_dxi.block<3,3>(0,0) = -Rwc * skew(pc); // d pw / d omega
+//         dpw_dxi.block<3,3>(0,3) = -Rwc;            // d pw / d rho
+
+//         STEP("linearize.JXi");
+//         _jacobianOplusXi.noalias() = R * dpw_dxi;
+
+//         // ---------- Depth Jacobian ----------
+//         STEP("linearize.dpw_dd");
+//         const Eigen::Vector3d dpw_dd = Rwc * ray;
+
+//         STEP("linearize.JXj");
+//         _jacobianOplusXj.setZero();
+//         _jacobianOplusXj.col(0).noalias() = R * dpw_dd; // = vnorm x dpw_dd
+
+//         STEP("linearize.finiteCheck");
+//         if(!_jacobianOplusXi.allFinite() || !_jacobianOplusXj.allFinite()){
+//             _jacobianOplusXi.setZero();
+//             _jacobianOplusXj.setZero();
+//             STEP("linearize.nan");
+//             return;
+//         }
+
+//         // ✅ 放在 finiteCheck 后
+//         dbg_J_pose  = _jacobianOplusXi; //debug jacobian
+//         dbg_J_depth = _jacobianOplusXj;
+//         dbg_jac_updated = true;
+
+//         STEP("linearize.end");
+//     }
+
+// private:
+//     Eigen::Vector2d px_;
+//     Eigen::Matrix3d K_inv_;
+//     Eigen::Matrix<double,6,1> Lw_;
+// };
+
+
+
+class EdgePointToPluckerLinePoseAndDepthNew
+    : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
+                                 g2o::VertexSE3Expmap, VertexDepth>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    virtual ~EdgePointToPluckerLinePoseAndDepthNew() = default;
+
+    EdgePointToPluckerLinePoseAndDepthNew(
+        const Eigen::Vector2d& px,
+        const Eigen::Matrix3d& K_inv,
+        const Eigen::Matrix<double,6,1>& plucker)
+        : px_(px), K_inv_(K_inv), Lw_(plucker)
+    {
+        dbg_J_pose.setZero();
+        dbg_J_depth.setZero();
+        dbg_jac_updated = false;
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    // -------- debug output --------
+    Eigen::Matrix<double,3,6> dbg_J_pose;
+    Eigen::Matrix<double,3,1> dbg_J_depth;
+    bool dbg_jac_updated = false;
+
+private:
+#ifndef JAC_CHECK_DEBUG
+#define JAC_CHECK_DEBUG 1
+#endif
+
+#if JAC_CHECK_DEBUG
+#define STEP(tag) \
+    do { std::cout << "[EDGE] " << (tag) << " @L" << __LINE__ << std::endl; } while(0)
+#else
+#define STEP(tag) do {} while(0)
+#endif
+
+    static inline Eigen::Matrix3d skew(const Eigen::Vector3d& v)
+    {
+        Eigen::Matrix3d S;
+        S <<  0.0,   -v.z(),  v.y(),
+              v.z(),  0.0,   -v.x(),
+             -v.y(),  v.x(),  0.0;
+        return S;
+    }
+
+public:
+    // =====================================================
+    // computeError
+    // =====================================================
+    void computeError() override
+    {
+        STEP("computeError.begin");
+
+        const auto* vPose  =
+            static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
+        const auto* vDepth =
+            static_cast<const VertexDepth*>(vertex(1));
+
+        if(!vPose || !vDepth){
+            _error.setZero();
+            STEP("computeError.nullVertex");
+            return;
+        }
+
+        double d = vDepth->estimate();
+        if(!(d > 0.0) || !std::isfinite(d))
+            d = 1e-3;
+
+        const Eigen::Vector3d ray =
+            K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
+
+        if(!ray.allFinite()){
+            _error.setZero();
+            STEP("computeError.ray.nan");
+            return;
+        }
+
+        const Eigen::Vector3d pc = d * ray;
+
+        const g2o::SE3Quat Twc = vPose->estimate().inverse();
+        const Eigen::Vector3d pw = Twc.map(pc);
+
+        if(!pw.allFinite()){
+            _error.setZero();
+            STEP("computeError.pw.nan");
+            return;
+        }
+
+        Eigen::Vector3d n = Lw_.head<3>();
+        Eigen::Vector3d v = Lw_.tail<3>();
+
+        if(!n.allFinite() || !v.allFinite()){
+            _error.setZero();
+            STEP("computeError.line.nan");
+            return;
+        }
+
+        double vn = v.norm();
+        if(!(vn > 1e-9))
+            v = Eigen::Vector3d(1,0,0), vn = 1.0;
+
+        const Eigen::Vector3d vnorm = v / vn;
+        const Eigen::Vector3d p0 = v.cross(n) / (vn * vn);
+
+        const Eigen::Vector3d r = (pw - p0).cross(vnorm);
+        if(!r.allFinite()){
+            _error.setZero();
+            STEP("computeError.r.nan");
+            return;
+        }
+
+        _error = r;
+        STEP("computeError.end");
+    }
+
+    // =====================================================
+    // linearizeOplus  (✔ numerically verified)
+    // =====================================================
+    void linearizeOplus() override
+    {
+        STEP("linearize.begin");
+
+        const auto* vPose  =
+            static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
+        const auto* vDepth =
+            static_cast<const VertexDepth*>(vertex(1));
+
+        if(!vPose || !vDepth){
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
+
+        double d = vDepth->estimate();
+        if(!(d > 0.0) || !std::isfinite(d))
+            d = 1e-3;
+
+        const Eigen::Vector3d ray =
+            K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
+        const Eigen::Vector3d pc = d * ray;
+
+        const g2o::SE3Quat Twc = vPose->estimate().inverse();
+        const Eigen::Matrix3d Rwc =
+            Twc.rotation().toRotationMatrix();
+
+        Eigen::Vector3d v = Lw_.tail<3>();
+        double vn = v.norm();
+        if(!(vn > 1e-9))
+            v = Eigen::Vector3d(1,0,0), vn = 1.0;
+
+        const Eigen::Vector3d vnorm = v / vn;
+
+        // ⭐ 核心修正：负号
+        const Eigen::Matrix3d R = -skew(vnorm);
+
+        // ---- pose Jacobian ----
+        Eigen::Matrix<double,3,6> dpw_dxi;
+        //dpw_dxi.block<3,3>(0,0) = -Rwc * skew(pc);
+        dpw_dxi.block<3,3>(0,0) = Rwc * skew(pc);
+        dpw_dxi.block<3,3>(0,3) = -Rwc;
+
+        _jacobianOplusXi.noalias() = R * dpw_dxi;
+
+        // ---- depth Jacobian ----
+        const Eigen::Vector3d dpw_dd = Rwc * ray;
+        _jacobianOplusXj.col(0).noalias() = R * dpw_dd;
+
+        dbg_J_pose  = _jacobianOplusXi;
+        dbg_J_depth = _jacobianOplusXj;
+        dbg_jac_updated = true;
+
+        STEP("linearize.end");
+    }
+
+private:
+    Eigen::Vector2d px_;
+    Eigen::Matrix3d K_inv_;
+    Eigen::Matrix<double,6,1> Lw_;
+};
+
+
+// =======================================================
+// 3. MANUAL JACOBIAN CHECKER
+// =======================================================
+// 检查 Vertex 的 Jacobian (通用函数)
+bool checkJacobian_zdg(g2o::BaseBinaryEdge<3, Eigen::Vector3d, g2o::VertexSE3Expmap, VertexDepth>* edge, int vertex_idx);
+
+
+// class EdgePointToPluckerLinePoseAndDepth : public g2o::BaseMultiEdge<3, Eigen::Vector3d>
+// {
+// public:
+//     EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+//     /**
+//      * @param px   image endpoint (u,v) in pixels
+//      * @param K_inv 3x3 inverse camera intrinsics (double)
+//      * @param plucker_line 6x1 double: [n(3); v(3)]  (固定测量)
+//      */
+//     EdgePointToPluckerLinePoseAndDepth(
+//         const Eigen::Vector2d& px,
+//         const Eigen::Matrix3d& K_inv,
+//         const Eigen::Matrix<double,6,1>& plucker_line)
+//         : px_(px), K_inv_(K_inv), plucker_line_(plucker_line)
+//     {
+//         // 2 vertices: 0 = pose, 1 = depth
+//         resize(2);
+
+//         // 初始化雅可比矩阵大小并清零
+//         _jacobianOplus[0].resize(3,6);
+//         _jacobianOplus[0].setZero();
+//         _jacobianOplus[1].resize(3,1);
+//         _jacobianOplus[1].setZero();
+//     }
+
+//     bool read(std::istream& /*is*/) override { return false; }
+//     bool write(std::ostream& /*os*/) const override { return false; }
+
+//     // skew / cross-product matrix
+//     inline Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
+//     {
+//         Eigen::Matrix3d S;
+//         S <<     0.0, -v.z(),  v.y(),
+//                v.z(),   0.0, -v.x(),
+//               -v.y(),  v.x(),   0.0;
+//         return S;
+//     }
+
+//     void computeError() override
+//     {
+//         const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+//         const auto* vDepth = static_cast<const VertexDepth*>(_vertices[1]);
+//         if(!vPose || !vDepth) { _error.setZero(); return; }
+
+//         double d = vDepth->estimate();
+//         if(!(d > 0.0 && std::isfinite(d))) d = 1e-3;
+
+//         Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_(0), px_(1), 1.0);
+//         Eigen::Vector3d pc  = d * ray;
+
+//         g2o::SE3Quat Tcw = vPose->estimate();
+//         g2o::SE3Quat Twc = Tcw.inverse();
+//         Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
+//         Eigen::Vector3d t = Twc.translation();
+
+//         Eigen::Vector3d pw = Rwc * pc + t;
+
+//         Eigen::Vector3d n = plucker_line_.head<3>();
+//         Eigen::Vector3d v = plucker_line_.tail<3>();
+//         double vnorm_len = v.norm();
+//         if(!std::isfinite(vnorm_len) || vnorm_len < 1e-9) v = Eigen::Vector3d(1.0,0,0), vnorm_len=1.0;
+//         Eigen::Vector3d vnorm = v / vnorm_len;
+//         Eigen::Vector3d p0 = vnorm.cross(n);
+
+//         _error = (pw - p0).cross(vnorm);
+
+//         if(!(_error.allFinite())) _error.setZero();
+//     }
+
+//     void linearizeOplus() override
+//     {
+//         if(!_vertices[0] || !_vertices[1]) {
+//             _jacobianOplus[0].setZero();
+//             _jacobianOplus[1].setZero();
+//             return;
+//         }
+
+//         const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+//         const auto* vDepth = static_cast<const VertexDepth*>(_vertices[1]);
+
+//         double d = vDepth->estimate();
+//         if(!(d>0.0 && std::isfinite(d))) d = 1e-3;
+
+//         Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_(0), px_(1), 1.0);
+//         Eigen::Vector3d pc  = d * ray;
+
+//         g2o::SE3Quat Twc = vPose->estimate().inverse();
+//         Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
+
+//         Eigen::Vector3d n = plucker_line_.head<3>();
+//         Eigen::Vector3d v = plucker_line_.tail<3>();
+//         double vnorm_len = v.norm();
+//         if(!std::isfinite(vnorm_len) || vnorm_len < 1e-9) v = Eigen::Vector3d(1.0,0,0), vnorm_len=1.0;
+//         Eigen::Vector3d vnorm = v / vnorm_len;
+
+//         // ----- depth jacobian (3x1) -----
+//         Eigen::Vector3d dpw_dd = Rwc * ray;
+//         _jacobianOplus[1].setZero();
+//         std::cerr < "dpw_dd: " << dpw_dd.transpose() << std::endl;
+//         _jacobianOplus[1].col(0) = skew(dpw_dd) * vnorm;
+//         std::cerr <<"end..." << std::endl;
+
+//         // ----- pose jacobian (3x6) -----
+//         Eigen::Matrix<double,3,6> Jpose;
+//         Jpose.setZero();
+//         Jpose.block<3,3>(0,0) = -skew(vnorm);
+//         Eigen::Matrix3d d_pw_domega = -Rwc * skew(pc);
+//         Jpose.block<3,3>(0,3) = -skew(vnorm) * d_pw_domega;
+//         _jacobianOplus[0] = Jpose;
+
+//         // 防止 NaN/Inf
+//         for(int i=0;i<3;i++){
+//             for(int j=0;j<6;j++) if(!std::isfinite(_jacobianOplus[0](i,j))) _jacobianOplus[0](i,j)=0.0;
+//             if(!std::isfinite(_jacobianOplus[1](i,0))) _jacobianOplus[1](i,0)=0.0;
+//         }
+//     }
+
+// private:
+//     Eigen::Vector2d px_;
+//     Eigen::Matrix3d K_inv_;
+//     Eigen::Matrix<double,6,1> plucker_line_;
+// };
 
 
 }

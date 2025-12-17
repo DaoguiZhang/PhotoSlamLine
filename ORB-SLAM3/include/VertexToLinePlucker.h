@@ -17,14 +17,48 @@ namespace ORB_SLAM3
 {
 
 // ---------- 简单的 1D depth 顶点（存标量 depth） ----------
+// ================================
+// VertexDepth: 单自由度深度顶点
+// ================================
 class VertexDepth : public g2o::BaseVertex<1, double> {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+    //EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    // 【修正点】添加虚析构函数
+    //virtual ~VertexDepth() = default;
     VertexDepth() {}
     bool read(std::istream& ) override { return false; }
     bool write(std::ostream& ) const override { return false; }
     void setToOriginImpl() override { _estimate = 1.0; }
     void oplusImpl(const double* update) override { _estimate += update[0]; }
+};
+
+// ========================================
+// EdgeDepthPrior: 深度的弱先验约束
+// 防止 depth 发散 / 变负 / 数值不稳定， 这块也非常重要，用于后续的debug
+// ========================================
+class EdgeDepthPrior
+    : public g2o::BaseUnaryEdge<1, double, VertexDepth>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    explicit EdgeDepthPrior(double d0)
+    {
+        setMeasurement(d0);   // 初始深度作为先验
+    }
+
+    void computeError() override
+    {
+        const VertexDepth* v =
+            static_cast<const VertexDepth*>(_vertices[0]);
+
+        // error = d - d_prior
+        _error[0] = v->estimate() - measurement();
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
 };
 
 class VertexLinePluckerOld : public g2o::BaseVertex<6, Eigen::Matrix<double,6,1>>
