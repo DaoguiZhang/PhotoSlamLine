@@ -588,6 +588,169 @@ public:
     double fx, fy, cx, cy;
 };
 
+// Point-to-line error formulation
+class EdgeSE3ProjectLineXYZOnlyPose_PointToLine
+    : public g2o::BaseUnaryEdge<2, Eigen::Matrix<double,2,1>, g2o::VertexSE3Expmap>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectLineXYZOnlyPose_PointToLine()
+        : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0)
+    {
+        //resize(1); // one vertex (the pose)
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    // ---------------- intrinsics ----------------
+    void SetCameraIntrinsics(double _fx, double _fy, double _cx, double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    // ---------------- observed line ----------------
+    void SetObservedLineByEndpoints(double u1,double v1,double u2,double v2)
+    {
+        double dx = u2 - u1;
+        double dy = v2 - v1;
+        double na = dy;
+        double nb = -dx;
+        double norm = std::sqrt(na*na + nb*nb);
+        if(norm < 1e-12){ a=b=c=0.0; return; }
+        a = na / norm;
+        b = nb / norm;
+        c = -(a*u1 + b*v1);
+    }
+
+    void SetObservedLineABC(double _a,double _b,double _c)
+    {
+        double norm = std::sqrt(_a*_a + _b*_b);
+        if(norm < 1e-12){ a=_a; b=_b; c=_c; return; }
+        a = _a / norm;
+        b = _b / norm;
+        c = _c / norm;
+    }
+
+    // ---------------- world endpoints ----------------
+    void SetXw(const Eigen::Vector3d &X1,const Eigen::Vector3d &X2)
+    { Xw1=X1; Xw2=X2; }
+
+    // ---------------- compute error ----------------
+    void computeError() override
+    {
+        const g2o::VertexSE3Expmap* vSE3 = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        g2o::SE3Quat Tcw = vSE3->estimate();
+
+        // 打印 Tcw 和 Xw1, Xw2
+        ///std::cout << "Tcw: " << Tcw.rotation().toRotationMatrix() << ", Translation: " << Tcw.translation().transpose() << std::endl;
+        ///std::cout << "Xw1: " << Xw1.transpose() << ", Xw2: " << Xw2.transpose() << std::endl;
+
+        // Transform world endpoints to camera frame
+        Eigen::Vector3d Xc1 = Tcw.map(Xw1);
+        Eigen::Vector3d Xc2 = Tcw.map(Xw2);
+
+        //// 打印 Xc1, Xc2 的值
+        ///std::cout << "Mapped Xc1: " << Xc1.transpose() << std::endl;
+        ///std::cout << "Mapped Xc2: " << Xc2.transpose() << std::endl;
+
+        // Ensure positive depth (to avoid division by zero)
+        if (Xc1(2) <= 0 || Xc2(2) <= 0) {
+            std::cout << "Invalid depth detected (Z <= 0)!" << std::endl;
+            _error(0) = 1e3;  // Set large residual in case of invalid depth
+            _error(1) = 1e3;
+            return;
+        }
+
+        // Project to pixels
+        Eigen::Vector2d uv1 = cam2pixel(Xc1);
+        Eigen::Vector2d uv2 = cam2pixel(Xc2);
+
+        // Residuals: signed distance to line (a*b normalized)
+        _error(0) = a * uv1(0) + b * uv1(1) + c;
+        _error(1) = a * uv2(0) + b * uv2(1) + c;
+    }
+
+    // ---------------- Jacobian ----------------
+    void linearizeOplus() override
+    {
+        const auto* vSE3 =
+            static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+
+        Eigen::Vector3d Xc1 = vSE3->estimate().map(Xw1);
+        Eigen::Vector3d Xc2 = vSE3->estimate().map(Xw2);
+
+        if(Xc1(2) <= 1e-9 || Xc2(2) <= 1e-9){
+            _jacobianOplusXi.setZero();
+            return;
+        }
+
+        Eigen::Matrix<double,2,6> Jp1 = projectJacobian(Xc1);
+        Eigen::Matrix<double,2,6> Jp2 = projectJacobian(Xc2);
+
+        Eigen::RowVector2d ab(a,b);
+
+        //std::cerr<< "Jacobian computation: " << std::endl;
+        //std::cerr<< "Xc1: " << Xc1.transpose() << ", Xc2: " << Xc2.transpose() << std::endl;
+        //std::cerr<< "Jp1: \n" << Jp1 << std::endl;
+        //std::cerr<< "Jp2: \n" << Jp2 << std::endl;
+
+         //_jacobianOplusXi.setZero();  // 清空 Jacobian
+        //std::cerr << "11" <<std::endl;
+        _jacobianOplusXi.row(0) = ab * Jp1;
+        _jacobianOplusXi.row(1) = ab * Jp2;
+        
+        //std::cerr<< "Jacobian OplusXi: \n" << _jacobianOplusXi << std::endl;
+        mJacobianPose.row(0) = ab * Jp1;
+        mJacobianPose.row(1) = ab * Jp2;
+    }
+
+public:
+    // ---------------- helpers ----------------
+    Eigen::Vector2d cam2pixel(const Eigen::Vector3d &Xc) const
+    {
+        return Eigen::Vector2d(
+            fx * Xc(0) / Xc(2) + cx,
+            fy * Xc(1) / Xc(2) + cy
+        );
+    }
+
+    // right perturbation, se(3) = [w, t]
+    Eigen::Matrix<double,2,6>
+    projectJacobian(const Eigen::Vector3d &Xc) const
+    {
+        const double x=Xc(0), y=Xc(1), z=Xc(2), z2=z*z;
+
+        Eigen::Matrix<double,2,3> Jpi;
+        Jpi << fx/z,     0, -fx*x/z2,
+                    0, fy/z, -fy*y/z2;
+
+        Eigen::Matrix<double,3,6> dXc_dxi;
+        dXc_dxi.setZero();
+
+        // rotation part: -skew(Xc)
+        dXc_dxi(0,1)= z;   dXc_dxi(0,2)= -y;
+        dXc_dxi(1,0)= -z;  dXc_dxi(1,2)=  x;
+        dXc_dxi(2,0)=  y;  dXc_dxi(2,1)= -x;
+
+        // translation part
+        dXc_dxi.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+
+        return Jpi * dXc_dxi;
+    }
+
+    const Eigen::Matrix<double,2,6>& JPose() const {
+        return mJacobianPose;
+    }
+
+private:
+    Eigen::Matrix<double,2,6> mJacobianPose;
+    Eigen::Vector3d Xw1, Xw2;
+    double fx, fy, cx, cy;
+    double a, b, c;
+};
+
+
+#if 0
 /**
  * EdgeSE3ProjectLineXYZOnlyPose (point-to-line residual)
  *
@@ -847,6 +1010,7 @@ public:
 //     double m_bf;
 // };
 
+#endif
 
 class EdgeStereoSE3ProjectLineXYZOnlyPose_PointToLine
     : public g2o::BaseUnaryEdge<4, Eigen::Vector4d, g2o::VertexSE3Expmap>
@@ -1164,12 +1328,12 @@ public:
     g2o::SE3Quat mTrl;
 };
 
-class EdgeSE3ProjectLine_PoseAndPoints : public g2o::BaseMultiEdge<2, Eigen::Vector2d>
+class EdgeSE3ProjectLine_PoseAndPoints_old : public g2o::BaseMultiEdge<2, Eigen::Vector2d>
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
-    EdgeSE3ProjectLine_PoseAndPoints()
+    EdgeSE3ProjectLine_PoseAndPoints_old()
         : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0)
     {
         resize(3); // 0: pose, 1: point1, 2: point2
@@ -1301,6 +1465,196 @@ public:
     double a, b, c;
 };
 
+
+//测试通过，VertexSE3Expmap 右扰动测试。后面其它方法，求导也要注意右扰动
+//前 3 维：旋转（李代数 so(3)，角轴，小角度，单位：rad）后 3 维：平移（单位：米）
+class EdgeSE3ProjectLine_PoseAndPoints
+    : public g2o::BaseMultiEdge<2, Eigen::Vector2d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectLine_PoseAndPoints()
+        : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0)
+    {
+        resize(3); // 0: pose, 1: point1, 2: point2
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    // ---------------- intrinsics ----------------
+    void SetCameraIntrinsics(double _fx,double _fy,double _cx,double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    // ---------------- observed line ----------------
+    void SetObservedLineByEndpoints(double u1,double v1,double u2,double v2)
+    {
+        double dx = u2 - u1;
+        double dy = v2 - v1;
+        double na = dy;
+        double nb = -dx;
+        double norm = std::sqrt(na*na + nb*nb);
+        if(norm < 1e-12){ a=b=c=0.0; return; }
+        a = na / norm;
+        b = nb / norm;
+        c = -(a*u1 + b*v1);
+    }
+
+    void SetObservedLineABC(double _a,double _b,double _c)
+    {
+        double norm = std::sqrt(_a*_a + _b*_b);
+        if(norm < 1e-12){ a=_a; b=_b; c=_c; return; }
+        a = _a / norm;
+        b = _b / norm;
+        c = _c / norm;
+    }
+
+    // ---------------- compute error ----------------
+    void computeError() override
+    {
+        using g2o::VertexSE3Expmap;
+        using g2o::VertexSBAPointXYZ;
+
+        const VertexSE3Expmap* vPose =
+            static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexSBAPointXYZ* vP1 =
+            static_cast<const VertexSBAPointXYZ*>(_vertices[1]);
+        const VertexSBAPointXYZ* vP2 =
+            static_cast<const VertexSBAPointXYZ*>(_vertices[2]);
+
+        Eigen::Vector3d Xc1 = vPose->estimate().map(vP1->estimate());
+        Eigen::Vector3d Xc2 = vPose->estimate().map(vP2->estimate());
+
+        if (Xc1(2) <= 1e-9 || Xc2(2) <= 1e-9) {
+            _error.setConstant(1e3);
+            return;
+        }
+
+        Eigen::Vector2d uv1 = cam2pixel(Xc1);
+        Eigen::Vector2d uv2 = cam2pixel(Xc2);
+
+        _error(0) = a*uv1(0) + b*uv1(1) + c;
+        _error(1) = a*uv2(0) + b*uv2(1) + c;
+    }
+
+    // ---------------- Jacobians ----------------
+    void linearizeOplus() override
+    {
+        using g2o::VertexSE3Expmap;
+        using g2o::VertexSBAPointXYZ;
+
+        const VertexSE3Expmap* vPose =
+            static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const VertexSBAPointXYZ* vP1 =
+            static_cast<const VertexSBAPointXYZ*>(_vertices[1]);
+        const VertexSBAPointXYZ* vP2 =
+            static_cast<const VertexSBAPointXYZ*>(_vertices[2]);
+
+        Eigen::Vector3d Xc1 = vPose->estimate().map(vP1->estimate());
+        Eigen::Vector3d Xc2 = vPose->estimate().map(vP2->estimate());
+        Eigen::Matrix3d R   = vPose->estimate().rotation().toRotationMatrix();
+
+        if (Xc1(2)<=1e-9 || Xc2(2)<=1e-9) {
+            _jacobianOplus[0].setZero();
+            _jacobianOplus[1].setZero();
+            _jacobianOplus[2].setZero();
+            return;
+        }
+
+        // duv / dXc
+        Eigen::Matrix<double,2,3> Jpi1 = projectionJacobian_Xc(Xc1);
+        Eigen::Matrix<double,2,3> Jpi2 = projectionJacobian_Xc(Xc2);
+
+        // dXc / dxi (right perturbation, VertexSE3Expmap)
+        Eigen::Matrix<double,3,6> dXc1_dxi = dXc_dxi_from_Xc(Xc1);
+        Eigen::Matrix<double,3,6> dXc2_dxi = dXc_dxi_from_Xc(Xc2);
+
+        // duv / dxi
+        Eigen::Matrix<double,2,6> Jpose1 = Jpi1 * dXc1_dxi;
+        Eigen::Matrix<double,2,6> Jpose2 = Jpi2 * dXc2_dxi;
+
+        Eigen::RowVector2d ab(a,b);
+
+        // ---- Pose Jacobian (2x6)
+        _jacobianOplus[0].row(0) = ab * Jpose1;
+        _jacobianOplus[0].row(1) = ab * Jpose2;
+        mJacobianPose.row(0) = ab * Jpose1; // for test
+        mJacobianPose.row(1) = ab * Jpose2; // for test
+
+        // ---- Point Jacobians (2x3)  [关键修正点]
+        _jacobianOplus[1].setZero();
+        _jacobianOplus[2].setZero();
+
+        _jacobianOplus[1].row(0) = ab * Jpi1 * R; // P1 only affects error(0)
+        _jacobianOplus[2].row(1) = ab * Jpi2 * R; // P2 only affects error(1)
+        mJacobianP1.row(0) = ab * Jpi1 * R;
+        mJacobianP1.row(1).setZero();
+
+        mJacobianP2.row(0).setZero();
+        mJacobianP2.row(1) = ab * Jpi2 * R;
+    }
+
+private:
+    // ---------------- helpers ----------------
+    Eigen::Vector2d cam2pixel(const Eigen::Vector3d& Xc) const {
+        return Eigen::Vector2d(
+            fx * Xc(0) / Xc(2) + cx,
+            fy * Xc(1) / Xc(2) + cy
+        );
+    }
+
+    Eigen::Matrix<double,2,3>
+    projectionJacobian_Xc(const Eigen::Vector3d &Xc) const
+    {
+        double x = Xc(0), y = Xc(1), z = Xc(2), z2 = z*z;
+        Eigen::Matrix<double,2,3> J;
+        J << fx/z,     0, -fx*x/z2,
+                 0, fy/z, -fy*y/z2;
+        return J;
+    }
+
+    // right perturbation: dXc/dxi = [ -skew(Xc) | I ]
+    Eigen::Matrix<double,3,6>
+    dXc_dxi_from_Xc(const Eigen::Vector3d& Xc) const
+    {
+        Eigen::Matrix<double,3,6> J;
+        J.setZero();
+
+        const double x = Xc(0);
+        const double y = Xc(1);
+        const double z = Xc(2);
+
+        // -skew(Xc)
+        J(0,1) =  z;   J(0,2) = -y;
+        J(1,0) = -z;  J(1,2) =  x;
+        J(2,0) =  y;  J(2,1) = -x;
+
+        // translation
+        J.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+
+        return J;
+    }
+
+public:
+    const Eigen::Matrix<double,2,6>& JPose() const {
+        return mJacobianPose;
+    }
+    const Eigen::Matrix<double,2,3>& JP1() const {
+        return mJacobianP1;
+    }
+    const Eigen::Matrix<double,2,3>& JP2() const {
+        return mJacobianP2;
+    }
+    Eigen::Matrix<double, 2, 6> mJacobianPose; // for test
+    Eigen::Matrix<double, 2, 3> mJacobianP1;   // for test
+    Eigen::Matrix<double, 2, 3> mJacobianP2;   // for test
+    double fx, fy, cx, cy;
+    double a, b, c;
+};
+
+
+// Edge for SE3 pose and Plucker line optimization (通过测试，可用， 需要再测试数值是否正确)
 class EdgeSE3ProjectPluckerLine_PoseAndLine
     : public g2o::BaseMultiEdge<2, Eigen::Vector2d>
 {
@@ -1325,6 +1679,10 @@ public:
         if(n < 1e-12) { a=_a; b=_b; c=_c; return; }
         a=_a/n; b=_b/n; c=_c/n;
     }
+
+    //inline std::vector<Eigen::Matrix<double,2,6>> jacobians() const {
+    //   return _jacobianOplus;
+    //}
 
     void computeError() override
     {
@@ -1383,8 +1741,10 @@ public:
 
         Eigen::Matrix<double,3,6> dncdxi;
         dncdxi.setZero();
-        dncdxi.block<3,3>(0,0) = -skew(Rcw*v_w);
-        dncdxi.block<3,3>(0,3) = -Rcw*skew(n_w) - skew(tcw)*Rcw*skew(v_w);
+        //dncdxi.block<3,3>(0,0) = -skew(Rcw*v_w);
+        //dncdxi.block<3,3>(0,3) = -Rcw*skew(n_w) - skew(tcw)*Rcw*skew(v_w);
+        dncdxi.block<3,3>(0,0) = -Rcw*skew(n_w) - skew(tcw)*Rcw*skew(v_w);  // d n_c / d rotation
+        dncdxi.block<3,3>(0,3) = -skew(Rcw * v_w);                         // d n_c / d translation
 
         Eigen::Matrix<double,3,6> dldxi = dldnc * dncdxi;
 
@@ -1392,14 +1752,27 @@ public:
         Jpose.row(0) = dldxi.row(0);
         Jpose.row(1) = dldxi.row(1);
         _jacobianOplus[0] = Jpose;  // 直接赋值，不用 setZero
+        mJacobianPose = Jpose;  //test store
 
         // --- Jacobian wrt line (2x6) ---
+        //Eigen::Matrix<double,2,6> Jline;
+        //Jline.setZero();
+        //Jline.block<2,3>(0,0) = dldnc.block<2,3>(0,0) * Rcw;
+        //Jline.block<2,3>(0,3) = dldnc.block<2,3>(0,0) * skew(tcw) * Rcw;
+        // --- Line Jacobian (2x6) ---
+        Eigen::Matrix<double,3,3> dnc_dnw = Rcw;
+        Eigen::Matrix<double,3,3> dnc_dvw = skew(tcw) * Rcw;
+
+        Eigen::Matrix<double,3,6> dnc_dLw;
+        dnc_dLw.block<3,3>(0,0) = dnc_dnw;
+        dnc_dLw.block<3,3>(0,3) = dnc_dvw;
+        Eigen::Matrix<double,3,6> dldLw = dldnc * dnc_dLw;
         Eigen::Matrix<double,2,6> Jline;
-        Jline.setZero();
-        Jline.block<2,3>(0,0) = dldnc.block<2,3>(0,0) * Rcw;
-        Jline.block<2,3>(0,3) = dldnc.block<2,3>(0,0) * skew(tcw) * Rcw;
+        Jline.row(0) = dldLw.row(0);
+        Jline.row(1) = dldLw.row(1);
 
         _jacobianOplus[1] = Jline;
+        mJacobianLine = Jline;  //test store
     }
 
     inline Eigen::Matrix3d skew(const Eigen::Vector3d& v) const
@@ -1411,7 +1784,19 @@ public:
         return S;
     }
 
+    inline Eigen::Matrix<double,2,6> getJacobianPose() const {
+        
+       return mJacobianPose;
+    }
+
+    inline Eigen::Matrix<double,2,6> getJacobianLine() const {
+       return mJacobianLine;
+    }
+    
+
 private:
+    Eigen::Matrix<double,2,6> mJacobianPose;
+    Eigen::Matrix<double,2,6> mJacobianLine;
     double fx, fy, cx, cy;
     double a, b, c;
 };
@@ -2495,28 +2880,22 @@ public:
 //         dbg_J_depth.setZero();
 //         dbg_jac_updated = false;
 //     }
-
 //     bool read(std::istream&) override { return false; }
 //     bool write(std::ostream&) const override { return false; }
-
 //     Eigen::Matrix<double,3,6> dbg_J_pose;   //debug jacobian
 //     Eigen::Matrix<double,3,1> dbg_J_depth;
 //     bool dbg_jac_updated = false;
-
-
 // private:
 //     // ---- debug macro ----
 // #ifndef JAC_CHECK_DEBUG
 // #define JAC_CHECK_DEBUG 1
 // #endif
-
 // #if JAC_CHECK_DEBUG
 // #define STEP(tag) \
 //     do { std::cout << "[EDGE] " << (tag) << " @L" << __LINE__ << std::endl; } while(0)
 // #else
 // #define STEP(tag) do {} while(0)
 // #endif
-
 //     static inline Eigen::Matrix3d skew(const Eigen::Vector3d& v)
 //     {
 //         Eigen::Matrix3d S;
@@ -2525,12 +2904,10 @@ public:
 //             -v.y(),  v.x(),  0.0;
 //         return S;
 //     }
-
 // public:
 //     void computeError() override
 //     {
 //         STEP("computeError.begin");
-
 //         const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
 //         const auto* vDepth = static_cast<const VertexDepth*>(vertex(1));
 //         if(!vPose || !vDepth){
@@ -2538,13 +2915,11 @@ public:
 //             STEP("computeError.nullVertex");
 //             return;
 //         }
-
 //         double d = vDepth->estimate();
 //         if(!(d > 0.0) || !std::isfinite(d)){
 //             // 不要 assert 直接炸；调试时更希望继续跑完看到更多信息
 //             d = 1e-3;
 //         }
-
 //         STEP("computeError.ray");
 //         const Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
 //         if(!ray.allFinite()){
@@ -2552,13 +2927,10 @@ public:
 //             STEP("computeError.ray.nan");
 //             return;
 //         }
-
 //         STEP("computeError.pc");
 //         const Eigen::Vector3d pc = d * ray;
-
 //         STEP("computeError.Twc");
 //         const g2o::SE3Quat Twc = vPose->estimate().inverse();
-
 //         STEP("computeError.pw");
 //         const Eigen::Vector3d pw = Twc.map(pc);
 //         if(!pw.allFinite()){
@@ -2566,7 +2938,6 @@ public:
 //             STEP("computeError.pw.nan");
 //             return;
 //         }
-
 //         STEP("computeError.line");
 //         Eigen::Vector3d n = Lw_.head<3>();
 //         Eigen::Vector3d v = Lw_.tail<3>();
@@ -2575,7 +2946,6 @@ public:
 //             STEP("computeError.line.nan");
 //             return;
 //         }
-
 //         double vn = v.norm();
 //         if(!(vn > 1e-9) || !std::isfinite(vn)){
 //             // 退化线：给一个默认方向，保证不炸
@@ -2583,10 +2953,8 @@ public:
 //             vn = 1.0;
 //         }
 //         const Eigen::Vector3d vnorm = v / vn;
-
 //         STEP("computeError.p0");
 //         const Eigen::Vector3d p0 = v.cross(n) / (vn * vn);
-
 //         STEP("computeError.r");
 //         const Eigen::Vector3d r = (pw - p0).cross(vnorm);
 //         if(!r.allFinite()){
@@ -2594,15 +2962,12 @@ public:
 //             STEP("computeError.r.nan");
 //             return;
 //         }
-
 //         _error = r;
 //         STEP("computeError.end");
 //     }
-
 //     void linearizeOplus() override
 //     {
 //         STEP("linearize.begin");
-
 //         const auto* vPose  = static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
 //         const auto* vDepth = static_cast<const VertexDepth*>(vertex(1));
 //         if(!vPose || !vDepth){
@@ -2611,7 +2976,6 @@ public:
 //             STEP("linearize.nullVertex");
 //             return;
 //         }
-
 //         // ---------- 强制检查 Jacobian 尺寸（非常关键） ----------
 //         // g2o 正常情况下：Xi=3x6, Xj=3x1
 //         if(_jacobianOplusXi.rows()!=3 || _jacobianOplusXi.cols()!=6 ||
@@ -2628,12 +2992,9 @@ public:
 //             STEP("linearize.badJacSize");
 //             return;
 //         }
-
 //         STEP("linearize.inputs");
-
 //         double d = vDepth->estimate();
 //         if(!(d > 0.0) || !std::isfinite(d)) d = 1e-3;
-
 //         const Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
 //         if(!ray.allFinite()){
 //             _jacobianOplusXi.setZero();
@@ -2641,9 +3002,7 @@ public:
 //             STEP("linearize.ray.nan");
 //             return;
 //         }
-
 //         const Eigen::Vector3d pc = d * ray;
-
 //         STEP("linearize.Rwc");
 //         const g2o::SE3Quat Twc = vPose->estimate().inverse();
 //         const Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
@@ -2653,7 +3012,6 @@ public:
 //             STEP("linearize.Rwc.nan");
 //             return;
 //         }
-
 //         STEP("linearize.vnorm");
 //         Eigen::Vector3d v = Lw_.tail<3>();
 //         double vn = v.norm();
@@ -2662,27 +3020,21 @@ public:
 //             vn = 1.0;
 //         }
 //         const Eigen::Vector3d vnorm = v / vn;
-
 //         STEP("linearize.R");
 //         const Eigen::Matrix3d R = skew(vnorm); // e = [v]x (pw - p0)
-
 //         // ---------- Pose Jacobian ----------
 //         STEP("linearize.dpw_dxi");
 //         Eigen::Matrix<double,3,6> dpw_dxi;
 //         dpw_dxi.block<3,3>(0,0) = -Rwc * skew(pc); // d pw / d omega
 //         dpw_dxi.block<3,3>(0,3) = -Rwc;            // d pw / d rho
-
 //         STEP("linearize.JXi");
 //         _jacobianOplusXi.noalias() = R * dpw_dxi;
-
 //         // ---------- Depth Jacobian ----------
 //         STEP("linearize.dpw_dd");
 //         const Eigen::Vector3d dpw_dd = Rwc * ray;
-
 //         STEP("linearize.JXj");
 //         _jacobianOplusXj.setZero();
 //         _jacobianOplusXj.col(0).noalias() = R * dpw_dd; // = vnorm x dpw_dd
-
 //         STEP("linearize.finiteCheck");
 //         if(!_jacobianOplusXi.allFinite() || !_jacobianOplusXj.allFinite()){
 //             _jacobianOplusXi.setZero();
@@ -2690,15 +3042,12 @@ public:
 //             STEP("linearize.nan");
 //             return;
 //         }
-
 //         // ✅ 放在 finiteCheck 后
 //         dbg_J_pose  = _jacobianOplusXi; //debug jacobian
 //         dbg_J_depth = _jacobianOplusXj;
 //         dbg_jac_updated = true;
-
 //         STEP("linearize.end");
 //     }
-
 // private:
 //     Eigen::Vector2d px_;
 //     Eigen::Matrix3d K_inv_;
@@ -2736,7 +3085,7 @@ public:
 
 private:
 #ifndef JAC_CHECK_DEBUG
-#define JAC_CHECK_DEBUG 1
+#define JAC_CHECK_DEBUG 0   
 #endif
 
 #if JAC_CHECK_DEBUG
@@ -2853,8 +3202,8 @@ public:
             return;
         }
 
-        std::cout << "[INFO] linearize vertex ids: pose=" << vPose->id()
-                << ", depth=" << vDepth->id() << std::endl;
+        //std::cout << "[INFO] linearize vertex ids: pose=" << vPose->id()
+        //        << ", depth=" << vDepth->id() << std::endl;
 
         double d = vDepth->estimate();
         if (!(d > 0.0) || !std::isfinite(d)) {
@@ -2869,7 +3218,7 @@ public:
             _jacobianOplusXj.setZero();
             return;
         }
-        std::cout << "[DBG] ray = " << ray.transpose() << std::endl;
+        //std::cout << "[DBG] ray = " << ray.transpose() << std::endl;
 
         const Eigen::Vector3d pc = d * ray;
         if (!pc.allFinite()) {
@@ -2880,7 +3229,7 @@ public:
         }
 
         const g2o::SE3Quat Twc = vPose->estimate().inverse();
-        std::cout << "[DBG] Twc translation = " << Twc.translation().transpose() << std::endl;
+        //std::cout << "[DBG] Twc translation = " << Twc.translation().transpose() << std::endl;
         const Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
         if (!Rwc.allFinite()) {
             std::cerr << "[ERR] Rwc not finite!" << std::endl;
@@ -2906,7 +3255,7 @@ public:
         }
 
         const Eigen::Matrix3d R = -skew(vnorm);
-        std::cout << "[DBG] R = \n" << R << std::endl;
+        //std::cout << "[DBG] R = \n" << R << std::endl;
         if (!R.allFinite()) {
             std::cerr << "[ERR] R = skew(vnorm) is not finite!" << std::endl;
             _jacobianOplusXi.setZero();
@@ -2935,9 +3284,9 @@ public:
             _jacobianOplusXj.setZero();
             return;
         }
-        std::cout << "[DBG] dpw_dd = " << dpw_dd.transpose() << std::endl;
+        //std::cout << "[DBG] dpw_dd = " << dpw_dd.transpose() << std::endl;
         _jacobianOplusXj.col(0).noalias() = R * dpw_dd;
-        std::cout << "[DBG] J_depth = " << _jacobianOplusXj.col(0).transpose() << std::endl;
+        //std::cout << "[DBG] J_depth = " << _jacobianOplusXj.col(0).transpose() << std::endl;
 
         // Save for debug
         dbg_J_pose  = _jacobianOplusXi;

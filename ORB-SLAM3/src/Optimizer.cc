@@ -2568,6 +2568,309 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     pMap->IncreaseChangeIndex();
 }
 
+void Optimizer::TestEdgeSE3ProjectLine_PoseAndPoints()
+{
+    using namespace g2o;
+
+    std::cout << "\n============================================\n";
+    std::cout << " EdgeSE3ProjectLine_PoseAndPoints Jacobian Check\n";
+    std::cout << "============================================\n";
+
+    // --------------------------------------------------
+    // 构造 edge
+    // --------------------------------------------------
+    auto* edge = new EdgeSE3ProjectLine_PoseAndPoints();
+    edge->SetCameraIntrinsics(500, 500, 320, 240);
+    edge->SetObservedLineByEndpoints(100, 100, 400, 200);
+
+    // --------------------------------------------------
+    // Pose
+    // --------------------------------------------------
+    auto* vPose = new VertexSE3Expmap();
+    vPose->setId(0);
+    vPose->setEstimate(SE3Quat(
+        Eigen::Quaterniond::Identity(),
+        Eigen::Vector3d(0.1, 0.2, 0.3)));
+
+    // --------------------------------------------------
+    // Points
+    // --------------------------------------------------
+    auto* vP1 = new VertexSBAPointXYZ();
+    vP1->setId(1);
+    vP1->setEstimate(Eigen::Vector3d(1.0, 0.5, 4.0));
+
+    auto* vP2 = new VertexSBAPointXYZ();
+    vP2->setId(2);
+    vP2->setEstimate(Eigen::Vector3d(1.2, 0.6, 4.2));
+
+    edge->setVertex(0, vPose);
+    edge->setVertex(1, vP1);
+    edge->setVertex(2, vP2);
+
+    // --------------------------------------------------
+    // 解析 Jacobian
+    // --------------------------------------------------
+    edge->computeError();
+    edge->linearizeOplus();
+
+    Eigen::Matrix<double,2,6> Jpose_ana = edge->JPose();
+    Eigen::Matrix<double,2,3> Jp1_ana   = edge->JP1();
+    Eigen::Matrix<double,2,3> Jp2_ana   = edge->JP2();
+
+    // --------------------------------------------------
+    // 数值 Jacobian：Pose（用 setEstimate 备份恢复，避免 6/7 维 estimateData 坑）
+    // --------------------------------------------------
+    Eigen::Matrix<double,2,6> Jpose_num;
+    Jpose_num.setZero();
+
+    const SE3Quat pose_backup = vPose->estimate();
+
+    for(int i = 0; i < 6; ++i)
+    {
+        Eigen::Matrix<double,6,1> dx = Eigen::Matrix<double,6,1>::Zero();
+
+        const double eps_i = (i < 3) ? 1e-6 : 1e-4; // rot(rad) / trans(m)
+        dx[i] = eps_i;
+
+        // +eps
+        vPose->setEstimate(pose_backup);
+        vPose->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_plus = edge->error();
+
+        // -eps
+        vPose->setEstimate(pose_backup);
+        dx[i] = -eps_i;
+        vPose->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_minus = edge->error();
+
+        // restore
+        vPose->setEstimate(pose_backup);
+
+        Jpose_num.col(i) = (e_plus - e_minus) / (2.0 * eps_i);
+    }
+
+    // --------------------------------------------------
+    // 数值 Jacobian：Point 1（同样用 setEstimate 备份恢复）
+    // --------------------------------------------------
+    Eigen::Matrix<double,2,3> Jp1_num;
+    Jp1_num.setZero();
+
+    const Eigen::Vector3d p1_backup = vP1->estimate();
+
+    for(int i = 0; i < 3; ++i)
+    {
+        Eigen::Vector3d dx = Eigen::Vector3d::Zero();
+        const double eps_p = 1e-6;
+        dx[i] = eps_p;
+
+        // +eps
+        vP1->setEstimate(p1_backup);
+        vP1->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_plus = edge->error();
+
+        // -eps
+        vP1->setEstimate(p1_backup);
+        dx[i] = -eps_p;
+        vP1->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_minus = edge->error();
+
+        // restore
+        vP1->setEstimate(p1_backup);
+
+        Jp1_num.col(i) = (e_plus - e_minus) / (2.0 * eps_p);
+    }
+
+    // --------------------------------------------------
+    // 数值 Jacobian：Point 2
+    // --------------------------------------------------
+    Eigen::Matrix<double,2,3> Jp2_num;
+    Jp2_num.setZero();
+
+    const Eigen::Vector3d p2_backup = vP2->estimate();
+
+    for(int i = 0; i < 3; ++i)
+    {
+        Eigen::Vector3d dx = Eigen::Vector3d::Zero();
+        const double eps_p = 1e-6;
+        dx[i] = eps_p;
+
+        // +eps
+        vP2->setEstimate(p2_backup);
+        vP2->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_plus = edge->error();
+
+        // -eps
+        vP2->setEstimate(p2_backup);
+        dx[i] = -eps_p;
+        vP2->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_minus = edge->error();
+
+        // restore
+        vP2->setEstimate(p2_backup);
+
+        Jp2_num.col(i) = (e_plus - e_minus) / (2.0 * eps_p);
+    }
+
+    // --------------------------------------------------
+    // 打印对比
+    // --------------------------------------------------
+    auto print_diff = [](const std::string& name,
+                         const auto& A,
+                         const auto& B)
+    {
+        std::cout << "\n==== " << name << " ====\n";
+        std::cout << "Analytic:\n" << A << "\n\n";
+        std::cout << "Numeric:\n" << B << "\n\n";
+        std::cout << "Max |diff| = "
+                  << (A - B).cwiseAbs().maxCoeff()
+                  << "\n";
+    };
+
+    print_diff("Pose Jacobian",   Jpose_ana, Jpose_num);
+    print_diff("Point1 Jacobian", Jp1_ana,   Jp1_num);
+    print_diff("Point2 Jacobian", Jp2_ana,   Jp2_num);
+
+    // --------------------------------------------------
+    // cleanup
+    // --------------------------------------------------
+    delete edge;
+    delete vPose;
+    delete vP1;
+    delete vP2;
+}
+
+void Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine()
+{
+    using namespace g2o;
+
+    std::cout << "\n============================================\n";
+    std::cout << "EdgeSE3ProjectLineXYZOnlyPose_PointToLine Jacobian Check\n";
+    std::cout << "============================================\n";
+
+    constexpr double eps = 1e-6;
+
+    // --------------------------------------------------
+    // 构造 edge
+    // --------------------------------------------------
+    std::cout << "Creating edge..." << std::endl;
+    auto* edge = new EdgeSE3ProjectLineXYZOnlyPose_PointToLine();
+    edge->SetCameraIntrinsics(500, 500, 320, 240);
+    edge->SetObservedLineByEndpoints(100, 100, 400, 200);
+
+    // --------------------------------------------------
+    // Pose
+    // --------------------------------------------------
+    std::cout << "Creating vPose..." << std::endl;
+    auto* vPose = new VertexSE3Expmap();
+    vPose->setId(0);
+    vPose->setEstimate(SE3Quat(Eigen::Quaterniond::Identity(), Eigen::Vector3d(0.1, 0.2, 0.3)));
+    edge->setVertex(0, vPose);  // 确保正确绑定
+    std::cout << "vPose estimate: " << vPose->estimate().translation().transpose() << std::endl;
+
+    // --------------------------------------------------
+    // Points (dummy, not used in this edge)
+    // --------------------------------------------------
+    std::cout << "Creating points vP1 and vP2..." << std::endl;
+    auto* vP1 = new VertexSBAPointXYZ();
+    vP1->setId(1);
+    vP1->setEstimate(Eigen::Vector3d(1.0, 0.5, 4.0));
+
+    auto* vP2 = new VertexSBAPointXYZ();
+    vP2->setId(2);
+    vP2->setEstimate(Eigen::Vector3d(1.2, 0.6, 4.2));
+
+    edge->setVertex(1, vP1);  // 添加到 edge
+    edge->setVertex(2, vP2);  // 添加到 edge
+
+    // --------------------------------------------------
+    // 确保 SetXw 正确调用
+    // --------------------------------------------------
+    std::cout << "Setting world coordinates Xw..." << std::endl;
+    edge->SetXw(Eigen::Vector3d(1.0, 0.0, 5.0), Eigen::Vector3d(1.2, 0.1, 5.1));
+
+    // --------------------------------------------------
+    // 解析 Jacobian
+    // --------------------------------------------------
+    std::cout << "Computing error and linearizing..." << std::endl;
+    edge->computeError();
+    edge->linearizeOplus();
+    std::cout << "Error: " << edge->error().transpose() << std::endl;
+    Eigen::Matrix<double,2,6> Jpose_ana = edge->JPose();
+    std::cout << "Analytic Jacobian: \n" << Jpose_ana << std::endl;
+
+    // --------------------------------------------------
+    // 数值 Jacobian：Pose
+    // --------------------------------------------------
+    Eigen::Matrix<double,2,6> Jpose_num;
+    Jpose_num.setZero();
+
+    const SE3Quat pose_backup = vPose->estimate(); // 保存 pose
+
+    for(int i = 0; i < 6; ++i)
+    {
+        Eigen::Matrix<double,6,1> dx = Eigen::Matrix<double,6,1>::Zero();
+
+        // 分别对旋转和平移采用不同的 eps
+        double eps_i = (i < 3) ? 1e-6 : 1e-4;  // 旋转用较小 eps，平移稍大
+        dx[i] = eps_i;
+
+        std::cout << "Testing with perturbation dx[" << i << "] = " << eps_i << std::endl;
+
+        // +eps
+        vPose->setEstimate(pose_backup);
+        vPose->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_plus = edge->error();
+        std::cout << "e_plus: " << e_plus.transpose() << std::endl;
+
+        // -eps
+        vPose->setEstimate(pose_backup);
+        dx[i] = -eps_i;
+        vPose->oplus(dx.data());
+        edge->computeError();
+        Eigen::Vector2d e_minus = edge->error();
+        std::cout << "e_minus: " << e_minus.transpose() << std::endl;
+
+        // 恢复
+        vPose->setEstimate(pose_backup);
+
+        // 使用中央差分法
+        Jpose_num.col(i) = (e_plus - e_minus) / (2.0 * eps_i);
+    }
+
+    // --------------------------------------------------
+    // 打印对比结果
+    // --------------------------------------------------
+    auto print_diff = [](const std::string& name,
+                         const auto& A,
+                         const auto& B)
+    {
+        std::cout << "\n==== " << name << " ====\n";
+        std::cout << "Analytic:\n" << A << "\n\n";
+        std::cout << "Numeric:\n" << B << "\n\n";
+        std::cout << "Max |diff| = "
+                  << (A - B).cwiseAbs().maxCoeff()
+                  << "\n";
+    };
+
+    print_diff("Pose Jacobian", Jpose_ana, Jpose_num);
+
+    // --------------------------------------------------
+    // cleanup
+    // --------------------------------------------------
+    std::cout << "Cleaning up..." << std::endl;
+    delete edge;
+    delete vPose;
+    delete vP1;
+    delete vP2;
+}
+
 void Optimizer::LocalBundleAdjustmentWithLine(
     KeyFrame *pKF,
     bool* pbStopFlag,
@@ -3889,6 +4192,271 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker(
     pMap->IncreaseChangeIndex();
 }
 
+Eigen::Matrix<double,6,1> Optimizer::NormalizePluckerLine(const Eigen::Matrix<double,6,1>& L)
+{
+    Eigen::Vector3d n = L.head<3>();
+    Eigen::Vector3d v = L.tail<3>();
+
+    // 如果 n 为 0 向量，不能归一化
+    if (n.norm() < 1e-10) return L;
+
+    // 强制正交： v' = v - proj_n(v)
+    Eigen::Vector3d v_proj = v - n * (n.dot(v) / n.squaredNorm());
+
+    Eigen::Matrix<double,6,1> Ln;
+    Ln.head<3>() = n;
+    Ln.tail<3>() = v_proj;
+    // 👉 打印正交约束是否满足
+    std::cout << "n·v = " << n.dot(v_proj) << std::endl;
+    return Ln;
+}
+
+void Optimizer::TestPluckerLineEdgeJacobian() {
+
+    cout << "[Main] Start\n";
+
+    // --- 1. 创建顶点 ---
+    cout << "[Main] Creating pose vertex\n";
+    auto* vPose = new g2o::VertexSE3Expmap();
+    vPose->setId(0);
+    vPose->setEstimate(g2o::SE3Quat()); // Identity pose
+
+    cout << "[Main] Creating line vertex\n";
+    auto* vLine = new VertexLinePlucker();
+    vLine->setId(1);
+    Eigen::Matrix<double,6,1> Lw;
+    Lw << 0.0, 1.0, 0.0,    // direction
+          0.0, 0.0, 1.0;    // moment
+    vLine->setEstimate(Lw);
+
+    // --- 2. 构建边 ---
+    cout << "[Main] Creating edge\n";
+    auto* edge = new EdgeSE3ProjectPluckerLine_PoseAndLine();
+    edge->resize(2); // VERY IMPORTANT
+    edge->setVertex(0, vPose);
+    edge->setVertex(1, vLine);
+    edge->SetCameraIntrinsics(500, 500, 320, 240);
+    edge->SetObservedLineABC(1.0, 0.0, -320);
+
+    // --- 3. 计算误差和 Jacobian ---
+    cout << "[Main] computeError + linearizeOplus\n";
+    edge->computeError();
+    edge->linearizeOplus();
+
+    auto J_pose_analytic = edge->getJacobianPose();
+    auto J_line_analytic = edge->getJacobianLine();
+
+    // --- 4. 数值 Jacobian ---
+    double eps = 1e-6;
+
+    Eigen::Matrix<double,2,6> J_pose_numeric;
+    for (int i = 0; i < 6; ++i)
+    {
+        g2o::VertexSE3Expmap tempPose = *vPose;
+
+        Eigen::Matrix<double,6,1> epsVec = Eigen::Matrix<double,6,1>::Zero();
+        epsVec[i] = eps;
+
+        g2o::SE3Quat dT = g2o::SE3Quat::exp(epsVec);
+        tempPose.setEstimate(dT * vPose->estimate());
+
+        edge->setVertex(0, &tempPose);
+        edge->computeError();
+        Eigen::Vector2d err_plus = edge->error();
+
+        epsVec[i] = -eps;
+        dT = g2o::SE3Quat::exp(epsVec);
+        tempPose.setEstimate(dT * vPose->estimate());
+
+        edge->setVertex(0, &tempPose);
+        edge->computeError();
+        Eigen::Vector2d err_minus = edge->error();
+
+        J_pose_numeric.col(i) = (err_plus - err_minus) / (2 * eps);
+    }
+
+    Eigen::Matrix<double,2,6> J_line_numeric;
+    for (int i = 0; i < 6; ++i)
+    {
+        VertexLinePlucker tempLine = *vLine;
+        Eigen::Matrix<double,6,1> L = vLine->estimate();
+        Eigen::Matrix<double,6,1> dL = Eigen::Matrix<double,6,1>::Zero();
+        dL[i] = eps;
+        tempLine.setEstimate(NormalizePluckerLine(L + dL));
+        edge->setVertex(1, &tempLine);
+        edge->computeError();
+        Eigen::Vector2d err_plus = edge->error();
+
+        tempLine.setEstimate(NormalizePluckerLine(L - dL));
+        edge->setVertex(1, &tempLine);
+        edge->computeError();
+        Eigen::Vector2d err_minus = edge->error();
+
+        J_line_numeric.col(i) = (err_plus - err_minus) / (2 * eps);
+    }
+
+    // --- 5. 打印结果 ---
+    cout << "\n=== Pose Jacobian ===" << endl;
+    cout << "Analytic:\n" << J_pose_analytic << endl;
+    cout << "Numeric:\n" << J_pose_numeric << endl;
+    cout << "Diff:\n" << J_pose_analytic - J_pose_numeric << endl;
+
+    cout << "\n=== Line Jacobian ===" << endl;
+    cout << "Analytic:\n" << J_line_analytic << endl;
+    cout << "Numeric:\n" << J_line_numeric << endl;
+    cout << "Diff:\n" << J_line_analytic - J_line_numeric << endl;
+
+    // === 检查每一列差异，定位最大误差的列 ===
+    std::cout << "\n=== Per-column Difference for Line Jacobian ===" << std::endl;
+
+    double max_error = 0.0;
+    int max_col = -1;
+
+    for (int i = 0; i < 6; ++i)
+    {
+        Eigen::Vector2d diff = J_line_analytic.col(i) - J_line_numeric.col(i);
+        double norm = diff.norm();
+        std::cout << "Column " << i << " diff norm = " << norm
+                  << ", diff = " << diff.transpose() << std::endl;
+
+        if (norm > max_error)
+        {
+            max_error = norm;
+            max_col = i;
+        }
+
+    }
+
+    std::cout << ">> Max error at column " << max_col << ", norm = " << max_error << std::endl;
+
+    cout << "[Main] Done\n";
+
+    // cout << "[Main] Start\n";
+
+    // // 创建顶点
+    // cout << "[Main] Creating pose vertex\n";
+    // auto* vPose = new g2o::VertexSE3Expmap();
+    // vPose->setId(0);
+    // vPose->setEstimate(g2o::SE3Quat()); // identity pose
+
+    // cout << "[Main] Creating line vertex\n";
+    // auto* vLine = new VertexLinePlucker();
+    // vLine->setId(1);
+    // Eigen::Matrix<double,6,1> Lw;
+    // Lw << 0.0, 1.0, 0.0,    // direction
+    //       0.0, 0.0, 1.0;    // moment
+    // vLine->setEstimate(Lw);
+
+    // cout << "[Main] Creating edge\n";
+    // auto* edge = new EdgeSE3ProjectPluckerLine_PoseAndLine();
+    // edge->resize(2);  // VERY IMPORTANT
+    // edge->setVertex(0, vPose);
+    // edge->setVertex(1, vLine);
+    // edge->SetCameraIntrinsics(500, 500, 320, 240);
+    // edge->SetObservedLineABC(1.0, 0.0, -320);
+
+    // cout << "[Main] computeError + linearizeOplus\n";
+    // edge->computeError();
+    // edge->linearizeOplus();
+
+    // cout << "[Main] Extracting analytic Jacobians\n";
+    // //std::cout << "Jacobian vector size: " << edge->jacobians().size() << std::endl;
+    // auto J_pose_analytic = edge->getJacobianPose();
+    // std::cerr << "J_pose_analytic: \n" << J_pose_analytic << std::endl;
+    // auto J_line_analytic = edge->getJacobianLine();
+
+    // cout << "[Main] Computing numerical Jacobians\n";
+    // auto J_pose_numeric = ComputeNumericalJacobianPose(edge, vPose);
+    // auto J_line_numeric = ComputeNumericalJacobianLine(edge, vLine);
+
+    // cout << "\n=== Pose Jacobian ===" << endl;
+    // cout << "Analytic:\n" << J_pose_analytic << endl;
+    // cout << "Numeric:\n" << J_pose_numeric << endl;
+    // cout << "Diff:\n" << J_pose_analytic - J_pose_numeric << endl;
+
+    // cout << "\n=== Line Jacobian ===" << endl;
+    // cout << "Analytic:\n" << J_line_analytic << endl;
+    // cout << "Numeric:\n" << J_line_numeric << endl;
+    // cout << "Diff:\n" << J_line_analytic - J_line_numeric << endl;
+
+    // cout << "[Main] Done\n";
+}
+
+Eigen::Matrix<double,2,6> Optimizer::ComputeNumericalJacobianPose(
+    ORB_SLAM3::EdgeSE3ProjectPluckerLine_PoseAndLine* edge,
+    g2o::VertexSE3Expmap* vPose)
+{
+    cout << "[NumJacPose] Start\n";
+    Eigen::Matrix<double,2,6> Jnum;
+    const double eps = 1e-6;
+    g2o::SE3Quat T0 = vPose->estimate();
+
+    for (int i = 0; i < 6; ++i) {
+        Eigen::Matrix<double,6,1> d;
+        d.setZero(); d[i] = eps;
+
+        g2o::SE3Quat T_plus = g2o::SE3Quat::exp(d) * T0;
+        g2o::SE3Quat T_minus = g2o::SE3Quat::exp(-d) * T0;
+
+        vPose->setEstimate(T_plus);
+        edge->computeError();
+        Eigen::Vector2d err_plus = edge->error();
+
+        vPose->setEstimate(T_minus);
+        edge->computeError();
+        Eigen::Vector2d err_minus = edge->error();
+
+        if (!err_plus.allFinite() || !err_minus.allFinite()) {
+            cerr << "[WARN] NaN in pose diff i=" << i << endl;
+            Jnum.col(i).setZero();
+        } else {
+            Jnum.col(i) = (err_plus - err_minus) / (2.0 * eps);
+        }
+    }
+
+    vPose->setEstimate(T0);
+    edge->computeError();
+    cout << "[NumJacPose] Done\n";
+    return Jnum;
+}
+
+Eigen::Matrix<double,2,6> Optimizer::ComputeNumericalJacobianLine(
+    ORB_SLAM3::EdgeSE3ProjectPluckerLine_PoseAndLine* edge,
+    ORB_SLAM3::VertexLinePlucker* vLine)
+{
+    cout << "[NumJacLine] Start\n";
+    Eigen::Matrix<double,2,6> Jnum;
+    const double eps = 1e-6;
+    Eigen::Matrix<double,6,1> L0 = vLine->estimate();
+
+    for (int i = 0; i < 6; ++i) {
+        Eigen::Matrix<double,6,1> Lp = L0;
+        Eigen::Matrix<double,6,1> Lm = L0;
+        Lp(i) += eps;
+        Lm(i) -= eps;
+
+        vLine->setEstimate(Lp);
+        edge->computeError();
+        Eigen::Vector2d err_plus = edge->error();
+
+        vLine->setEstimate(Lm);
+        edge->computeError();
+        Eigen::Vector2d err_minus = edge->error();
+
+        if (!err_plus.allFinite() || !err_minus.allFinite()) {
+            cerr << "[WARN] NaN in line diff i=" << i << endl;
+            Jnum.col(i).setZero();
+        } else {
+            Jnum.col(i) = (err_plus - err_minus) / (2.0 * eps);
+        }
+    }
+
+    vLine->setEstimate(L0);
+    edge->computeError();
+    cout << "[NumJacLine] Done\n";
+    return Jnum;
+}
+
 void Optimizer::TestPluckerLinesBundleEdge()
 {
     // // solver
@@ -4272,7 +4840,6 @@ std::cout << "==== Numerical Jacobian Check (Scheme A: right-multiplicative) ===
     delete vPoseB;
     delete vDepthB;
 }
-
 
 
 void Optimizer::TestNumericalJacobian_PointToPlucker()
@@ -5131,7 +5698,8 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(
 
 }
 
-
+//fixed clashing vertex id issue and the depth is optimized(but some depth vertices are too large/small, need to fix the issue, 
+//(convert the depth and plucker line to two 3D endpoints and re-compute the plucker line from the two endpoints)? the process may be wrong)
 void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(
     KeyFrame *pKF,
     bool* pbStopFlag,

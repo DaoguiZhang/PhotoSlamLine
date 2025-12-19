@@ -402,19 +402,25 @@ void LocalMapping::RunWithLine()
                         MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
                         //Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
                         ///修改LocalBundleAdjustment，把这个写完，明天调试这些代码，如果能调试好，几乎所有都做好了。后面对于全局的相机优化，是否再弄一下，需要调整一下。
+                        //Optimizer::TestEdgeSE3ProjectLine_PoseAndPoints(); //debug, 
+                        //Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine(); //debug, 点到线的误差边的雅可比矩阵测试函数
+                        std::cerr <<"------end test-------" << std::endl;
                         //Optimizer::LocalBundleAdjustmentWithLine(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
-                        //Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        //Optimizer::TestPluckerLineEdgeJacobian(); //debug, plucker line(6x1)投影误差边的雅可比矩阵测试函数
+                        std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker" << std::endl;
+                        Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;
+                        std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLinesPlucker" << std::endl;
 
                         //Optimizer::TestPluckerLinesBundleEdge();
                         //Optimizer::TestNumericalJacobian_PointToPlucker();
                         //std::cerr <<"------end test-------" << std::endl;
-                        std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker_Alternating" << std::endl;
-                        //Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
-                        Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
-                        //LocalBundleAdjustmentWithLinesPlucker_Alternating
-                        b_doneLBA = true;
-                        std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;
-                        std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLinesPlucker_Alternating" << std::endl;
+                        // std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker_Alternating" << std::endl;
+                        // //Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        // Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        // b_doneLBA = true;
+                        // std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;
+                        // std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLinesPlucker_Alternating" << std::endl;
                         mpAtlas->pushMappingOperation(opr);
                     }
 

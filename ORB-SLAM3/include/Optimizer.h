@@ -45,6 +45,7 @@
 #include <Thirdparty/g2o/g2o/core/base_binary_edge.h> 
 #include <Thirdparty/g2o/g2o/core/base_multi_edge.h>
 
+#include "VertexToLinePlucker.h"
 #include "OptimizableTypes.h"
 #include "util_slam.h"
 
@@ -79,7 +80,19 @@ public:
     
     void static LocalBundleAdjustmentWithLinesPluckerOld(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPlucker(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
+    void static TestPluckerLineEdgeJacobian();
     //debug function
+    void static TestEdgeSE3ProjectLine_PoseAndPoints();
+    void static TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine();
+    static Eigen::Matrix<double,6,1> NormalizePluckerLine(const Eigen::Matrix<double,6,1>& L);
+    static Eigen::Matrix<double, 2, 6> ComputeNumericalJacobianPose(
+        ORB_SLAM3::EdgeSE3ProjectPluckerLine_PoseAndLine* edge,
+        g2o::VertexSE3Expmap* vPose);
+    static Eigen::Matrix<double,2,6> ComputeNumericalJacobianLine(
+        ORB_SLAM3::EdgeSE3ProjectPluckerLine_PoseAndLine* edge,
+        ORB_SLAM3::VertexLinePlucker* vLine);
+
+
     void static TestPluckerLinesBundleEdge();
     void static CheckJacobianNumerical();
     void static TestNumericalJacobian_PointToPlucker();
