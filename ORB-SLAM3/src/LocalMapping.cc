@@ -409,7 +409,8 @@ void LocalMapping::RunWithLine()
                         //Optimizer::TestNumericalJacobian_PointToPlucker();
                         //std::cerr <<"------end test-------" << std::endl;
                         std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker_Alternating" << std::endl;
-                        Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        //Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
                         //LocalBundleAdjustmentWithLinesPlucker_Alternating
                         b_doneLBA = true;
                         std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;

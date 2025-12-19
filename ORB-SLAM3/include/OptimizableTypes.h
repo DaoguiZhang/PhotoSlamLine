@@ -2828,61 +2828,201 @@ public:
     // =====================================================
     // linearizeOplus  (✔ numerically verified)
     // =====================================================
+
     void linearizeOplus() override
     {
         STEP("linearize.begin");
 
-        const auto* vPose  =
-            static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
-        const auto* vDepth =
-            static_cast<const VertexDepth*>(vertex(1));
+        const auto* vPoseRaw  = vertex(0);
+        const auto* vDepthRaw = vertex(1);
 
-        if(!vPose || !vDepth){
+        if (!vPoseRaw || !vDepthRaw) {
+            std::cerr << "[ERR] vertex null (vPoseRaw or vDepthRaw)" << std::endl;
             _jacobianOplusXi.setZero();
             _jacobianOplusXj.setZero();
             return;
         }
 
-        double d = vDepth->estimate();
-        if(!(d > 0.0) || !std::isfinite(d))
-            d = 1e-3;
+        auto* vPose  = dynamic_cast<const g2o::VertexSE3Expmap*>(vPoseRaw);
+        auto* vDepth = dynamic_cast<const VertexDepth*>(vDepthRaw);
 
-        const Eigen::Vector3d ray =
-            K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
+        if (!vPose || !vDepth) {
+            std::cerr << "[ERR] vertex cast failed." << std::endl;
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
+
+        std::cout << "[INFO] linearize vertex ids: pose=" << vPose->id()
+                << ", depth=" << vDepth->id() << std::endl;
+
+        double d = vDepth->estimate();
+        if (!(d > 0.0) || !std::isfinite(d)) {
+            std::cerr << "[WARN] invalid depth: " << d << std::endl;
+            d = 1e-3;
+        }
+
+        const Eigen::Vector3d ray = K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
+        if (!ray.allFinite()) {
+            std::cerr << "[ERR] ray is not finite: " << ray.transpose() << std::endl;
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
+        std::cout << "[DBG] ray = " << ray.transpose() << std::endl;
+
         const Eigen::Vector3d pc = d * ray;
+        if (!pc.allFinite()) {
+            std::cerr << "[ERR] pc is not finite: " << pc.transpose() << std::endl;
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
 
         const g2o::SE3Quat Twc = vPose->estimate().inverse();
-        const Eigen::Matrix3d Rwc =
-            Twc.rotation().toRotationMatrix();
+        std::cout << "[DBG] Twc translation = " << Twc.translation().transpose() << std::endl;
+        const Eigen::Matrix3d Rwc = Twc.rotation().toRotationMatrix();
+        if (!Rwc.allFinite()) {
+            std::cerr << "[ERR] Rwc not finite!" << std::endl;
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
 
         Eigen::Vector3d v = Lw_.tail<3>();
         double vn = v.norm();
-        if(!(vn > 1e-9))
-            v = Eigen::Vector3d(1,0,0), vn = 1.0;
+        if (!(vn > 1e-9)) {
+            std::cerr << "[WARN] v.norm() too small. Resetting." << std::endl;
+            v = Eigen::Vector3d(1, 0, 0);
+            vn = 1.0;
+        }
 
         const Eigen::Vector3d vnorm = v / vn;
+        if (!vnorm.allFinite()) {
+            std::cerr << "[ERR] vnorm is not finite: " << vnorm.transpose() << std::endl;
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
 
-        // ⭐ 核心修正：负号
         const Eigen::Matrix3d R = -skew(vnorm);
+        std::cout << "[DBG] R = \n" << R << std::endl;
+        if (!R.allFinite()) {
+            std::cerr << "[ERR] R = skew(vnorm) is not finite!" << std::endl;
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
 
-        // ---- pose Jacobian ----
-        Eigen::Matrix<double,3,6> dpw_dxi;
-        //dpw_dxi.block<3,3>(0,0) = -Rwc * skew(pc);
+        // --- Pose Jacobian ---
+        Eigen::Matrix<double, 3, 6> dpw_dxi;
         dpw_dxi.block<3,3>(0,0) = Rwc * skew(pc);
         dpw_dxi.block<3,3>(0,3) = -Rwc;
 
+        if (!dpw_dxi.allFinite()) {
+            std::cerr << "[ERR] dpw_dxi not finite!" << std::endl;
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+            return;
+        }
+
         _jacobianOplusXi.noalias() = R * dpw_dxi;
 
-        // ---- depth Jacobian ----
+        // --- Depth Jacobian ---
         const Eigen::Vector3d dpw_dd = Rwc * ray;
+        if (!dpw_dd.allFinite()) {
+            std::cerr << "[ERR] dpw_dd not finite: " << dpw_dd.transpose() << std::endl;
+            _jacobianOplusXj.setZero();
+            return;
+        }
+        std::cout << "[DBG] dpw_dd = " << dpw_dd.transpose() << std::endl;
         _jacobianOplusXj.col(0).noalias() = R * dpw_dd;
+        std::cout << "[DBG] J_depth = " << _jacobianOplusXj.col(0).transpose() << std::endl;
 
+        // Save for debug
         dbg_J_pose  = _jacobianOplusXi;
         dbg_J_depth = _jacobianOplusXj;
         dbg_jac_updated = true;
 
         STEP("linearize.end");
     }
+
+
+    // void linearizeOplus() override
+    // {
+    //     STEP("linearize.begin");
+
+    //     const auto* vPose  =
+    //         static_cast<const g2o::VertexSE3Expmap*>(vertex(0));
+    //     const auto* vDepth =
+    //         static_cast<const VertexDepth*>(vertex(1));
+
+    //     if(!vPose || !vDepth){
+    //         _jacobianOplusXi.setZero();
+    //         _jacobianOplusXj.setZero();
+    //         return;
+    //     }
+
+    //     double d = vDepth->estimate();
+    //     if(!(d > 0.0) || !std::isfinite(d))
+    //         d = 1e-3;
+
+    //     const Eigen::Vector3d ray =
+    //         K_inv_ * Eigen::Vector3d(px_.x(), px_.y(), 1.0);
+    //     const Eigen::Vector3d pc = d * ray;
+
+    //     const g2o::SE3Quat Twc = vPose->estimate().inverse();
+    //     const Eigen::Matrix3d Rwc =
+    //         Twc.rotation().toRotationMatrix();
+
+    //     Eigen::Vector3d v = Lw_.tail<3>();
+    //     double vn = v.norm();
+    //     if(!(vn > 1e-9))
+    //         v = Eigen::Vector3d(1,0,0), vn = 1.0;
+
+    //     const Eigen::Vector3d vnorm = v / vn;
+
+    //     // ⭐ 核心修正：负号
+    //     const Eigen::Matrix3d R = -skew(vnorm);
+
+    //     // ---- pose Jacobian ----
+    //     Eigen::Matrix<double,3,6> dpw_dxi;
+    //     //dpw_dxi.block<3,3>(0,0) = -Rwc * skew(pc);
+    //     dpw_dxi.block<3,3>(0,0) = Rwc * skew(pc);
+    //     dpw_dxi.block<3,3>(0,3) = -Rwc;
+
+    //     _jacobianOplusXi.noalias() = R * dpw_dxi;
+
+    //     // ---- depth Jacobian ----
+    //     const Eigen::Vector3d dpw_dd = Rwc * ray;
+    //     _jacobianOplusXj.col(0).noalias() = R * dpw_dd;
+
+    //     dbg_J_pose  = _jacobianOplusXi;
+    //     dbg_J_depth = _jacobianOplusXj;
+    //     dbg_jac_updated = true;
+
+    //     STEP("linearize.end");
+    // }
+    
+public:
+    inline const Eigen::Matrix<double,3,1>& JacobianDepth() const
+    {
+        return _jacobianOplusXj;
+    }
+
+    inline const Eigen::Vector3d& ErrorVec() const
+    {
+        return _error;
+    }
+
+    inline const Eigen::Matrix3d& InfoMat() const
+    {
+        return information(); // g2o BaseEdge 提供
+    }
+    // inside EdgePointToPluckerLinePoseAndDepthNew
+    inline const Eigen::Vector2d& GetPixel() const { return px_; }
+    inline const Eigen::Matrix3d& GetKinv() const { return K_inv_; }
+    inline const Eigen::Matrix<double,6,1>& GetPlucker() const { return Lw_; }
 
 private:
     Eigen::Vector2d px_;

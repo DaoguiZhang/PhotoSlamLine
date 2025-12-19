@@ -88,11 +88,64 @@ public:
     void static CheckDuplicateVertexID(g2o::SparseOptimizer& optimizer);
     void static LocalBundleAdjustmentWithLinesPlucker_Alternating(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges,MappingOperation& opr);
+
+    void static WriteOptimizedDepthBack(
+        const std::unordered_map<int, VertexDepth*>& id2newDepth,
+        const std::map<std::tuple<MapLine*, KeyFrame*, int>, VertexDepth*>& depthVertexMap);
+
+    void static OptimizeDepthSeparately(
+        std::vector<EdgePointToPluckerLinePoseAndDepthNew*>& vpEdgesLine,
+        std::vector<VertexDepth*>& vpDepthVerts,
+        std::unordered_map<int, VertexDepth*>& id2newDepth_out,
+        double lambda = 1e-3,
+        int maxIter = 5,
+        double min_depth = 0.01,
+        double max_depth = 100.0);
+
+    void static UpdateDepthVertices_ExternalLM_Edge_Safe(
+        const std::vector<EdgePointToPluckerLinePoseAndDepthNew*>& vpEdgesLine,
+        const std::vector<VertexDepth*> &vpDepthVerts,
+        double prior,
+        double prior_w,
+        int iters,
+        double lambda_init,
+        double min_depth,
+        double max_depth);
+
+    void static UpdateDepthVertices_ExternalLM_Safe_Verts(
+        const std::vector<VertexDepth*>& depthVerts,
+        const std::unordered_map<int, double>& priorMap,
+        double prior_w,
+        int iters,
+        double lambda_init,
+        double min_depth,
+        double max_depth);
+
+    void static UpdateDepthVertices_ExternalLM_Safe(
+        g2o::SparseOptimizer& optimizer,
+        const std::unordered_map<int, double>& priorMap,  // use vertex ID -> prior
+        double prior_w,
+        int iters,
+        double lambda_init,
+        double min_depth,
+        double max_depth);
+
+    void static UpdateDepthVertices_ExternalLM(
+        const std::vector<EdgePointToPluckerLinePoseAndDepthNew*>& vpEdgesLine,
+        const std::vector<VertexDepth*>& vpDepthVerts,
+        const std::unordered_map<VertexDepth*, double>& priorMap, // d_prior（可为空）
+        double prior_w,
+        int iters,
+        double lambda_init,
+        double min_depth,
+        double max_depth);
+
     static VertexDepth* FindDepthVertex_SchemeB(
         MapLine* pML,
         KeyFrame* pKFi,
         int endpoint,
         const std::map<std::tuple<MapLine*, KeyFrame*, int>, VertexDepth*>& depthVertexMap);
+    static VertexDepth* CreateDepthVertex(g2o::SparseOptimizer& optimizer,int& nextVid,double initDepth);
 
     void static OptimizeOneIterationLocalBundleAdjustmentLinesPlucker(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int num_iter,std::list<KeyFrame*> pLocalKeyFrames,std::list<MapPoint*> pLocalMapPoints,
         std::list<MapLine*> pLocalMapLines, std::list<KeyFrame*> pFixedCameras, int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges);

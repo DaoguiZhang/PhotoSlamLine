@@ -5469,14 +5469,20 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(
 
         // ---- containers (与 MapPoint LBA 对齐) ----
         std::vector<EdgePointToPluckerLinePoseAndDepthNew*> vpEdgesLine;
-        vpEdgesLine.reserve(lLocalMapLines.size() * 10);
+        vpEdgesLine.reserve(lLocalMapLines.size() * 20);
         std::vector<KeyFrame*> vpEdgeKFLine;
-        vpEdgeKFLine.reserve(lLocalMapLines.size() * 10);
+        vpEdgeKFLine.reserve(lLocalMapLines.size() * 20);
         std::vector<MapLine*>  vpMapLineEdge;
-        vpMapLineEdge.reserve(lLocalMapLines.size() * 10);
+        vpMapLineEdge.reserve(lLocalMapLines.size() * 20);
 
         // 每一个 (MapLine*, KeyFrame*, endpointIndex) 对应一个 VertexDepth (idx 不是 line 的 index（idx），而是 endpoint。)
         std::map<std::tuple<MapLine*, KeyFrame*, int>, VertexDepth*> depthVertexMap;
+
+        // 外部 depth 更新要用到
+        std::vector<VertexDepth*> vpDepthVerts;
+        vpDepthVerts.reserve(lLocalMapLines.size()*20);
+        std::unordered_map<VertexDepth*, double> depthPrior;
+        depthPrior.reserve(lLocalMapLines.size()*20);
         //std::map<std::tuple<MapLine*, KeyFrame*, int, int>, VertexDepth*> depthVertexMap;
         // ---- 取得安全起始 vertex id（不要用 rbegin；ORB-SLAM3 这版 g2o 是 tr1 unordered_map）----
         int nextVid = GetMaxVertexId(optimizer) + 1;
@@ -5518,7 +5524,7 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(
                 auto* vPose = static_cast<g2o::VertexSE3Expmap*>(vPoseBase);
                 Eigen::Matrix3d Kinv = pKFi->GetCamKinv();
                 // ----------------------------
-                // Create two depth vertices (NON-FIXED)
+                // Create two depth vertices (FIXED)
                 // ----------------------------
                 // ---------- endpoint 0 ----------
                 VertexDepth* vD0 = nullptr;
@@ -5529,14 +5535,11 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(
                     vD0 = new VertexDepth();
                     vD0->setId(nextVid++);
                     vD0->setEstimate(d0);
-                    vD0->setFixed(false);
-                    optimizer.addVertex(vD0);
+                    vD0->setFixed(true);                 // ✅ 固定，避免进 block solver
+                    if(!optimizer.addVertex(vD0)) { delete vD0; continue; }
                     depthVertexMap[key0] = vD0;
-                    auto* ep = new EdgeDepthPrior(d0);
-                    ep->setVertex(0, vD0);
-                    ep->setInformation(
-                        Eigen::Matrix<double,1,1>::Identity() * 1e-2);
-                        optimizer.addEdge(ep);
+                    vpDepthVerts.push_back(vD0);
+                    depthPrior[vD0] = d0;
                 }
                 else
                 {
@@ -5552,46 +5555,17 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(
                     vD1 = new VertexDepth();
                     vD1->setId(nextVid++);
                     vD1->setEstimate(d1);
-                    vD1->setFixed(false);
-                    optimizer.addVertex(vD1);
+                    vD1->setFixed(true);                 // ✅ 固定
+                    if(!optimizer.addVertex(vD1)) { delete vD1; continue; }
                     depthVertexMap[key1] = vD1;
-                    auto* ep = new EdgeDepthPrior(d1);
-                    ep->setVertex(0, vD1);
-                    ep->setInformation(
-                        Eigen::Matrix<double,1,1>::Identity() * 1e-2);
-                    optimizer.addEdge(ep);
+                    vpDepthVerts.push_back(vD1);
+                    depthPrior[vD1] = d1;
                 }
                 else
                 {
                     vD1 = it1->second;
                 }
                 // ----------------------------
-                //VertexDepth* vD0 = new VertexDepth();
-                //vD0->setId(nextVid++);
-                //vD0->setEstimate(d0);
-                //vD0->setFixed(false);               // ✅ Scheme B: NON-FIXED  
-                //if(!optimizer.addVertex(vD0))
-                //{
-                //    delete vD0;
-                //    continue;
-                //}
-                //// ⭐ 关键：登记 depth vertex
-                //depthVertexMap[std::make_tuple(pML, pKFi, 0)] = vD0;
-                //VertexDepth* vD1 = new VertexDepth();
-                //vD1->setId(nextVid++);
-                //vD1->setEstimate(d1);
-                //vD1->setFixed(false);                 // ✅ Scheme B: NON-FIXED
-                //if(!optimizer.addVertex(vD1))
-                //{
-                //    // 成对回滚：vD0 已经加入图，必须 remove 再 delete
-                //    optimizer.removeVertex(vD0);
-                //    delete vD0;
-                //    delete vD1;
-                //    continue;
-                //}
-                // ⭐ 关键：登记 depth vertex
-                //depthVertexMap[std::make_tuple(pML, pKFi, 1)] = vD1;
-
                 // ---- edge endpoint 0 ----
                 {
                     auto* e0 = new EdgePointToPluckerLinePoseAndDepthNew(
@@ -5647,9 +5621,52 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(
         num_edges = nEdges + vpEdgesLine.size();
         
         CheckDuplicateVertexID(optimizer);
+        
+        // 构建 depth prior ID map（vertex id -> prior）
+        std::unordered_map<int, double> priorMap;
+        priorMap.reserve(depthPrior.size());
+        for (const auto& it : depthPrior)
+        {
+            if(it.first) {
+                priorMap[it.first->id()] = it.second;
+            }
+        }
+
         // ----------------------------
         optimizer.initializeOptimization();
         optimizer.optimize(10);
+        // std::cerr << "------------0000000000000000000---------------------" << std::endl;
+        // std::cerr << "Line LBA: after first opt: numEdges=" << vpEdgesLine.size() << std::endl;
+        // std::cout << "Total Depth Vertices: " << vpDepthVerts.size() << std::endl;
+        // for (VertexDepth* v : vpDepthVerts)
+        //     std::cout << "VertexID: " << (v ? v->id() : -1) << std::endl;
+        // for (auto* e : vpEdgesLine)
+        // {
+        //     if (!e || e->vertices().size() != 2 || !e->vertex(0) || !e->vertex(1)) {
+        //         std::cerr << "[ERR] Invalid edge or missing vertices!" << std::endl;
+        //             continue;
+        //     }
+        //     // Optionally check dynamic type too
+        //     auto* casted = dynamic_cast<EdgePointToPluckerLinePoseAndDepthNew*>(e);
+        //     if (!casted) {
+        //         std::cerr << "[ERR] Edge type cast failed!" << std::endl;
+        //         continue;
+        //     }
+        //     // Then safely use it
+        //     casted->computeError();
+        //     std::cerr << "Edge error after opt: " << casted->error().transpose() << std::endl;
+        //     casted->linearizeOplus();
+        //     std::cerr << "Edge chi2 after opt: " << casted->chi2() << std::endl;
+        // }
+        // ✅ external depth optimization (uses safe update)
+        //UpdateDepthVertices_ExternalLM_Edge_Safe(vpEdgesLine, vpDepthVerts, /*prior=*/1e-2, /*prior_w=*/1e-2, /*iters=*/3, /*lambda_init=*/1e-3, MIN_DEPTH, MAX_DEPTH);
+
+        // 替代原来的 ExternalLM 函数
+        {
+            std::unordered_map<int, VertexDepth*> id2newDepth;
+            OptimizeDepthSeparately(vpEdgesLine, vpDepthVerts, id2newDepth, 1e-3, 5, MIN_DEPTH, MAX_DEPTH);
+            WriteOptimizedDepthBack(id2newDepth, depthVertexMap);
+        }
 
         double chi2_line_sum = 0;
         for(auto* e : vpEdgesLine)
@@ -6009,6 +6026,498 @@ void Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(
 
 }
 
+
+void Optimizer::OptimizeDepthSeparately(
+    std::vector<EdgePointToPluckerLinePoseAndDepthNew*>& vpEdgesLine,
+    std::vector<VertexDepth*>& vpDepthVerts,
+    std::unordered_map<int, VertexDepth*>& id2newDepth_out,
+    double lambda,
+    int maxIter,
+    double min_depth,
+    double max_depth)
+{
+    using namespace g2o;
+
+    std::cout << "=== [DepthOnlyOptimizer] Begin ===" << std::endl;
+
+    // 1. 构建优化器（6 DOF pose + 1 DOF depth）
+    typedef BlockSolver<BlockSolverTraits<6,1>> Block;
+    Block::LinearSolverType* linearSolver = new LinearSolverDense<Block::PoseMatrixType>();
+    Block* solver_ptr = new Block(linearSolver);
+    OptimizationAlgorithmLevenberg* solver = new OptimizationAlgorithmLevenberg(solver_ptr);
+    
+    SparseOptimizer optimizer;
+    optimizer.setAlgorithm(solver);
+    optimizer.setVerbose(false);
+
+    // 2. 构建新的 VertexDepth
+    std::unordered_map<int, VertexDepth*> id2newDepth;
+
+    for (VertexDepth* vOld : vpDepthVerts)
+    {
+        if (!vOld) continue;
+
+        VertexDepth* vNew = new VertexDepth();
+        vNew->setId(vOld->id());
+        vNew->setEstimate(vOld->estimate());
+        vNew->setFixed(false);
+        optimizer.addVertex(vNew);
+        id2newDepth[vOld->id()] = vNew;
+    }
+
+    // 3. 构建新的 pose vertex（只复制一次）
+    std::unordered_map<int, g2o::VertexSE3Expmap*> id2pose;
+    int edge_id = 1000000;
+
+    for (const auto* eOld : vpEdgesLine)
+    {
+        if (!eOld || !eOld->vertex(0) || !eOld->vertex(1)) continue;
+
+        const auto* vPoseOld  = static_cast<const g2o::VertexSE3Expmap*>(eOld->vertex(0));
+        const auto* vDepthOld = static_cast<const VertexDepth*>(eOld->vertex(1));
+        if (!vPoseOld || !vDepthOld) continue;
+
+        int pose_id = vPoseOld->id();
+        int depth_id = vDepthOld->id();
+
+        g2o::VertexSE3Expmap* vPoseNew = nullptr;
+        if (id2pose.find(pose_id) == id2pose.end())
+        {
+            vPoseNew = new g2o::VertexSE3Expmap();
+            vPoseNew->setId(pose_id);
+            vPoseNew->setEstimate(vPoseOld->estimate());
+            vPoseNew->setFixed(true);  // pose 不优化
+            optimizer.addVertex(vPoseNew);
+            id2pose[pose_id] = vPoseNew;
+        }
+        else
+        {
+            vPoseNew = id2pose[pose_id];
+        }
+
+        VertexDepth* vDepthNew = id2newDepth[depth_id];
+        if (!vDepthNew) continue;
+
+        // 新建 edge
+        auto* eNew = new EdgePointToPluckerLinePoseAndDepthNew(
+            eOld->GetPixel(), eOld->GetKinv(), eOld->GetPlucker());
+
+        eNew->setId(edge_id++);
+        eNew->setVertex(0, vPoseNew);
+        eNew->setVertex(1, vDepthNew);
+        eNew->setMeasurement(Eigen::Vector3d::Zero());
+        eNew->setInformation(Eigen::Matrix3d::Identity());
+
+        g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+        rk->setDelta(5.991);  // 2D chi2 threshold
+        eNew->setRobustKernel(rk);
+
+        optimizer.addEdge(eNew);
+    }
+
+    // 4. 运行优化器
+    optimizer.initializeOptimization();
+    optimizer.optimize(maxIter);
+
+    // 5. 打印优化结果
+    for (auto& it : id2newDepth)
+    {
+        VertexDepth* v = it.second;
+        if (!v) continue;
+        double d = v->estimate();
+        d = std::max(min_depth, std::min(max_depth, d));
+        std::cout << "[DepthOnly] VertexID=" << v->id() << " d=" << d << std::endl;
+    }
+
+    // ========== 输出结果 ==========
+    id2newDepth_out = std::move(id2newDepth);
+    std::cout << "=== [DepthOnlyOptimizer] End ===" << std::endl;
+}
+
+
+void Optimizer::WriteOptimizedDepthBack(
+    const std::unordered_map<int, VertexDepth*>& id2newDepth,
+    const std::map<std::tuple<MapLine*, KeyFrame*, int>, VertexDepth*>& depthVertexMap)
+{
+    for (const auto& kv : depthVertexMap)
+    {
+        const auto& key = kv.first;
+        MapLine* pML = std::get<0>(key);
+        KeyFrame* pKF = std::get<1>(key);
+        int endpoint = std::get<2>(key); // 0 or 1
+
+        if (!pML || !pKF) continue;
+
+        VertexDepth* oldV = kv.second;
+        if (!oldV) continue;
+
+        int vid = oldV->id();
+        auto itNew = id2newDepth.find(vid);
+        if (itNew == id2newDepth.end()) continue;
+
+        double new_d = itNew->second->estimate();
+        if (!(new_d > MIN_DEPTH && new_d < MAX_DEPTH)) continue;
+
+        std::tuple<int,int> idx_pair = pML->GetIndexInKeyFrame(pKF);
+        int idx = std::get<0>(idx_pair); // 你自己封装一下这个接口
+        if (idx < 0) continue;
+
+        if (endpoint == 0)
+            pML->SetObservationLineLsDepth(pKF, idx, float(new_d));
+        else
+            pML->SetObservationLineLeDepth(pKF, idx, float(new_d));
+    }
+}
+
+void Optimizer::UpdateDepthVertices_ExternalLM_Edge_Safe(
+    const std::vector<EdgePointToPluckerLinePoseAndDepthNew*>& vpEdgesLine,
+    const std::vector<VertexDepth*> &vpDepthVerts,
+    double prior,
+    double prior_w,
+    int iters,
+    double lambda_init,
+    double min_depth,
+    double max_depth)
+{
+    std::cout << "=== Begin Safe External Depth Optimization ===" << std::endl;
+
+    // Create a map: depth vertex ID -> list of connected edges
+    std::unordered_map<int, std::vector<EdgePointToPluckerLinePoseAndDepthNew*>> depthEdgeMap;
+
+    for (auto* edge : vpEdgesLine)
+    {
+        if (!edge) continue;
+
+        const auto* vDepth = static_cast<const VertexDepth*>(edge->vertex(1));
+        if (!vDepth) continue;
+
+        int id = vDepth->id();
+        depthEdgeMap[id].push_back(edge);
+    }
+
+    for (int iter = 0; iter < iters; ++iter)
+    {
+        std::cout << "--- Iteration " << iter << " ---" << std::endl;
+
+        for (auto* vDepth : vpDepthVerts)
+        {
+            if (!vDepth) continue;
+            int id = vDepth->id();
+
+            auto it = depthEdgeMap.find(id);
+            if (it == depthEdgeMap.end()) continue;
+
+            const auto& edges = it->second;
+
+            double H = 0.0;
+            double b = 0.0;
+
+            for (auto* edge : edges)
+            {
+                if (!edge || !edge->vertex(0) || !edge->vertex(1)) continue;
+
+                try {
+                    edge->computeError();
+                    edge->linearizeOplus();
+                } catch (...) {
+                    std::cerr << "[EXCEPTION] edge compute/linearize failed for depthID=" << id << std::endl;
+                    continue;
+                }
+
+                const Eigen::Vector3d r = edge->ErrorVec();
+                const Eigen::Matrix<double,3,1> J = edge->JacobianDepth();
+                const Eigen::Matrix3d info = edge->InfoMat();
+
+                double Jtr = J.transpose() * info * r;
+                double JtJ = J.transpose() * info * J;
+
+                b += -Jtr;
+                H += JtJ;
+            }
+
+            if (H <= 1e-12) {
+                std::cerr << "[WARN] Skipping vertex " << id << " due to degenerate Hessian." << std::endl;
+                continue;
+            }
+
+            double step = b / (H + lambda_init);
+            double d0 = vDepth->estimate();
+            double d_new = UtilSlam::ClampD_ZDG(d0 + step, min_depth, max_depth);
+            vDepth->setEstimate(d_new);
+
+            std::cout << "[DEPTH] Vertex " << id
+                      << " d0=" << d0
+                      << " step=" << step
+                      << " d_new=" << d_new << std::endl;
+        }
+    }
+
+    std::cout << "=== End External Depth Optimization ===" << std::endl;
+}
+
+
+void Optimizer::UpdateDepthVertices_ExternalLM_Safe_Verts(
+    const std::vector<VertexDepth*>& depthVerts,
+    const std::unordered_map<int, double>& priorMap,
+    double prior_w,
+    int iters,
+    double lambda_init,
+    double min_depth,
+    double max_depth)
+{
+    double lambda = lambda_init;
+
+    for (int it = 0; it < iters; ++it)
+    {
+        for (VertexDepth* vD : depthVerts)
+        {
+            if (!vD) continue;
+
+            const int vid = vD->id();
+            const double d0 = vD->estimate();
+
+            double H = 0.0;
+            double b = 0.0;
+
+            // 遍历连接此 vertex 的所有边
+            const auto& edges = vD->edges();
+            for (auto* edge_base : edges)
+            {
+                
+                // 安全 static_cast，因为你构图时确定只有这种 edge 类型
+                auto* edge = static_cast<EdgePointToPluckerLinePoseAndDepthNew*>(edge_base);
+                if (!edge || edge->vertex(1) != vD) continue;
+
+                // 保守：确保 vD->estimate() 是当前值
+                vD->setEstimate(d0);
+
+                edge->computeError();
+                edge->linearizeOplus();
+
+                const Eigen::Vector3d r = edge->ErrorVec();
+                const Eigen::Matrix<double, 3, 1> Jd = edge->JacobianDepth();
+                const Eigen::Matrix3d W = edge->InfoMat();
+
+                const double JtWJ = (Jd.transpose() * W * Jd)(0, 0);
+                const double JtWr = (Jd.transpose() * W * r)(0, 0);
+
+                H += JtWJ;
+                b += JtWr;
+            }
+
+            // 加入 depth prior
+            auto it_prior = priorMap.find(vid);
+            if (it_prior != priorMap.end())
+            {
+                const double d_prior = it_prior->second;
+                H += prior_w;
+                b += prior_w * (d0 - d_prior);
+            }
+
+            // 加入阻尼项（防止病态）
+            H += lambda;
+
+            // 避免除以 0 或数值不稳定
+            if (!std::isfinite(H) || std::abs(H) < 1e-12)
+                continue;
+
+            const double step = -b / H;
+            double d1 = d0 + step;
+
+            // 保守检查
+            if (!std::isfinite(d1))
+                continue;
+
+            // 限制范围
+            d1 = UtilSlam::ClampD_ZDG(d1, min_depth, max_depth);
+
+            // 限制跳变
+            if (std::abs(step) > 0.5 * std::max(1.0, std::abs(d0)))
+                continue;
+
+            vD->setEstimate(d1);
+        }
+    }
+}
+
+
+void Optimizer::UpdateDepthVertices_ExternalLM_Safe(
+    g2o::SparseOptimizer& optimizer,
+    const std::unordered_map<int, double>& priorMap,  // use vertex ID -> prior
+    double prior_w,
+    int iters,
+    double lambda_init,
+    double min_depth,
+    double max_depth)
+{
+    double lambda = lambda_init;
+
+    for(int it = 0; it < iters; ++it)
+    {
+        for(const auto& v_pair : optimizer.vertices())
+        {
+            g2o::HyperGraph::Vertex* hv = v_pair.second;
+            auto* v = dynamic_cast<g2o::OptimizableGraph::Vertex*>(hv);
+            if (!v) continue;
+
+            VertexDepth* vD = dynamic_cast<VertexDepth*>(v);
+            if (!vD) continue;
+
+            const int vid = vD->id();
+
+            const double d0 = vD->estimate();
+
+            double H = 0.0;
+            double b = 0.0;
+
+            // Collect connected edges
+            const auto& edges = vD->edges();
+            for(auto* e : edges)
+            {
+                if(!e) continue;
+
+                // We only want depth-related edges
+                EdgePointToPluckerLinePoseAndDepthNew* edge = dynamic_cast<EdgePointToPluckerLinePoseAndDepthNew*>(e);
+                if(!edge) continue;
+
+                // vD is vertex(1)
+                if(edge->vertex(1) != vD) continue;
+
+                // Compute residuals and jacobians
+                vD->setEstimate(d0);  // reset
+                edge->computeError();
+                edge->linearizeOplus();
+
+                const Eigen::Vector3d r = edge->ErrorVec();
+                const Eigen::Matrix<double, 3, 1> Jd = edge->JacobianDepth();
+                const Eigen::Matrix3d W = edge->InfoMat();
+
+                const double JtWJ = (Jd.transpose() * W * Jd)(0, 0);
+                const double JtWr = (Jd.transpose() * W * r)(0, 0);
+
+                H += JtWJ;
+                b += JtWr;
+            }
+
+            // Add prior term if available
+            auto it_prior = priorMap.find(vid);
+            if(it_prior != priorMap.end())
+            {
+                const double d_prior = it_prior->second;
+                H += prior_w;
+                b += prior_w * (d0 - d_prior);
+            }
+
+            H += lambda;
+
+            if(!std::isfinite(H) || std::abs(H) < 1e-12)
+                continue;
+
+            const double step = - b / H;
+            double d1 = d0 + step;
+
+            if(!std::isfinite(d1)) continue;
+
+            d1 = UtilSlam::ClampD_ZDG(d1, min_depth, max_depth);
+
+            // Reject crazy jump (optional)
+            if(std::abs(step) > 0.5 * std::max(1.0, std::abs(d0)))
+                continue;
+
+            vD->setEstimate(d1);
+        }
+    }
+}
+
+
+void Optimizer::UpdateDepthVertices_ExternalLM(
+    const std::vector<EdgePointToPluckerLinePoseAndDepthNew*>& vpEdgesLine,
+    const std::vector<VertexDepth*>& vpDepthVerts,
+    const std::unordered_map<VertexDepth*, double>& priorMap, // d_prior（可为空）
+    double prior_w,
+    int iters,
+    double lambda_init,
+    double min_depth,
+    double max_depth)
+{
+    if(vpEdgesLine.empty() || vpDepthVerts.empty()) return;
+
+    // depth -> edges adjacency
+    std::unordered_map<VertexDepth*, std::vector<EdgePointToPluckerLinePoseAndDepthNew*>> adj;
+    adj.reserve(vpDepthVerts.size()*2);
+
+    for(auto* e : vpEdgesLine)
+    {
+        if(!e) continue;
+        auto* vD = static_cast<VertexDepth*>(e->vertex(1));
+        if(!vD) continue;
+        adj[vD].push_back(e);
+    }
+
+    double lambda = lambda_init;
+
+    for(int it=0; it<iters; ++it)
+    {
+        for(VertexDepth* vD : vpDepthVerts)
+        {
+            if(!vD) continue;
+            auto itAdj = adj.find(vD);
+            if(itAdj == adj.end()) continue;
+
+            const double d0 = vD->estimate();
+            double H = 0.0;
+            double b = 0.0;
+
+            // accumulate from connected edges
+            for(auto* e : itAdj->second)
+            {
+                // compute r and J
+                vD->setEstimate(d0);
+                e->computeError();
+                e->linearizeOplus();
+
+                const Eigen::Vector3d r = e->ErrorVec();             // 3x1
+                const Eigen::Matrix<double,3,1> Jd = e->JacobianDepth(); // 3x1
+                const Eigen::Matrix3d W = e->InfoMat();              // 3x3
+
+                const double JtWJ = (Jd.transpose() * W * Jd)(0,0);
+                const double JtWr = (Jd.transpose() * W * r)(0,0);
+
+                H += JtWJ;
+                b += JtWr;
+            }
+
+            // prior: prior_w * (d - d_prior)^2
+            auto itP = priorMap.find(vD);
+            if(itP != priorMap.end())
+            {
+                const double d_prior = itP->second;
+                H += prior_w;
+                b += prior_w * (d0 - d_prior);
+            }
+
+            // LM damping
+            H += lambda;
+
+            if(!std::isfinite(H) || std::abs(H) < 1e-12) continue;
+
+            const double step = - b / H;
+            double d1 = d0 + step;
+
+            if(!std::isfinite(d1)) continue;
+            d1 = UtilSlam::ClampD_ZDG(d1, min_depth, max_depth);
+
+            // optional: reject crazy jump
+            // if(std::abs(step) > 0.5 * std::max(1.0, d0)) continue;
+
+            vD->setEstimate(d1);
+        }
+
+        // simplest: keep lambda fixed (most stable)
+        // lambda *= 0.5;
+    }
+}
+
 /// ← 线在该 KeyFrame 中的 index // endpoint ∈ {0,1}
 VertexDepth* Optimizer::FindDepthVertex_SchemeB(
     MapLine* pML,
@@ -6019,6 +6528,25 @@ VertexDepth* Optimizer::FindDepthVertex_SchemeB(
     const auto key = std::make_tuple(pML, pKFi, endpoint);
     auto it = depthVertexMap.find(key);
     return (it == depthVertexMap.end()) ? nullptr : it->second;
+}
+
+
+VertexDepth* Optimizer::CreateDepthVertex(
+    g2o::SparseOptimizer& optimizer,
+    int& nextVid,
+    double initDepth)
+{
+    VertexDepth* vD = new VertexDepth();
+    vD->setId(nextVid++);
+    vD->setEstimate(initDepth);
+    vD->setFixed(false);
+
+    if(!optimizer.addVertex(vD))
+    {
+        delete vD;
+        return nullptr;
+    }
+    return vD;
 }
 
 
