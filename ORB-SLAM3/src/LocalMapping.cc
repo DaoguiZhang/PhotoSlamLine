@@ -403,14 +403,26 @@ void LocalMapping::RunWithLine()
                         //Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
                         ///修改LocalBundleAdjustment，把这个写完，明天调试这些代码，如果能调试好，几乎所有都做好了。后面对于全局的相机优化，是否再弄一下，需要调整一下。
                         //Optimizer::TestEdgeSE3ProjectLine_PoseAndPoints(); //debug, 
+                        //std::cerr <<"------start test-------" << std::endl;
                         //Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine(); //debug, 点到线的误差边的雅可比矩阵测试函数
-                        std::cerr <<"------end test-------" << std::endl;
+                        //std::cerr <<"------end test-------" << std::endl;
+
+                        //Optimizer::TestEdgeSE3ProjectXYZOnlyPose(); //debug, 仅优化位姿的点投影误差边的雅可比矩阵测试函数
+                        //std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLine" << std::endl;
                         //Optimizer::LocalBundleAdjustmentWithLine(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        //std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLine" << std::endl;
+                        
+                        std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization" << std::endl;
+                        Optimizer::LocalBundleAdjustmentWithLine_Optimization(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization" << std::endl;
+
+                        b_doneLBA = true;
+
                         //Optimizer::TestPluckerLineEdgeJacobian(); //debug, plucker line(6x1)投影误差边的雅可比矩阵测试函数
-                        std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker" << std::endl;
-                        Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        //std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker" << std::endl;
+                        //Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
                         std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;
-                        std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLinesPlucker" << std::endl;
+                        //std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLinesPlucker" << std::endl;
 
                         //Optimizer::TestPluckerLinesBundleEdge();
                         //Optimizer::TestNumericalJacobian_PointToPlucker();

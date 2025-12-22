@@ -60,6 +60,7 @@ namespace ORB_SLAM3 {
                      y ,  -x , 0.f, 0.f, 0.f, 1.f;
 
         _jacobianOplusXi = -pCamera->projectJac(xyz_trans) * SE3deriv;
+        //mJacobianOplusXi = -pCamera->projectJac(xyz_trans) * SE3deriv;  //test for jacobian
     }
 
     bool EdgeSE3ProjectXYZOnlyPoseToBody::read(std::istream& is){

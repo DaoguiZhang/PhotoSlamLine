@@ -77,11 +77,13 @@ public:
     void static LocalBundleAdjustment(KeyFrame* pKF, bool *pbStopFlag, Map *pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, MappingOperation& opr);
 
     void static LocalBundleAdjustmentWithLine(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, int& num_Lines, MappingOperation& opr);
+    void static LocalBundleAdjustmentWithLine_Optimization(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, int& num_Lines, MappingOperation& opr);
     
     void static LocalBundleAdjustmentWithLinesPluckerOld(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPlucker(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static TestPluckerLineEdgeJacobian();
     //debug function
+    void static TestEdgeSE3ProjectXYZOnlyPose();
     void static TestEdgeSE3ProjectLine_PoseAndPoints();
     void static TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine();
     static Eigen::Matrix<double,6,1> NormalizePluckerLine(const Eigen::Matrix<double,6,1>& L);
