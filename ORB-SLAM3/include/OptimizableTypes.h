@@ -1870,9 +1870,13 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
 
     EdgeSE3ProjectLine_PoseAndPoints()
-        : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0)
+        : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0),
+          valid_obs_(false)
     {
         resize(3); // 0: pose, 1: point1, 2: point2
+        mJacobianPose.setZero();
+        mJacobianP1.setZero();
+        mJacobianP2.setZero();
     }
 
     bool read(std::istream&) override { return false; }
@@ -1883,26 +1887,42 @@ public:
     { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
 
     // ---------------- observed line ----------------
-    void SetObservedLineByEndpoints(double u1,double v1,double u2,double v2)
+    // ---------------- observed line ----------------
+    // Return false if degenerate observation (zero-length 2D line).
+    bool SetObservedLineByEndpoints(double u1,double v1,double u2,double v2)
     {
-        double dx = u2 - u1;
-        double dy = v2 - v1;
-        double na = dy;
-        double nb = -dx;
-        double norm = std::sqrt(na*na + nb*nb);
-        if(norm < 1e-12){ a=b=c=0.0; return; }
+        const double dx = u2 - u1;
+        const double dy = v2 - v1;
+        const double na = dy;
+        const double nb = -dx;
+        const double norm = std::sqrt(na*na + nb*nb);
+        if(!std::isfinite(norm) || norm < 1e-12)
+        {
+            a=b=c=0.0;
+            valid_obs_ = false;
+            return false;
+        }
         a = na / norm;
         b = nb / norm;
         c = -(a*u1 + b*v1);
+        valid_obs_ = std::isfinite(a) && std::isfinite(b) && std::isfinite(c);
+        return valid_obs_;
     }
 
-    void SetObservedLineABC(double _a,double _b,double _c)
+    bool SetObservedLineABC(double _a,double _b,double _c)
     {
-        double norm = std::sqrt(_a*_a + _b*_b);
-        if(norm < 1e-12){ a=_a; b=_b; c=_c; return; }
+        const double norm = std::sqrt(_a*_a + _b*_b);
+        if(!std::isfinite(norm) || norm < 1e-12)
+        {
+            a=_a; b=_b; c=_c;
+            valid_obs_ = false;
+            return false;
+        }
         a = _a / norm;
         b = _b / norm;
-        c = _c / norm;
+        c = _c / norm; // keep your original normalization behavior
+        valid_obs_ = std::isfinite(a) && std::isfinite(b) && std::isfinite(c);
+        return valid_obs_;
     }
 
     // ---------------- compute error ----------------
@@ -1910,6 +1930,13 @@ public:
     {
         using g2o::VertexSE3Expmap;
         using g2o::VertexSBAPointXYZ;
+
+        // vertex null check (safety)
+        if(!_vertices[0] || !_vertices[1] || !_vertices[2] || !valid_obs_)
+        {
+            _error.setConstant(1e3);
+            return;
+        }
 
         const VertexSE3Expmap* vPose =
             static_cast<const VertexSE3Expmap*>(_vertices[0]);
@@ -1926,11 +1953,22 @@ public:
             return;
         }
 
+        // segment degeneracy check in camera frame (BA may collapse endpoints)
+        const Eigen::Vector3d d = Xc2 - Xc1;
+        if (d.squaredNorm() < 1e-12)
+        {
+            _error.setConstant(1e3);
+            return;
+        }
+
         Eigen::Vector2d uv1 = cam2pixel(Xc1);
         Eigen::Vector2d uv2 = cam2pixel(Xc2);
 
         _error(0) = a*uv1(0) + b*uv1(1) + c;
         _error(1) = a*uv2(0) + b*uv2(1) + c;
+
+        if(!std::isfinite(_error(0)) || !std::isfinite(_error(1)))
+            _error.setConstant(1e3);
     }
 
     // ---------------- Jacobians ----------------
@@ -1938,6 +1976,17 @@ public:
     {
         using g2o::VertexSE3Expmap;
         using g2o::VertexSBAPointXYZ;
+
+        // default to zeros
+        _jacobianOplus[0].setZero();
+        _jacobianOplus[1].setZero();
+        _jacobianOplus[2].setZero();
+        mJacobianPose.setZero();
+        mJacobianP1.setZero();
+        mJacobianP2.setZero();
+
+        if(!_vertices[0] || !_vertices[1] || !_vertices[2] || !valid_obs_)
+            return;
 
         const VertexSE3Expmap* vPose =
             static_cast<const VertexSE3Expmap*>(_vertices[0]);
@@ -1956,6 +2005,13 @@ public:
             _jacobianOplus[2].setZero();
             return;
         }
+
+        if (Xc1(2) <= 1e-9 || Xc2(2) <= 1e-9)
+            return;
+
+        const Eigen::Vector3d d = Xc2 - Xc1;
+        if (d.squaredNorm() < 1e-12)
+            return;
 
         // duv / dXc
         Eigen::Matrix<double,2,3> Jpi1 = projectionJacobian_Xc(Xc1);
@@ -1988,9 +2044,24 @@ public:
 
         mJacobianP2.row(0).setZero();
         mJacobianP2.row(1) = ab * Jpi2 * R;
+
+        // final finite check (avoid NaN poisoning Hessian)
+        if(!allFinite(_jacobianOplus[0]) ||
+           !allFinite(_jacobianOplus[1]) ||
+           !allFinite(_jacobianOplus[2]))
+        {
+            _jacobianOplus[0].setZero();
+            _jacobianOplus[1].setZero();
+            _jacobianOplus[2].setZero();
+            mJacobianPose.setZero();
+            mJacobianP1.setZero();
+            mJacobianP2.setZero();
+        }
     }
 
 private:
+    bool valid_obs_;
+
     // ---------------- helpers ----------------
     Eigen::Vector2d cam2pixel(const Eigen::Vector3d& Xc) const {
         return Eigen::Vector2d(
@@ -2031,6 +2102,15 @@ private:
         return J;
     }
 
+    template<typename Derived>
+    static bool allFinite(const Eigen::MatrixBase<Derived>& M)
+    {
+        for (int r=0; r<M.rows(); ++r)
+            for (int c=0; c<M.cols(); ++c)
+                if(!std::isfinite(M(r,c))) return false;
+        return true;
+    }
+
 public:
     const Eigen::Matrix<double,2,6>& JPose() const {
         return mJacobianPose;
@@ -2047,6 +2127,520 @@ public:
     double fx, fy, cx, cy;
     double a, b, c;
 };
+
+
+// Edge: point (world) + pose -> distance to observed 2D line (a u + b v + c = 0)
+//前 3 维：旋转（李代数 so(3)，角轴，小角度，单位：rad）后 3 维：平移（单位：米）; VertexSE3Expmap 右扰动测试。后面其它方法，求导也要注意右扰动
+// 1 residual: point-to-line distance
+class EdgeSE3ProjectPointToLine2D
+    : public g2o::BaseBinaryEdge<1, Eigen::Vector3d,
+                                 g2o::VertexSBAPointXYZ, g2o::VertexSE3Expmap>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    EdgeSE3ProjectPointToLine2D()
+        : fx(0), fy(0), cx(0), cy(0) {}
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void SetCameraIntrinsics(double _fx,double _fy,double _cx,double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    // line = [a,b,c] should already be normalized s.t. sqrt(a^2+b^2)=1
+    void computeError() override
+    {
+        const auto* vP = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* vT = static_cast<const g2o::VertexSE3Expmap*>(_vertices[1]);
+
+        const Eigen::Vector3d Xc = vT->estimate().map(vP->estimate());
+        if (Xc(2) <= 1e-9 || !Xc.allFinite())
+        {
+            _error[0] = 1e3;
+            return;
+        }
+
+        const double invz = 1.0 / Xc(2);
+        const double u = fx * Xc(0) * invz + cx;
+        const double v = fy * Xc(1) * invz + cy;
+
+        const Eigen::Vector3d& L = _measurement; // (a,b,c)
+        _error[0] = L(0)*u + L(1)*v + L(2);
+    }
+
+    void linearizeOplus() override
+    {
+        _jacobianOplusXi.setZero(); // wrt point (1x3)
+        _jacobianOplusXj.setZero(); // wrt pose  (1x6)
+
+        const auto* vP = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* vT = static_cast<const g2o::VertexSE3Expmap*>(_vertices[1]);
+
+        const Eigen::Vector3d Xw = vP->estimate();
+        const Eigen::Vector3d Xc = vT->estimate().map(Xw);
+        if (Xc(2) <= 1e-9 || !Xc.allFinite()) return;
+
+        const Eigen::Matrix3d R = vT->estimate().rotation().toRotationMatrix();
+        const double x = Xc(0), y = Xc(1), z = Xc(2);
+        const double z2 = z*z;
+
+        // duv/dXc (2x3)
+        Eigen::Matrix<double,2,3> Jpi;
+        Jpi << fx/z,   0,   -fx*x/z2,
+                 0, fy/z,   -fy*y/z2;
+
+        const Eigen::RowVector2d ab(_measurement(0), _measurement(1)); // (a,b)
+        const Eigen::RowVector3d Jimg = ab * Jpi; // 1x3  (dres/dXc)
+
+        // dXc/dXw = R
+        _jacobianOplusXi = Jimg * R; // 1x3
+
+        // dXc/dxi (right perturb) = [ -skew(Xc) | I ]
+        Eigen::Matrix<double,3,6> Jse3;
+        Jse3.setZero();
+        Jse3(0,1)= z;   Jse3(0,2)=-y;
+        Jse3(1,0)=-z;   Jse3(1,2)= x;
+        Jse3(2,0)= y;   Jse3(2,1)=-x;
+        Jse3.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+
+        _jacobianOplusXj = Jimg * Jse3; // 1x6
+
+        // safety
+        if (!std::isfinite(_jacobianOplusXi.sum()) || !std::isfinite(_jacobianOplusXj.sum()))
+        {
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXj.setZero();
+        }
+    }
+
+    double fx, fy, cx, cy;
+};
+
+// Edge: line segment length prior
+// 1 residual: length prior
+class EdgeLineLengthPrior
+    : public g2o::BaseBinaryEdge<1, double,
+                                 g2o::VertexSBAPointXYZ,
+                                 g2o::VertexSBAPointXYZ>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    EdgeLineLengthPrior(double L0, double lambda)
+        : L0_(L0), lambda_(lambda) {}
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void computeError() override
+    {
+        const auto* v1 =
+            static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* v2 =
+            static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[1]);
+
+        const Eigen::Vector3d d = v2->estimate() - v1->estimate();
+        const double len = d.norm();
+
+        _error[0] = lambda_ * (len - L0_);
+    }
+
+    void linearizeOplus() override
+    {
+        _jacobianOplusXi.setZero(); // wrt P1
+        _jacobianOplusXj.setZero(); // wrt P2
+
+        const auto* v1 =
+            static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* v2 =
+            static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[1]);
+
+        const Eigen::Vector3d d = v2->estimate() - v1->estimate();
+        const double len = d.norm();
+        if (len < 1e-9) return;
+
+        const Eigen::RowVector3d J =
+            lambda_ * (d / len).transpose();
+
+        _jacobianOplusXi = -J;
+        _jacobianOplusXj =  J;
+    }
+
+private:
+    double L0_;
+    double lambda_;
+};
+
+
+class EdgeLineDirectionPrior
+    : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
+                                 g2o::VertexSBAPointXYZ, g2o::VertexSBAPointXYZ>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    // measurement: d0_unit (must be normalized)
+    EdgeLineDirectionPrior(const Eigen::Vector3d& d0_unit, double lambdaD)
+        : d0_(d0_unit), lambdaD_(lambdaD) {}
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void computeError() override
+    {
+        const auto* v1 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* v2 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[1]);
+        Eigen::Vector3d d = v2->estimate() - v1->estimate();
+        if (!d.allFinite() || !d0_.allFinite()) {
+            _error.setZero();
+            return;
+        }
+        // r = lambda * (d x d0)
+        _error = lambdaD_ * (d.cross(d0_));
+    }
+
+    void linearizeOplus() override
+    {
+        _jacobianOplusXi.setZero(); // 3x3 wrt P1
+        _jacobianOplusXj.setZero(); // 3x3 wrt P2
+
+        if (!d0_.allFinite()) return;
+
+        // d x d0 = - [d0]_x d
+        // d = P2 - P1
+        // J_P1 = lambda * [d0]_x
+        // J_P2 = -lambda * [d0]_x
+        Eigen::Matrix3d Sd0 = Skew(d0_);
+        _jacobianOplusXi = +lambdaD_ * Sd0;
+        _jacobianOplusXj = -lambdaD_ * Sd0;
+    }
+
+private:
+    inline Eigen::Matrix3d Skew(const Eigen::Vector3d& v)
+    {
+        Eigen::Matrix3d S;
+        S <<     0, -v.z(),  v.y(),
+            v.z(),     0, -v.x(),
+            -v.y(),  v.x(),     0;
+        return S;
+    }
+    Eigen::Vector3d d0_;
+    double lambdaD_ = 1.0;
+};
+
+
+// 4 residuals: 加入了正则化项 长度保持（Length Regularization） 和 方向保持（Direction Regularization）
+// Residuals:
+//   Given observed 2D line (a,b,c): a*u + b*v + c = 0 
+//   rL​=λL​(∥P1​−P2​∥−L0​); rD​=λD​⋅∥d×d0​∥
+//   e0: point1 signed distance to observed 2D line
+//   e1: point2 signed distance to observed 2D line
+//   e2: length regularization
+//   e3: direction regularization
+class EdgeSE3ProjectLine_PoseAndPoints_Reg
+    : public g2o::BaseMultiEdge<4, Eigen::Vector4d>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(true)
+
+    EdgeSE3ProjectLine_PoseAndPoints_Reg()
+        : fx(0), fy(0), cx(0), cy(0), a(0), b(0), c(0),
+          wLength(1e-3), wDirection(1e-3),
+          length0(0.0)
+    {
+        resize(3); // 0: pose, 1: endpoint P1, 2: endpoint P2
+        dir0.setZero();
+    }
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    // ---------------- intrinsics ----------------
+    inline void SetCameraIntrinsics(double _fx,double _fy,double _cx,double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    // ---------------- observed 2D line ----------------
+    inline void SetObservedLineByEndpoints(double u1,double v1,double u2,double v2)
+    {
+        double dx = u2 - u1;
+        double dy = v2 - v1;
+        double na = dy;
+        double nb = -dx;
+        double norm = std::sqrt(na*na + nb*nb);
+        if(norm < 1e-12){ a=b=c=0.0; return; }
+        a = na / norm;
+        b = nb / norm;
+        c = -(a*u1 + b*v1);
+    }
+
+    inline void SetObservedLineABC(double _a,double _b,double _c)
+    {
+        double norm = std::sqrt(_a*_a + _b*_b);
+        if(norm < 1e-12){ a=_a; b=_b; c=_c; return; }
+        a = _a / norm;
+        b = _b / norm;
+        c = _c / norm;
+    }
+
+    // ---------------- regularization config ----------------
+    inline void SetRegularizationWeights(double w_len, double w_dir)
+    {
+        wLength = w_len;
+        wDirection = w_dir;
+    }
+
+    // Call ONCE when you create line endpoint vertices (use current MapLine endpoints).
+    inline void SetInitialLine(const Eigen::Vector3d& P1w0,
+                               const Eigen::Vector3d& P2w0)
+    {
+        Eigen::Vector3d d0 = P1w0 - P2w0;
+        length0 = d0.norm();
+        if(length0 > 1e-9) dir0 = d0 / length0;
+        else dir0.setZero();
+    }
+
+    // ---------------- compute error ----------------
+    void computeError() override
+    {
+        using g2o::VertexSE3Expmap;
+        using g2o::VertexSBAPointXYZ;
+
+        const auto* vPose = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const auto* vP1   = static_cast<const VertexSBAPointXYZ*>(_vertices[1]);
+        const auto* vP2   = static_cast<const VertexSBAPointXYZ*>(_vertices[2]);
+
+        const Eigen::Vector3d Pw1 = vP1->estimate();
+        const Eigen::Vector3d Pw2 = vP2->estimate();
+
+        const Eigen::Vector3d Xc1 = vPose->estimate().map(Pw1);
+        const Eigen::Vector3d Xc2 = vPose->estimate().map(Pw2);
+
+        // If behind camera: make error large (keep stable)
+        if (Xc1(2) <= 1e-9 || Xc2(2) <= 1e-9) {
+            _error.setConstant(1e3);
+            return;
+        }
+
+        const Eigen::Vector2d uv1 = cam2pixel(Xc1);
+        const Eigen::Vector2d uv2 = cam2pixel(Xc2);
+
+        // e0,e1: point-to-line distance
+        _error(0) = a*uv1(0) + b*uv1(1) + c;
+        _error(1) = a*uv2(0) + b*uv2(1) + c;
+
+        // regularization: based in WORLD endpoints (directly on vertex estimates)
+        const Eigen::Vector3d d = Pw1 - Pw2;
+        const double L = d.norm();
+
+        // e2: length
+        _error(2) = wLength * (L - length0);
+
+        // e3: direction (sin(theta) = ||dir x dir0||)
+        if (L > 1e-9 && dir0.squaredNorm() > 0.5) {
+            const Eigen::Vector3d dir = d / L;
+            const Eigen::Vector3d crossv = dir.cross(dir0);
+            _error(3) = wDirection * crossv.norm();
+        } else {
+            _error(3) = 0.0;
+        }
+    }
+
+    // ---------------- analytic Jacobians ----------------
+    void linearizeOplus() override
+    {
+        using g2o::VertexSE3Expmap;
+        using g2o::VertexSBAPointXYZ;
+
+        const auto* vPose = static_cast<const VertexSE3Expmap*>(_vertices[0]);
+        const auto* vP1   = static_cast<const VertexSBAPointXYZ*>(_vertices[1]);
+        const auto* vP2   = static_cast<const VertexSBAPointXYZ*>(_vertices[2]);
+
+        const Eigen::Vector3d Pw1 = vP1->estimate();
+        const Eigen::Vector3d Pw2 = vP2->estimate();
+
+        const Eigen::Vector3d Xc1 = vPose->estimate().map(Pw1);
+        const Eigen::Vector3d Xc2 = vPose->estimate().map(Pw2);
+
+        // init all jacobians to zero
+        _jacobianOplus[0].setZero(); // 4x6
+        _jacobianOplus[1].setZero(); // 4x3
+        _jacobianOplus[2].setZero(); // 4x3
+
+        if (Xc1(2) <= 1e-9 || Xc2(2) <= 1e-9) {
+            return;
+        }
+
+        const Eigen::Matrix3d Rcw = vPose->estimate().rotation().toRotationMatrix();
+
+        // ---- image part (e0,e1) ----
+        const Eigen::Matrix<double,2,3> Jpi1 = projectionJacobian_Xc(Xc1);
+        const Eigen::Matrix<double,2,3> Jpi2 = projectionJacobian_Xc(Xc2);
+
+        const Eigen::Matrix<double,3,6> dXc1_dxi = dXc_dxi_from_Xc(Xc1); // right perturbation
+        const Eigen::Matrix<double,3,6> dXc2_dxi = dXc_dxi_from_Xc(Xc2);
+
+        const Eigen::Matrix<double,2,6> Jpose1 = Jpi1 * dXc1_dxi;
+        const Eigen::Matrix<double,2,6> Jpose2 = Jpi2 * dXc2_dxi;
+
+        const Eigen::RowVector2d ab(a,b);
+
+        // pose jac: e0,e1
+        _jacobianOplus[0].row(0) = ab * Jpose1;
+        _jacobianOplus[0].row(1) = ab * Jpose2;
+
+        // point jac (world point -> camera): dXc/dPw = Rcw
+        // e0 depends only on P1; e1 depends only on P2
+        _jacobianOplus[1].row(0) = ab * Jpi1 * Rcw;
+        _jacobianOplus[2].row(1) = ab * Jpi2 * Rcw;
+
+        // ---- regularization part (e2,e3) ----
+        const Eigen::Vector3d d = Pw1 - Pw2;
+        const double L = d.norm();
+
+        // e2 = wLength*(L - L0)
+        if (L > 1e-9) {
+            const Eigen::RowVector3d dL_dPw1 = (d / L).transpose();   // 1x3
+            const Eigen::RowVector3d dL_dPw2 = -(d / L).transpose();  // 1x3
+
+            _jacobianOplus[1].row(2) = wLength * dL_dPw1;
+            _jacobianOplus[2].row(2) = wLength * dL_dPw2;
+        }
+
+        // e3 = wDirection * || dir x dir0 ||,  dir = d/L
+        // Let c = dir x dir0, s = ||c||
+        // dr/d(dir) = wDirection*(1/s)* c^T * (-[dir0]_x)  (1x3)
+        // d(dir)/d(d) = (I - dir dir^T)/L
+        // d(d)/dPw1 = I, d(d)/dPw2 = -I
+        if (L > 1e-9 && dir0.squaredNorm() > 0.5) {
+            const Eigen::Vector3d dir = d / L;
+            const Eigen::Vector3d cvec = dir.cross(dir0);
+            const double s = cvec.norm();
+
+            if (s > 1e-12) {
+                // -[dir0]_x
+                Eigen::Matrix3d minus_dir0_hat;
+                minus_dir0_hat <<  0.0,      dir0(2), -dir0(1),
+                                  -dir0(2),  0.0,      dir0(0),
+                                   dir0(1), -dir0(0),  0.0;
+
+                // (1/s) * c^T * (-[dir0]_x)  => 1x3
+                const Eigen::RowVector3d dr_dDir =
+                    (wDirection / s) * (cvec.transpose() * minus_dir0_hat);
+
+                // dDir/dD = (I - dir*dir^T)/L
+                const Eigen::Matrix3d I = Eigen::Matrix3d::Identity();
+                const Eigen::Matrix3d dDir_dD = (I - dir*dir.transpose()) / L;
+
+                const Eigen::RowVector3d dr_dD = dr_dDir * dDir_dD; // 1x3
+
+                _jacobianOplus[1].row(3) = dr_dD;     // Pw1
+                _jacobianOplus[2].row(3) = -dr_dD;    // Pw2
+            }
+        }
+
+        // pose does not affect (e2,e3) because we regularize in WORLD endpoints
+        // _jacobianOplus[0].row(2/3) are already zero.
+    }
+
+private:
+    // ---------------- helpers ----------------
+    inline Eigen::Vector2d cam2pixel(const Eigen::Vector3d& Xc) const {
+        return Eigen::Vector2d(
+            fx * Xc(0) / Xc(2) + cx,
+            fy * Xc(1) / Xc(2) + cy
+        );
+    }
+
+    inline Eigen::Matrix<double,2,3>
+    projectionJacobian_Xc(const Eigen::Vector3d &Xc) const
+    {
+        const double x = Xc(0), y = Xc(1), z = Xc(2);
+        const double z2 = z*z;
+        Eigen::Matrix<double,2,3> J;
+        J << fx/z,     0, -fx*x/z2,
+                 0, fy/z, -fy*y/z2;
+        return J;
+    }
+
+    // right perturbation (VertexSE3Expmap typical):
+    // dXc/dxi = [ -skew(Xc) | I ]
+    inline Eigen::Matrix<double,3,6>
+    dXc_dxi_from_Xc(const Eigen::Vector3d& Xc) const
+    {
+        Eigen::Matrix<double,3,6> J;
+        J.setZero();
+
+        const double x = Xc(0);
+        const double y = Xc(1);
+        const double z = Xc(2);
+
+        // -skew(Xc)
+        J(0,1) =  z;   J(0,2) = -y;
+        J(1,0) = -z;   J(1,2) =  x;
+        J(2,0) =  y;   J(2,1) = -x;
+
+        // translation
+        J.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+        return J;
+    }
+
+public:
+    // intrinsics
+    double fx, fy, cx, cy;
+
+    // observed 2D line (normalized): a*u + b*v + c = 0
+    double a, b, c;
+
+    // regularization
+    double wLength;
+    double wDirection;
+
+    double length0;        // initial length
+    Eigen::Vector3d dir0;  // initial direction (unit)
+};
+
+class EdgeLineMidpointPrior
+    : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
+                                 g2o::VertexSBAPointXYZ, g2o::VertexSBAPointXYZ>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    // measurement: m0
+    EdgeLineMidpointPrior(const Eigen::Vector3d& m0, double lambdaM)
+        : m0_(m0), lambdaM_(lambdaM) {}
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void computeError() override
+    {
+        const auto* v1 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* v2 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[1]);
+        Eigen::Vector3d m = 0.5 * (v1->estimate() + v2->estimate());
+        if (!m.allFinite() || !m0_.allFinite()) {
+            _error.setZero();
+            return;
+        }
+        _error = lambdaM_ * (m - m0_);
+    }
+
+    void linearizeOplus() override
+    {
+        _jacobianOplusXi.setZero(); // 3x3
+        _jacobianOplusXj.setZero(); // 3x3
+
+        Eigen::Matrix3d J = 0.5 * lambdaM_ * Eigen::Matrix3d::Identity();
+        _jacobianOplusXi = J;
+        _jacobianOplusXj = J;
+    }
+
+private:
+    Eigen::Vector3d m0_;
+    double lambdaM_ = 1.0;
+};
+
 
 
 // Edge for SE3 pose and Plucker line optimization (通过测试，可用， 需要再测试数值是否正确)
