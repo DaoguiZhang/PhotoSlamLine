@@ -2212,8 +2212,17 @@ public:
             _jacobianOplusXi.setZero();
             _jacobianOplusXj.setZero();
         }
+
+        //mJPoint = Jimg * R;
+        //mJPose = Jimg * Jse3;
     }
 
+    // ---- SAFE getters (不要用 jacobianOplusXi() 这种版本相关接口) ----
+    //inline const Eigen::Matrix<double,1,3>& JPoint() const { return mJPoint; }
+   // inline const Eigen::Matrix<double,1,6>& JPose()  const { return mJPose; }
+
+    //Eigen::Matrix<double, 1, 3> mJPoint;
+    //Eigen::Matrix<double, 1, 6> mJPose;
     double fx, fy, cx, cy;
 };
 
@@ -2272,7 +2281,6 @@ private:
     double lambda_;
 };
 
-
 class EdgeLineDirectionPrior
     : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
                                  g2o::VertexSBAPointXYZ, g2o::VertexSBAPointXYZ>
@@ -2327,6 +2335,47 @@ private:
     }
     Eigen::Vector3d d0_;
     double lambdaD_ = 1.0;
+};
+
+class EdgeLineMidpointPrior
+    : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
+                                 g2o::VertexSBAPointXYZ, g2o::VertexSBAPointXYZ>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    // measurement: m0
+    EdgeLineMidpointPrior(const Eigen::Vector3d& m0, double lambdaM)
+        : m0_(m0), lambdaM_(lambdaM) {}
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void computeError() override
+    {
+        const auto* v1 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* v2 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[1]);
+        Eigen::Vector3d m = 0.5 * (v1->estimate() + v2->estimate());
+        if (!m.allFinite() || !m0_.allFinite()) {
+            _error.setZero();
+            return;
+        }
+        _error = lambdaM_ * (m - m0_);
+    }
+
+    void linearizeOplus() override
+    {
+        _jacobianOplusXi.setZero(); // 3x3
+        _jacobianOplusXj.setZero(); // 3x3
+
+        Eigen::Matrix3d J = 0.5 * lambdaM_ * Eigen::Matrix3d::Identity();
+        _jacobianOplusXi = J;
+        _jacobianOplusXj = J;
+    }
+
+private:
+    Eigen::Vector3d m0_;
+    double lambdaM_ = 1.0;
 };
 
 
@@ -2600,46 +2649,6 @@ public:
     Eigen::Vector3d dir0;  // initial direction (unit)
 };
 
-class EdgeLineMidpointPrior
-    : public g2o::BaseBinaryEdge<3, Eigen::Vector3d,
-                                 g2o::VertexSBAPointXYZ, g2o::VertexSBAPointXYZ>
-{
-public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-    // measurement: m0
-    EdgeLineMidpointPrior(const Eigen::Vector3d& m0, double lambdaM)
-        : m0_(m0), lambdaM_(lambdaM) {}
-
-    bool read(std::istream&) override { return false; }
-    bool write(std::ostream&) const override { return false; }
-
-    void computeError() override
-    {
-        const auto* v1 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
-        const auto* v2 = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[1]);
-        Eigen::Vector3d m = 0.5 * (v1->estimate() + v2->estimate());
-        if (!m.allFinite() || !m0_.allFinite()) {
-            _error.setZero();
-            return;
-        }
-        _error = lambdaM_ * (m - m0_);
-    }
-
-    void linearizeOplus() override
-    {
-        _jacobianOplusXi.setZero(); // 3x3
-        _jacobianOplusXj.setZero(); // 3x3
-
-        Eigen::Matrix3d J = 0.5 * lambdaM_ * Eigen::Matrix3d::Identity();
-        _jacobianOplusXi = J;
-        _jacobianOplusXj = J;
-    }
-
-private:
-    Eigen::Vector3d m0_;
-    double lambdaM_ = 1.0;
-};
 
 
 

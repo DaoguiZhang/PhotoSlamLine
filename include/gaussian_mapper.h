@@ -120,6 +120,13 @@ public:
         const int width,
         const int height,
         const bool main_vision = false);
+    
+    //render with line
+    cv::Mat renderFromPose_WithLine(
+        const Sophus::SE3f &Tcw,
+        const int width,
+        const int height,
+        const bool main_vision = false);
 
     int getIteration();
     void increaseIteration(const int inc = 1);
@@ -171,6 +178,8 @@ protected:
 
     void combineMappingOperations();
 
+    void combineMappingOperations_withLine();   //Get Line 3D
+
     void handleNewKeyframe(std::tuple<unsigned long,
                                       unsigned long,
                                       Sophus::SE3f,
@@ -181,6 +190,19 @@ protected:
                                       std::vector<float>,
                                       std::string,
                                       std::vector<float>> &kf);
+    
+    // Handle new keyframe with line information
+    void handleNewKeyframe_WithLine(std::tuple<unsigned long,
+                                      unsigned long,
+                                      Sophus::SE3f,
+                                      cv::Mat,
+                                      bool,
+                                      cv::Mat,
+                                      std::vector<float>,
+                                      std::vector<float>,
+                                      std::string,
+                                      std::vector<float>> &kf);                                  
+
     void generateKfidRandomShuffle();
     std::shared_ptr<GaussianKeyframe> useOneRandomSlidingWindowKeyframe();
     std::shared_ptr<GaussianKeyframe> useOneRandomKeyframe();

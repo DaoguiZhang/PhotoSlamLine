@@ -84,6 +84,10 @@ public:
     void static LocalBundleAdjustmentWithLinesPlucker(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static TestPluckerLineEdgeJacobian();
     //debug function
+    void static TestEdgeSE3ProjectPointToLine2D_Jacobian();
+    void static TestEdgeLineLengthPrior_Jacobian_SAFE();
+    void static TestEdgeLineDirectionPrior_Jacobian_SAFE();
+    static g2o::SE3Quat se3Plus_ZDG(const g2o::SE3Quat& T, const Eigen::Matrix<double,6,1>& dx);
     void static TestEdgeSE3ProjectXYZOnlyPose();
     void static TestEdgeSE3ProjectLine_PoseAndPoints();
     void static TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine();

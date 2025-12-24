@@ -51,6 +51,11 @@ public:
     std::map<std::size_t, std::shared_ptr<GaussianKeyframe>>& keyframes();
     std::map<std::size_t, std::shared_ptr<GaussianKeyframe>> getAllKeyframes();
 
+    void addKeyframeWithLine(std::shared_ptr<GaussianKeyframe> new_kf, bool* shuffled);
+    std::shared_ptr<GaussianKeyframe> getKeyframeWithLine(std::size_t fid);
+    std::map<std::size_t, std::shared_ptr<GaussianKeyframe>>& keyframesWithLine();
+    std::map<std::size_t, std::shared_ptr<GaussianKeyframe>> getAllKeyframesWithLine();
+
     void cachePoint3D(point3D_id_t point3D_id, Point3D& point3d);
     Point3D& getPoint3D(point3D_id_t point3DId);
     void clearCachedPoint3D();

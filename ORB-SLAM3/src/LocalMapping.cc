@@ -418,8 +418,15 @@ void LocalMapping::RunWithLine()
                         //std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization" << std::endl;
                         //Optimizer::LocalBundleAdjustmentWithLine_Optimization(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         //std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization" << std::endl;
-
+                        
+                        //
+                        
                         //测试通过（只优化位姿和点+线，它们同时优化，加正则项，这些正则项是约束，防止线段跑远等等）
+                        // std::cerr << "test jac " << std::endl;
+                        // Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian(); //debug, line(end points)(6x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
+                        // Optimizer::TestEdgeLineLengthPrior_Jacobian_SAFE(); //debug, 线段长度先验边的雅可比矩阵测试函数（数值测试通过）
+                        // Optimizer::TestEdgeLineDirectionPrior_Jacobian_SAFE(); //debug, 线段方向先验边的雅可比矩阵测试函数（数值测试通过）
+                        // std::cerr << "end test jac " << std::endl;
                         std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
                         Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;

@@ -4175,9 +4175,9 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     }
 
     // // --------- add Line Length Prior edges (ONCE per MapLine) ----------
-    const double lambdaL = 2.0;   // 1~5
-    const double lambdaD = 1.0;   // 0.5~2
-    const double lambdaM = 0.2;   // 0.05~0.5  (不要太大，防止锁死) 
+    const double lambdaL = 5.0;   // 1~5
+    const double lambdaD = 2.0;   // 0.5~2
+    const double lambdaM = 0.5;   // 0.05~0.5  (不要太大，防止锁死)
 
     for (MapLine* pML : lLocalMapLines)
     {
@@ -4321,15 +4321,13 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     }
 
     std::cerr << "Added " << addedLineEdges << " (binary) line endpoint edges.\n";
-
-    
     // --- 9. run optimization (you can do robust iterations as desired) ---
     if (pbStopFlag && *pbStopFlag) return;
     optimizer.initializeOptimization();
-    std::cerr << "Starting optimization with " << nEdges << " edges." << std::endl;
-    std::cerr << "Line edges added: " << vpEdgesLineMono.size() << std::endl;
+    //std::cerr << "Starting optimization with " << nEdges << " edges." << std::endl;
+    //std::cerr << "Line edges added: " << vpEdgesLineMono.size() << std::endl;
     optimizer.optimize(10);
-    std::cerr << "Optimization done." << std::endl;
+    //std::cerr << "Optimization done." << std::endl;
     // --- 10. outlier detection (points) ---
     vector<pair<KeyFrame*,MapPoint*>> vToErasePoints;
     vToErasePoints.reserve(vpEdgesMono.size() + vpEdgesBody.size() + vpEdgesStereo.size());
@@ -4442,6 +4440,347 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     num_Lines = lLocalMapLines.size();
 }
 
+
+void Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian()
+{
+    using namespace g2o;
+
+    std::cout << "\n============================================\n";
+    std::cout << "Jacobian Check: EdgeSE3ProjectPointToLine2D (SAFE)\n";
+    std::cout << "============================================\n";
+
+    constexpr double eps = 1e-6;
+
+    // ----------------------------
+    // 1. 构造 pose
+    // ----------------------------
+    VertexSE3Expmap vPose;
+    vPose.setEstimate(SE3Quat(
+        Eigen::Quaterniond::Identity(),
+        Eigen::Vector3d(0.1, -0.2, 0.3)
+    ));
+    SE3Quat T0 = vPose.estimate();
+
+    // ----------------------------
+    // 2. 构造 point
+    // ----------------------------
+    Eigen::Vector3d Xw(1.2, 0.5, 4.0);
+
+    // ----------------------------
+    // 3. 相机内参
+    // ----------------------------
+    const double fx = 500.0;
+    const double fy = 500.0;
+    const double cx = 320.0;
+    const double cy = 240.0;
+
+    // ----------------------------
+    // 4. 构造观测直线 ax + by + c = 0（单位化）
+    // ----------------------------
+    double a, b, c;
+    {
+        double u1 = 100, v1 = 120;
+        double u2 = 420, v2 = 260;
+        double dx = u2 - u1;
+        double dy = v2 - v1;
+        double n = std::sqrt(dx*dx + dy*dy);
+        a =  dy / n;
+        b = -dx / n;
+        c = -(a*u1 + b*v1);
+    }
+
+    // ----------------------------
+    // 5. 投影函数
+    // ----------------------------
+    auto project = [&](const Eigen::Vector3d& Xc){
+        return Eigen::Vector2d(
+            fx * Xc(0) / Xc(2) + cx,
+            fy * Xc(1) / Xc(2) + cy
+        );
+    };
+
+    auto projectJac = [&](const Eigen::Vector3d& Xc){
+        Eigen::Matrix<double,2,3> J;
+        double x = Xc(0), y = Xc(1), z = Xc(2), z2 = z*z;
+        J << fx/z,   0,    -fx*x/z2,
+              0,    fy/z, -fy*y/z2;
+        return J;
+    };
+
+    // ----------------------------
+    // 6. 误差函数 r = a*u + b*v + c
+    // ----------------------------
+    auto compute_error = [&](const SE3Quat& T){
+        Eigen::Vector3d Xc = T.map(Xw);
+        Eigen::Vector2d uv = project(Xc);
+        return a * uv(0) + b * uv(1) + c;
+    };
+
+    // ============================================================
+    // 7. 解析 Jacobian
+    // ============================================================
+    Eigen::Matrix<double,1,3> Ji_ana;
+    Eigen::Matrix<double,1,6> Jj_ana;
+
+    {
+        Eigen::Vector3d Xc = T0.map(Xw);
+        Eigen::Matrix3d R = T0.rotation().toRotationMatrix();
+
+        Eigen::Matrix<double,2,3> Jpi = projectJac(Xc);
+        Eigen::RowVector2d ab(a,b);
+        Eigen::RowVector3d Jimg = ab * Jpi;   // dr/dXc
+
+        // wrt point
+        Ji_ana = Jimg * R;
+
+        // wrt pose: dXc/dxi = [-skew(Xc) | I]
+        Eigen::Matrix<double,3,6> Jse3;
+        Jse3.setZero();
+        Jse3(0,1)= Xc(2);  Jse3(0,2)= -Xc(1);
+        Jse3(1,0)= -Xc(2); Jse3(1,2)=  Xc(0);
+        Jse3(2,0)= Xc(1);  Jse3(2,1)= -Xc(0);
+        Jse3.block<3,3>(0,3).setIdentity();
+
+        Jj_ana = Jimg * Jse3;
+    }
+
+    // ============================================================
+    // 8. 数值 Jacobian
+    // ============================================================
+    Eigen::Matrix<double,1,3> Ji_num;
+    Eigen::Matrix<double,1,6> Jj_num;
+
+    // ---- wrt point ----
+    for (int k = 0; k < 3; ++k)
+    {
+        Eigen::Vector3d dp = Eigen::Vector3d::Zero();
+        dp(k) = eps;
+
+        double rp = compute_error(T0);
+        double rm = compute_error(T0);
+
+        rp = compute_error(SE3Quat(T0.rotation(), T0.translation()));
+        rm = compute_error(SE3Quat(T0.rotation(), T0.translation()));
+
+        rp = compute_error(SE3Quat(T0.rotation(), T0.translation()));
+        rm = compute_error(SE3Quat(T0.rotation(), T0.translation()));
+
+        rp = compute_error(SE3Quat(T0.rotation(), T0.translation()));
+
+        // 手动 perturb point
+        Eigen::Vector3d Xp = Xw + dp;
+        Eigen::Vector3d Xm = Xw - dp;
+
+        rp = a * project(T0.map(Xp))(0) + b * project(T0.map(Xp))(1) + c;
+        rm = a * project(T0.map(Xm))(0) + b * project(T0.map(Xm))(1) + c;
+
+        Ji_num(0,k) = (rp - rm) / (2*eps);
+    }
+
+    // ---- wrt pose ----
+    for (int k = 0; k < 6; ++k)
+    {
+        Eigen::Matrix<double,6,1> dx = Eigen::Matrix<double,6,1>::Zero();
+        dx(k) = eps;
+
+        VertexSE3Expmap vp, vm;
+        vp.setEstimate(T0);
+        vm.setEstimate(T0);
+
+        vp.oplus(dx.data());
+        dx(k) = -eps;
+        vm.oplus(dx.data());
+
+        double rp = compute_error(vp.estimate());
+        double rm = compute_error(vm.estimate());
+
+        Jj_num(0,k) = (rp - rm) / (2*eps);
+    }
+
+    // ============================================================
+    // 9. 输出结果
+    // ============================================================
+    std::cout << "\nAnalytic Ji:\n" << Ji_ana << "\n";
+    std::cout << "Numeric  Ji:\n" << Ji_num << "\n";
+    std::cout << "Diff     Ji:\n" << (Ji_ana - Ji_num) << "\n";
+
+    std::cout << "\nAnalytic Jj:\n" << Jj_ana << "\n";
+    std::cout << "Numeric  Jj:\n" << Jj_num << "\n";
+    std::cout << "Diff     Jj:\n" << (Jj_ana - Jj_num) << "\n";
+
+    std::cout << "\nMax |diff| = "
+              << std::max(
+                    (Ji_ana - Ji_num).cwiseAbs().maxCoeff(),
+                    (Jj_ana - Jj_num).cwiseAbs().maxCoeff()
+                 )
+              << "\n";
+
+    std::cout << "====== Jacobian Check Done ======\n";
+}
+
+void Optimizer::TestEdgeLineLengthPrior_Jacobian_SAFE()
+{
+    std::cout << "\n============================================\n";
+    std::cout << "Jacobian Check: Line Length Prior (SAFE)\n";
+    std::cout << "============================================\n";
+
+    constexpr double eps = 1e-6;
+
+    // ---- test data ----
+    Eigen::Vector3d p1(1.0, 0.2, 3.5);
+    Eigen::Vector3d p2(1.4, 0.1, 3.7);
+
+    const double lambdaL = 2.0;
+
+    // L0 用初始长度（也可以给固定值）
+    const double L0 = (p2 - p1).norm();
+
+    auto compute_r = [&](const Eigen::Vector3d& _p1, const Eigen::Vector3d& _p2)->double{
+        Eigen::Vector3d s = _p2 - _p1;
+        double l = s.norm();
+        if(!std::isfinite(l) || l < 1e-12) return 1e6;
+        return lambdaL * (l - L0);
+    };
+
+    // ---- analytic jacobians ----
+    Eigen::RowVector3d Jp1_ana, Jp2_ana;
+    {
+        Eigen::Vector3d s = p2 - p1;
+        double l = s.norm();
+        Eigen::Vector3d shat = s / l;
+        Jp2_ana = lambdaL * shat.transpose();
+        Jp1_ana = -Jp2_ana;
+    }
+
+    // ---- numeric jacobians ----
+    Eigen::RowVector3d Jp1_num, Jp2_num;
+
+    for(int k=0;k<3;k++)
+    {
+        Eigen::Vector3d dp = Eigen::Vector3d::Zero();
+        dp(k) = eps;
+
+        // p1
+        double rp = compute_r(p1 + dp, p2);
+        double rm = compute_r(p1 - dp, p2);
+        Jp1_num(k) = (rp - rm) / (2*eps);
+
+        // p2
+        rp = compute_r(p1, p2 + dp);
+        rm = compute_r(p1, p2 - dp);
+        Jp2_num(k) = (rp - rm) / (2*eps);
+    }
+
+    std::cout << "\nJp1 analytic:\n" << Jp1_ana << "\n";
+    std::cout << "Jp1 numeric :\n" << Jp1_num << "\n";
+    std::cout << "diff        :\n" << (Jp1_ana - Jp1_num) << "\n";
+
+    std::cout << "\nJp2 analytic:\n" << Jp2_ana << "\n";
+    std::cout << "Jp2 numeric :\n" << Jp2_num << "\n";
+    std::cout << "diff        :\n" << (Jp2_ana - Jp2_num) << "\n";
+
+    double maxDiff = std::max((Jp1_ana - Jp1_num).cwiseAbs().maxCoeff(),
+                             (Jp2_ana - Jp2_num).cwiseAbs().maxCoeff());
+
+    std::cout << "\nMax |diff| = " << maxDiff << "\n";
+    std::cout << "------ end test ------\n";
+}
+
+void Optimizer::TestEdgeLineDirectionPrior_Jacobian_SAFE()
+{
+    std::cout << "\n============================================\n";
+    std::cout << "Jacobian Check: Line Direction Prior (SAFE, 3D residual)\n";
+    std::cout << "============================================\n";
+
+    constexpr double eps = 1e-6;
+
+    // ---- test data ----
+    Eigen::Vector3d p1(1.0, 0.2, 3.5);
+    Eigen::Vector3d p2(1.4, 0.1, 3.7);
+
+    const double lambdaD = 2.0;
+
+    // target direction (must be unit)
+    Eigen::Vector3d d0(1.0, 0.1, 0.0);
+    d0.normalize();
+
+    auto compute_r = [&](const Eigen::Vector3d& _p1, const Eigen::Vector3d& _p2)->Eigen::Vector3d{
+        Eigen::Vector3d s = _p2 - _p1;
+        Eigen::Vector3d d;
+        double l;
+        if(!UtilSlam::SafeNormalize_ZDG(s, d, l)) return Eigen::Vector3d(1e3,1e3,1e3);
+        return lambdaD * (d.cross(d0)); // 3D residual
+    };
+
+    // ---- analytic jacobians (3x3 for p1 and p2) ----
+    Eigen::Matrix3d Jp1_ana, Jp2_ana;
+    {
+        Eigen::Vector3d s = p2 - p1;
+        Eigen::Vector3d d;
+        double l;
+        if(!UtilSlam::SafeNormalize_ZDG(s, d, l))
+        {
+            std::cout << "[ERROR] degenerate line\n";
+            return;
+        }
+
+        // dd/ds = (I - d d^T)/l
+        Eigen::Matrix3d P = Eigen::Matrix3d::Identity() - d*d.transpose();
+        Eigen::Matrix3d dd_ds = P / l;
+
+        // r = lambda * (d x d0) = -lambda * [d0]_x d
+        Eigen::Matrix3d dr_dd = -lambdaD * Skew(d0);
+
+        Eigen::Matrix3d dr_ds = dr_dd * dd_ds;
+
+        Jp2_ana = dr_ds;
+        Jp1_ana = -dr_ds;
+    }
+
+    // ---- numeric jacobians ----
+    Eigen::Matrix3d Jp1_num, Jp2_num;
+    Jp1_num.setZero(); Jp2_num.setZero();
+
+    for(int k=0;k<3;k++)
+    {
+        Eigen::Vector3d dp = Eigen::Vector3d::Zero();
+        dp(k) = eps;
+
+        // p1
+        Eigen::Vector3d rp = compute_r(p1 + dp, p2);
+        Eigen::Vector3d rm = compute_r(p1 - dp, p2);
+        Jp1_num.col(k) = (rp - rm) / (2*eps);
+
+        // p2
+        rp = compute_r(p1, p2 + dp);
+        rm = compute_r(p1, p2 - dp);
+        Jp2_num.col(k) = (rp - rm) / (2*eps);
+    }
+
+    std::cout << "\nJp1 analytic:\n" << Jp1_ana << "\n";
+    std::cout << "\nJp1 numeric:\n" << Jp1_num << "\n";
+    std::cout << "\nJp1 diff:\n" << (Jp1_ana - Jp1_num) << "\n";
+
+    std::cout << "\nJp2 analytic:\n" << Jp2_ana << "\n";
+    std::cout << "\nJp2 numeric:\n" << Jp2_num << "\n";
+    std::cout << "\nJp2 diff:\n" << (Jp2_ana - Jp2_num) << "\n";
+
+    double maxDiff = std::max((Jp1_ana - Jp1_num).cwiseAbs().maxCoeff(),
+                             (Jp2_ana - Jp2_num).cwiseAbs().maxCoeff());
+
+    std::cout << "\nMax |diff| = " << maxDiff << "\n";
+    std::cout << "------ end test ------\n";
+}
+
+
+g2o::SE3Quat Optimizer::se3Plus_ZDG(const g2o::SE3Quat& T, const Eigen::Matrix<double,6,1>& dx)
+{
+    Eigen::Vector3d omega = dx.head<3>();
+    Eigen::Vector3d upsilon = dx.tail<3>();
+    Sophus::SE3d dT(Sophus::SO3d::exp(omega), upsilon);
+    Sophus::SE3d Tnew = dT * Sophus::SE3d(T.rotation(), T.translation());
+    return g2o::SE3Quat(Tnew.rotationMatrix(), Tnew.translation());
+}
 
 // Local Bundle Adjustment with Line Support, Old Version (Plucker Coordinates)
 void Optimizer::LocalBundleAdjustmentWithLinesPluckerOld(
