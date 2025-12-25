@@ -29,6 +29,8 @@
 #include "types.h"
 #include "camera.h"
 #include "point2d.h"
+#include "line_2d.h"
+#include "line_3d.h"
 #include "general_utils.h"
 #include "graphics_utils.h"
 #include "tensor_utils.h"
@@ -131,6 +133,9 @@ public:
     std::vector<Point2D> points2D_;
     std::vector<float> kps_pixel_;
     std::vector<float> kps_point_local_;
+
+    std::vector<Line2D> lines2D_;   //Add line into the Gaussian splatting optimization
+    std::vector<Line3D> lines3D_;   //Add line into the Gaussian splatting optimization
 
     bool done_inactive_geo_densify_ = false;
 };

@@ -16,9 +16,9 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "include/gaussian_mapper.h"
+#include "include/gaussian_mapper_line.h"
 
-GaussianMapper::GaussianMapper(
+GaussianMapperLine::GaussianMapperLine(
     std::shared_ptr<ORB_SLAM3::System> pSLAM,
     std::filesystem::path gaussian_config_file_path,
     std::filesystem::path result_dir,
@@ -54,7 +54,7 @@ GaussianMapper::GaussianMapper(
     }
 
     result_dir_ = result_dir;
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(result_dir)
     config_file_path_ = gaussian_config_file_path;
     readConfigFromFile(gaussian_config_file_path);
 
@@ -69,8 +69,8 @@ GaussianMapper::GaussianMapper(
     override_color_ = torch::empty(0, torch::TensorOptions().device(device_type_));
 
     // Initialize scene and model
-    gaussians_ = std::make_shared<GaussianModel>(model_params_);
-    scene_ = std::make_shared<GaussianScene>(model_params_);
+    gaussians_ = std::make_shared<GaussianModelLine>(model_params_);
+    scene_ = std::make_shared<GaussianSceneLine>(model_params_);
 
     // Mode
     if (!pSLAM) {
@@ -116,7 +116,7 @@ GaussianMapper::GaussianMapper(
     // TODO: not only monocular
     auto settings = pSLAM->getSettings();
     cv::Size SLAM_im_size = settings->newImSize();
-    UndistortParams undistort_params(
+    UndistortParamsLine undistort_params(
         SLAM_im_size,
         settings->camera1DistortionCoef()
     );
@@ -229,7 +229,7 @@ GaussianMapper::GaussianMapper(
     }
 }
 
-void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
+void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
 {
     cv::FileStorage settings_file(cfg_path.string().c_str(), cv::FileStorage::READ);
     if(!settings_file.isOpened()) {
@@ -368,7 +368,7 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["GaussianViewer.image_scale_main"].operator float();
 }
 
-void GaussianMapper::run()
+void GaussianMapperLine::run()
 {
     // First loop: Initial gaussian mapping
     while (!isStopped()) {
@@ -380,10 +380,12 @@ void GaussianMapper::run()
             auto pMap = pSLAM_->getAtlas()->GetCurrentMap();
             std::vector<ORB_SLAM3::KeyFrame*> vpKFs;
             std::vector<ORB_SLAM3::MapPoint*> vpMPs;
+            std::vector<ORB_SLAM3::MapLine*> vpMPLs;
             {
                 std::unique_lock<std::mutex> lock_map(pMap->mMutexMapUpdate);
                 vpKFs = pMap->GetAllKeyFrames();
                 vpMPs = pMap->GetAllMapPoints();
+                vpMPLs = pMap->GetAllMapLines();
                 for (const auto& pMP : vpMPs){
                     Point3D point3D;
                     auto pos = pMP->GetWorldPos();
@@ -396,8 +398,18 @@ void GaussianMapper::run()
                     point3D.color_(2) = color(2);
                     scene_->cachePoint3D(pMP->mnId, point3D);
                 }
+                for (size_t i = 0; i < vpMPLs.size(); i++)
+                {
+                    const auto& pML = vpMPLs[i];
+                    Line3D line3D;
+                    //line3D.start_ = scene_->getPoint3D(pML->GetStartPointId());
+                    //line3D.end_ = scene_->getPoint3D(pML->GetEndPointId());
+                    //line3D.color_ = pML->GetColorRGB();
+                    //scene_->cacheLine3D(pML->mnId, line3D);
+                }
+                
                 for (const auto& pKF : vpKFs){
-                    std::shared_ptr<GaussianKeyframe> new_kf = std::make_shared<GaussianKeyframe>(pKF->mnId, getIteration());
+                    std::shared_ptr<GaussianKeyframeLine> new_kf = std::make_shared<GaussianKeyframeLine>(pKF->mnId, getIteration());
                     new_kf->zfar_ = z_far_;
                     new_kf->znear_ = z_near_;
                     // Pose
@@ -541,7 +553,7 @@ void GaussianMapper::run()
     signalStop();
 }
 
-void GaussianMapper::trainColmap()
+void GaussianMapperLine::trainColmap()
 {
     // Prepare multi resolution images for training
     for (auto& kfit : scene_->keyframes()) {
@@ -611,13 +623,13 @@ void GaussianMapper::trainColmap()
  * @brief The training iteration body
  * 
  */
-void GaussianMapper::trainForOneIteration()
+void GaussianMapperLine::trainForOneIteration()
 {
     increaseIteration(1);
     auto iter_start_timing = std::chrono::steady_clock::now();
 
     // Pick a random Camera
-    std::shared_ptr<GaussianKeyframe> viewpoint_cam = useOneRandomSlidingWindowKeyframe();
+    std::shared_ptr<GaussianKeyframeLine> viewpoint_cam = useOneRandomSlidingWindowKeyframe();
     if (!viewpoint_cam) {
         increaseIteration(-1);
         return;
@@ -674,7 +686,7 @@ void GaussianMapper::trainForOneIteration()
     gaussians_->setRotationLearningRate(rotationLearningRate());
 
     // Render
-    auto render_pkg = GaussianRenderer::render(
+    auto render_pkg = GaussianRendererWithLine::renderWithLine(
         viewpoint_cam,
         image_height,
         image_width,
@@ -741,7 +753,7 @@ void GaussianMapper::trainForOneIteration()
 
         // Log and save
         if (training_report_interval_ && (getIteration() % training_report_interval_ == 0))
-            GaussianTrainer::trainingReport(
+            GaussianTrainerLine::trainingReport(
                 getIteration(),
                 opt_params_.iterations_,
                 Ll1,
@@ -773,19 +785,19 @@ void GaussianMapper::trainForOneIteration()
     }
 }
 
-bool GaussianMapper::isStopped()
+bool GaussianMapperLine::isStopped()
 {
     std::unique_lock<std::mutex> lock_status(this->mutex_status_);
     return this->stopped_;
 }
 
-void GaussianMapper::signalStop(const bool going_to_stop)
+void GaussianMapperLine::signalStop(const bool going_to_stop)
 {
     std::unique_lock<std::mutex> lock_status(this->mutex_status_);
     this->stopped_ = going_to_stop;
 }
 
-bool GaussianMapper::hasMetInitialMappingConditions()
+bool GaussianMapperLine::hasMetInitialMappingConditions()
 {
     if (!pSLAM_->isShutDown() &&
         pSLAM_->GetNumKeyframes() >= min_num_initial_map_kfs_ &&
@@ -796,7 +808,7 @@ bool GaussianMapper::hasMetInitialMappingConditions()
     return conditions_met;
 }
 
-bool GaussianMapper::hasMetIncrementalMappingConditions()
+bool GaussianMapperLine::hasMetIncrementalMappingConditions()
 {
     if (!pSLAM_->isShutDown() &&
         pSLAM_->getAtlas()->hasMappingOperation())
@@ -806,7 +818,7 @@ bool GaussianMapper::hasMetIncrementalMappingConditions()
     return conditions_met;
 }
 
-void GaussianMapper::combineMappingOperations()
+void GaussianMapperLine::combineMappingOperations()
 {
     // Get Mapping Operations
     while (pSLAM_->getAtlas()->hasMappingOperation()) {
@@ -827,7 +839,7 @@ void GaussianMapper::combineMappingOperations()
             for (auto& kf : associated_kfs) {
                 // Keyframe Id
                 auto kfid = std::get<0>(kf);
-                std::shared_ptr<GaussianKeyframe> pkf = scene_->getKeyframe(kfid);
+                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
                 // If the keyframe is already in the scene, only update the pose.   //not update the (world points) -> new camera pose not aligning the world points(????)
                 // Otherwise create a new one
                 if (pkf) {
@@ -885,7 +897,7 @@ void GaussianMapper::combineMappingOperations()
             for (auto& kf : associated_kfs) {
                 // Keyframe Id
                 auto kfid = std::get<0>(kf);
-                std::shared_ptr<GaussianKeyframe> pkf = scene_->getKeyframe(kfid);
+                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
                 // In case new points are added in handleNewKeyframe()
                 int64_t num_new_points = gaussians_->xyz_.size(0) - point_not_transformed_flags.size(0);
                 if (num_new_points > 0)
@@ -993,7 +1005,7 @@ void GaussianMapper::combineMappingOperations()
 
                 // Apply the scaled transformation on gaussian keyframes
                 for (auto& kfit : scene_->keyframes()) {
-                    std::shared_ptr<GaussianKeyframe> pkf = kfit.second;
+                    std::shared_ptr<GaussianKeyframeLine> pkf = kfit.second;
                     Sophus::SE3f Twc = pkf->getPosef().inverse();
                     Twc.translation() *= s;
                     Sophus::SE3f Tyc = T * Twc;
@@ -1014,7 +1026,7 @@ void GaussianMapper::combineMappingOperations()
     }
 }
 
-void GaussianMapper::combineMappingOperations_withLine()
+void GaussianMapperLine::combineMappingOperations_withLine()
 {
     // Get Mapping Operations
     while (pSLAM_->getAtlas()->hasMappingOperation()) {
@@ -1035,7 +1047,7 @@ void GaussianMapper::combineMappingOperations_withLine()
             for (auto& kf : associated_kfs) {
                 // Keyframe Id
                 auto kfid = std::get<0>(kf);
-                std::shared_ptr<GaussianKeyframe> pkf = scene_->getKeyframe(kfid);
+                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
                 // If the keyframe is already in the scene, only update the pose.   //not update the (world points) -> new camera pose not aligning the world points(????)
                 //这样导致很多问题:1. 新的相机位姿与世界点不对齐，导致重投影误差增大,需要在gaussian splatting 的优化中，这些顶点需要重新优化，移动它的位置等等，增加了操作。可以有其它方法来做。找到这些区域的顶点，然后进行局部优化。
                 // Otherwise create a new one
@@ -1094,7 +1106,7 @@ void GaussianMapper::combineMappingOperations_withLine()
             for (auto& kf : associated_kfs) {
                 // Keyframe Id
                 auto kfid = std::get<0>(kf);
-                std::shared_ptr<GaussianKeyframe> pkf = scene_->getKeyframe(kfid);
+                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
                 // In case new points are added in handleNewKeyframe()
                 int64_t num_new_points = gaussians_->xyz_.size(0) - point_not_transformed_flags.size(0);
                 if (num_new_points > 0)
@@ -1202,7 +1214,7 @@ void GaussianMapper::combineMappingOperations_withLine()
 
                 // Apply the scaled transformation on gaussian keyframes
                 for (auto& kfit : scene_->keyframes()) {
-                    std::shared_ptr<GaussianKeyframe> pkf = kfit.second;
+                    std::shared_ptr<GaussianKeyframeLine> pkf = kfit.second;
                     Sophus::SE3f Twc = pkf->getPosef().inverse();
                     Twc.translation() *= s;
                     Sophus::SE3f Tyc = T * Twc;
@@ -1224,7 +1236,7 @@ void GaussianMapper::combineMappingOperations_withLine()
 }
 
 
-void GaussianMapper::handleNewKeyframe(
+void GaussianMapperLine::handleNewKeyframe(
     std::tuple< unsigned long/*Id*/,
                 unsigned long/*CameraId*/,
                 Sophus::SE3f/*pose*/,
@@ -1236,8 +1248,8 @@ void GaussianMapper::handleNewKeyframe(
                 std::string,
                 std::vector<float>> &kf)
 {
-    std::shared_ptr<GaussianKeyframe> pkf =
-        std::make_shared<GaussianKeyframe>(std::get<0>(kf), getIteration());
+    std::shared_ptr<GaussianKeyframeLine> pkf =
+        std::make_shared<GaussianKeyframeLine>(std::get<0>(kf), getIteration());
     pkf->zfar_ = z_far_;
     pkf->znear_ = z_near_;
     // Pose
@@ -1315,7 +1327,7 @@ void GaussianMapper::handleNewKeyframe(
 }
 
 
-void GaussianMapper::handleNewKeyframe_WithLine(
+void GaussianMapperLine::handleNewKeyframe_WithLine(
     std::tuple< unsigned long/*Id*/,
                 unsigned long/*CameraId*/,
                 Sophus::SE3f/*pose*/,
@@ -1327,8 +1339,8 @@ void GaussianMapper::handleNewKeyframe_WithLine(
                 std::string,
                 std::vector<float>> &kf)
 {
-    std::shared_ptr<GaussianKeyframe> pkf =
-        std::make_shared<GaussianKeyframe>(std::get<0>(kf), getIteration());
+    std::shared_ptr<GaussianKeyframeLine> pkf =
+        std::make_shared<GaussianKeyframeLine>(std::get<0>(kf), getIteration());
     pkf->zfar_ = z_far_;
     pkf->znear_ = z_near_;
     // Pose
@@ -1406,8 +1418,7 @@ void GaussianMapper::handleNewKeyframe_WithLine(
 }
 
 
-
-void GaussianMapper::generateKfidRandomShuffle()
+void GaussianMapperLine::generateKfidRandomShuffle()
 {
 // if (viewpoint_sliding_window_.empty())
 //     return;
@@ -1430,8 +1441,8 @@ void GaussianMapper::generateKfidRandomShuffle()
     kfid_shuffled_ = true;
 }
 
-std::shared_ptr<GaussianKeyframe>
-GaussianMapper::useOneRandomSlidingWindowKeyframe()
+std::shared_ptr<GaussianKeyframeLine>
+GaussianMapperLine::useOneRandomSlidingWindowKeyframe()
 {
 // auto t1 = std::chrono::steady_clock::now();
     if (scene_->keyframes().empty())
@@ -1440,7 +1451,7 @@ GaussianMapper::useOneRandomSlidingWindowKeyframe()
     if (!kfid_shuffled_)
         generateKfidRandomShuffle();
 
-    std::shared_ptr<GaussianKeyframe> viewpoint_cam = nullptr;
+    std::shared_ptr<GaussianKeyframeLine> viewpoint_cam = nullptr;
     int random_cam_idx;
 
     if (kfid_shuffled_) {
@@ -1479,8 +1490,8 @@ GaussianMapper::useOneRandomSlidingWindowKeyframe()
     return viewpoint_cam;
 }
 
-std::shared_ptr<GaussianKeyframe>
-GaussianMapper::useOneRandomKeyframe()
+std::shared_ptr<GaussianKeyframeLine>
+GaussianMapperLine::useOneRandomKeyframe()
 {
     if (scene_->keyframes().empty())
         return nullptr;
@@ -1491,7 +1502,7 @@ GaussianMapper::useOneRandomKeyframe()
     auto random_cam_it = scene_->keyframes().begin();
     for (int cam_idx = 0; cam_idx < random_cam_idx; ++cam_idx)
         ++random_cam_it;
-    std::shared_ptr<GaussianKeyframe> viewpoint_cam = (*random_cam_it).second;
+    std::shared_ptr<GaussianKeyframeLine> viewpoint_cam = (*random_cam_it).second;
 
     // Count used times
     auto viewpoint_fid = viewpoint_cam->fid_;
@@ -1503,14 +1514,14 @@ GaussianMapper::useOneRandomKeyframe()
     return viewpoint_cam;
 }
 
-void GaussianMapper::increaseKeyframeTimesOfUse(
-    std::shared_ptr<GaussianKeyframe> pkf,
+void GaussianMapperLine::increaseKeyframeTimesOfUse(
+    std::shared_ptr<GaussianKeyframeLine> pkf,
     int times)
 {
     pkf->remaining_times_of_use_ += times;
 }
 
-void GaussianMapper::cullKeyframes()
+void GaussianMapperLine::cullKeyframes()
 {
     std::unordered_set<unsigned long> kfids =
         pSLAM_->getAtlas()->GetCurrentKeyFrameIds();
@@ -1529,8 +1540,8 @@ void GaussianMapper::cullKeyframes()
     }
 }
 
-void GaussianMapper::increasePcdByKeyframeInactiveGeoDensify(
-    std::shared_ptr<GaussianKeyframe> pkf)
+void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
+    std::shared_ptr<GaussianKeyframeLine> pkf)
 {
 // auto start_timing = std::chrono::steady_clock::now();
     torch::NoGradGuard no_grad;
@@ -1793,7 +1804,7 @@ void GaussianMapper::increasePcdByKeyframeInactiveGeoDensify(
 //     this->interrupt_training_ = interrupt_training;
 // }
 
-void GaussianMapper::recordKeyframeRendered(
+void GaussianMapperLine::recordKeyframeRendered(
         torch::Tensor &rendered,
         torch::Tensor &ground_truth,
         unsigned long kfid,
@@ -1825,7 +1836,7 @@ void GaussianMapper::recordKeyframeRendered(
     }
 }
 
-cv::Mat GaussianMapper::renderFromPose(
+cv::Mat GaussianMapperLine::renderFromPose(
     const Sophus::SE3f &Tcw,
     const int width,
     const int height,
@@ -1833,7 +1844,7 @@ cv::Mat GaussianMapper::renderFromPose(
 {
     if (!initial_mapped_ || getIteration() <= 0)
         return cv::Mat(height, width, CV_32FC3, cv::Vec3f(0.0f, 0.0f, 0.0f));
-    std::shared_ptr<GaussianKeyframe> pkf = std::make_shared<GaussianKeyframe>();
+    std::shared_ptr<GaussianKeyframeLine> pkf = std::make_shared<GaussianKeyframeLine>();
     pkf->zfar_ = z_far_;
     pkf->znear_ = z_near_;
     // Pose
@@ -1855,7 +1866,7 @@ cv::Mat GaussianMapper::renderFromPose(
     {
         std::unique_lock<std::mutex> lock_render(mutex_render_);
         // Render
-        render_pkg = GaussianRenderer::render(
+        render_pkg = GaussianRendererWithLine::renderWithLine(
             pkf,
             height,
             width,
@@ -1875,7 +1886,7 @@ cv::Mat GaussianMapper::renderFromPose(
     return tensor_utils::torchTensor2CvMat_Float32(masked_image);
 }
 
-cv::Mat GaussianMapper::renderFromPose_WithLine(
+cv::Mat GaussianMapperLine::renderFromPose_WithLine(
     const Sophus::SE3f &Tcw,
     const int width,
     const int height,
@@ -1883,7 +1894,7 @@ cv::Mat GaussianMapper::renderFromPose_WithLine(
 {
     if (!initial_mapped_ || getIteration() <= 0)
         return cv::Mat(height, width, CV_32FC3, cv::Vec3f(0.0f, 0.0f, 0.0f));
-    std::shared_ptr<GaussianKeyframe> pkf = std::make_shared<GaussianKeyframe>();
+    std::shared_ptr<GaussianKeyframeLine> pkf = std::make_shared<GaussianKeyframeLine>();
     pkf->zfar_ = z_far_;
     pkf->znear_ = z_near_;
     // Pose
@@ -1905,7 +1916,7 @@ cv::Mat GaussianMapper::renderFromPose_WithLine(
     {
         std::unique_lock<std::mutex> lock_render(mutex_render_);
         // Render
-        render_pkg = GaussianRenderer::render(
+        render_pkg = GaussianRendererWithLine::renderWithLine(
             pkf,
             height,
             width,
@@ -1926,8 +1937,8 @@ cv::Mat GaussianMapper::renderFromPose_WithLine(
 }
 
 
-void GaussianMapper::renderAndRecordKeyframe(
-    std::shared_ptr<GaussianKeyframe> pkf,
+void GaussianMapperLine::renderAndRecordKeyframe(
+    std::shared_ptr<GaussianKeyframeLine> pkf,
     float &dssim,
     float &psnr,
     float &psnr_gs,
@@ -1938,7 +1949,7 @@ void GaussianMapper::renderAndRecordKeyframe(
     std::string name_suffix)
 {
     auto start_timing = std::chrono::steady_clock::now();
-    auto render_pkg = GaussianRenderer::render(
+    auto render_pkg = GaussianRendererWithLine::renderWithLine(
         pkf,
         pkf->image_height_,
         pkf->image_width_,
@@ -1962,23 +1973,23 @@ void GaussianMapper::renderAndRecordKeyframe(
     recordKeyframeRendered(masked_image, gt_image, pkf->fid_, result_img_dir, result_gt_dir, result_loss_dir, name_suffix);    
 }
 
-void GaussianMapper::renderAndRecordAllKeyframes(
+void GaussianMapperLine::renderAndRecordAllKeyframes(
     std::string name_suffix)
 {
     std::filesystem::path result_dir = result_dir_ / (std::to_string(getIteration()) + name_suffix);
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(result_dir)
 
     std::filesystem::path image_dir = result_dir / "image";
     if (record_rendered_image_)
-        CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(image_dir);
+        CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(image_dir);
 
     std::filesystem::path image_gt_dir = result_dir / "image_gt";
     if (record_ground_truth_image_)
-        CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(image_gt_dir);
+        CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(image_gt_dir);
 
     std::filesystem::path image_loss_dir = result_dir / "image_loss";
     if (record_loss_image_) {
-        CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(image_loss_dir);
+        CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(image_loss_dir);
     }
 
     std::filesystem::path render_time_path = result_dir / "render_time.txt";
@@ -2013,25 +2024,25 @@ void GaussianMapper::renderAndRecordAllKeyframes(
     }
 }
 
-void GaussianMapper::savePly(std::filesystem::path result_dir)
+void GaussianMapperLine::savePly(std::filesystem::path result_dir)
 {
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(result_dir)
     keyframesToJson(result_dir);
     saveModelParams(result_dir);
 
     std::filesystem::path ply_dir = result_dir / "point_cloud";
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(ply_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(ply_dir)
 
     ply_dir = ply_dir / ("iteration_" + std::to_string(getIteration()));
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(ply_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(ply_dir)
 
     gaussians_->savePly(ply_dir / "point_cloud.ply");
     gaussians_->saveSparsePointsPly(result_dir / "input.ply");
 }
 
-void GaussianMapper::keyframesToJson(std::filesystem::path result_dir)
+void GaussianMapperLine::keyframesToJson(std::filesystem::path result_dir)
 {
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(result_dir)
 
     std::filesystem::path result_path = result_dir / "cameras.json";
     std::ofstream out_stream;
@@ -2088,9 +2099,9 @@ void GaussianMapper::keyframesToJson(std::filesystem::path result_dir)
     writer->write(json_root, &out_stream);
 }
 
-void GaussianMapper::saveModelParams(std::filesystem::path result_dir)
+void GaussianMapperLine::saveModelParams(std::filesystem::path result_dir)
 {
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(result_dir)
     std::filesystem::path result_path = result_dir / "cfg_args";
     std::ofstream out_stream;
     out_stream.open(result_path);
@@ -2110,9 +2121,9 @@ void GaussianMapper::saveModelParams(std::filesystem::path result_dir)
     out_stream.close();
 }
 
-void GaussianMapper::writeKeyframeUsedTimes(std::filesystem::path result_dir, std::string name_suffix)
+void GaussianMapperLine::writeKeyframeUsedTimes(std::filesystem::path result_dir, std::string name_suffix)
 {
-    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(result_dir)
     std::filesystem::path result_path = result_dir / ("keyframe_used_times" + name_suffix + ".txt");
     std::ofstream out_stream;
     out_stream.open(result_path, std::ios::app);
@@ -2130,174 +2141,174 @@ void GaussianMapper::writeKeyframeUsedTimes(std::filesystem::path result_dir, st
     out_stream.close();
 }
 
-int GaussianMapper::getIteration()
+int GaussianMapperLine::getIteration()
 {
     std::unique_lock<std::mutex> lock(mutex_status_);
     return iteration_;
 }
-void GaussianMapper::increaseIteration(const int inc)
+void GaussianMapperLine::increaseIteration(const int inc)
 {
     std::unique_lock<std::mutex> lock(mutex_status_);
     iteration_ += inc;
 }
 
-float GaussianMapper::positionLearningRateInit()
+float GaussianMapperLine::positionLearningRateInit()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.position_lr_init_;
 }
-float GaussianMapper::featureLearningRate()
+float GaussianMapperLine::featureLearningRate()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.feature_lr_;
 }
-float GaussianMapper::opacityLearningRate()
+float GaussianMapperLine::opacityLearningRate()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.opacity_lr_;
 }
-float GaussianMapper::scalingLearningRate()
+float GaussianMapperLine::scalingLearningRate()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.scaling_lr_;
 }
-float GaussianMapper::rotationLearningRate()
+float GaussianMapperLine::rotationLearningRate()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.rotation_lr_;
 }
-float GaussianMapper::percentDense()
+float GaussianMapperLine::percentDense()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.percent_dense_;
 }
-float GaussianMapper::lambdaDssim()
+float GaussianMapperLine::lambdaDssim()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.lambda_dssim_;
 }
-int GaussianMapper::opacityResetInterval()
+int GaussianMapperLine::opacityResetInterval()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.opacity_reset_interval_;
 }
-float GaussianMapper::densifyGradThreshold()
+float GaussianMapperLine::densifyGradThreshold()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.densify_grad_threshold_;
 }
-int GaussianMapper::densifyInterval()
+int GaussianMapperLine::densifyInterval()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return opt_params_.densification_interval_;
 }
-int GaussianMapper::newKeyframeTimesOfUse()
+int GaussianMapperLine::newKeyframeTimesOfUse()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return new_keyframe_times_of_use_;
 }
-int GaussianMapper::stableNumIterExistence()
+int GaussianMapperLine::stableNumIterExistence()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return stable_num_iter_existence_;
 }
-bool GaussianMapper::isKeepingTraining()
+bool GaussianMapperLine::isKeepingTraining()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return keep_training_;
 }
-bool GaussianMapper::isdoingGausPyramidTraining()
+bool GaussianMapperLine::isdoingGausPyramidTraining()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return do_gaus_pyramid_training_;
 }
-bool GaussianMapper::isdoingInactiveGeoDensify()
+bool GaussianMapperLine::isdoingInactiveGeoDensify()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return inactive_geo_densify_;
 }
 
-void GaussianMapper::setPositionLearningRateInit(const float lr)
+void GaussianMapperLine::setPositionLearningRateInit(const float lr)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.position_lr_init_ = lr;
 }
-void GaussianMapper::setFeatureLearningRate(const float lr)
+void GaussianMapperLine::setFeatureLearningRate(const float lr)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.feature_lr_ = lr;
 }
-void GaussianMapper::setOpacityLearningRate(const float lr)
+void GaussianMapperLine::setOpacityLearningRate(const float lr)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.opacity_lr_ = lr;
 }
-void GaussianMapper::setScalingLearningRate(const float lr)
+void GaussianMapperLine::setScalingLearningRate(const float lr)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.scaling_lr_ = lr;
 }
-void GaussianMapper::setRotationLearningRate(const float lr)
+void GaussianMapperLine::setRotationLearningRate(const float lr)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.rotation_lr_ = lr;
 }
-void GaussianMapper::setPercentDense(const float percent_dense)
+void GaussianMapperLine::setPercentDense(const float percent_dense)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.percent_dense_ = percent_dense;
     gaussians_->setPercentDense(percent_dense);
 }
-void GaussianMapper::setLambdaDssim(const float lambda_dssim)
+void GaussianMapperLine::setLambdaDssim(const float lambda_dssim)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.lambda_dssim_ = lambda_dssim;
 }
-void GaussianMapper::setOpacityResetInterval(const int interval)
+void GaussianMapperLine::setOpacityResetInterval(const int interval)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.opacity_reset_interval_ = interval;
 }
-void GaussianMapper::setDensifyGradThreshold(const float th)
+void GaussianMapperLine::setDensifyGradThreshold(const float th)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.densify_grad_threshold_ = th;
 }
-void GaussianMapper::setDensifyInterval(const int interval)
+void GaussianMapperLine::setDensifyInterval(const int interval)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.densification_interval_ = interval;
 }
-void GaussianMapper::setNewKeyframeTimesOfUse(const int times)
+void GaussianMapperLine::setNewKeyframeTimesOfUse(const int times)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     new_keyframe_times_of_use_ = times;
 }
-void GaussianMapper::setStableNumIterExistence(const int niter)
+void GaussianMapperLine::setStableNumIterExistence(const int niter)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     stable_num_iter_existence_ = niter;
 }
-void GaussianMapper::setKeepTraining(const bool keep)
+void GaussianMapperLine::setKeepTraining(const bool keep)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     keep_training_ = keep;
 }
-void GaussianMapper::setDoGausPyramidTraining(const bool gaus_pyramid)
+void GaussianMapperLine::setDoGausPyramidTraining(const bool gaus_pyramid)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     do_gaus_pyramid_training_ = gaus_pyramid;
 }
-void GaussianMapper::setDoInactiveGeoDensify(const bool inactive_geo_densify)
+void GaussianMapperLine::setDoInactiveGeoDensify(const bool inactive_geo_densify)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     inactive_geo_densify_ = inactive_geo_densify;
 }
 
-VariableParameters GaussianMapper::getVaribleParameters()
+VariableParametersLine GaussianMapperLine::getVaribleParameters()
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
-    VariableParameters params;
+    VariableParametersLine params;
     params.position_lr_init = opt_params_.position_lr_init_;
     params.feature_lr = opt_params_.feature_lr_;
     params.opacity_lr = opt_params_.opacity_lr_;
@@ -2316,7 +2327,7 @@ VariableParameters GaussianMapper::getVaribleParameters()
     return params;
 }
 
-void GaussianMapper::setVaribleParameters(const VariableParameters &params)
+void GaussianMapperLine::setVaribleParameters(const VariableParametersLine &params)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     opt_params_.position_lr_init_ = params.position_lr_init;
@@ -2337,7 +2348,7 @@ void GaussianMapper::setVaribleParameters(const VariableParameters &params)
     inactive_geo_densify_ = params.do_inactive_geo_densify;
 }
 
-void GaussianMapper::loadPly(std::filesystem::path ply_path, std::filesystem::path camera_path)
+void GaussianMapperLine::loadPly(std::filesystem::path ply_path, std::filesystem::path camera_path)
 {
     this->gaussians_->loadPly(ply_path);
 

@@ -427,6 +427,7 @@ void LocalMapping::RunWithLine()
                         // Optimizer::TestEdgeLineLengthPrior_Jacobian_SAFE(); //debug, 线段长度先验边的雅可比矩阵测试函数（数值测试通过）
                         // Optimizer::TestEdgeLineDirectionPrior_Jacobian_SAFE(); //debug, 线段方向先验边的雅可比矩阵测试函数（数值测试通过）
                         // std::cerr << "end test jac " << std::endl;
+                        
                         std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
                         Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;

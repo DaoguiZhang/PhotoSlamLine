@@ -130,6 +130,7 @@ add_library(gaussian_mapper SHARED
     third_party/tinyply/tinyply.h
     third_party/tinyply/tinyply.cpp
     include/gaussian_keyframe.h
+    include/gaussian_keyframe_line.h
     include/gaussian_model.h
     include/gaussian_parameters.h
     include/gaussian_rasterizer.h
@@ -144,17 +145,34 @@ add_library(gaussian_mapper SHARED
     include/tensor_utils.h
     include/camera.h
     include/point_cloud.h
+    include/line_2d.h
+    include/line_3d.h
     include/point2d.h
     include/point3d.h
     include/types.h
+    include/gaussian_mapper_line.h
+    include/gaussian_model_line.h
+    include/gaussian_rasterizer_line.h
+    include/gaussian_renderer_line.h
+    include/gaussian_scene_line.h
+    include/gaussian_trainer_line.h
+    include/gaussian_parameters_line.h
     src/gaussian_keyframe.cpp
+    src/gaussian_keyframe_line.cpp
     src/gaussian_model.cpp
     src/gaussian_parameters.cpp
     src/gaussian_rasterizer.cpp
     src/gaussian_renderer.cpp
     src/gaussian_scene.cpp
     src/gaussian_trainer.cpp
-    src/gaussian_mapper.cpp)
+    src/gaussian_mapper.cpp
+    src/gaussian_model_line.cpp
+    src/gaussian_rasterizer_line.cpp
+    src/gaussian_renderer_line.cpp
+    src/gaussian_scene_line.cpp
+    src/gaussian_trainer_line.cpp
+    src/gaussian_mapper_line.cpp
+    src/gaussian_parameters_line.cpp)
 target_link_libraries(gaussian_mapper
     ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
     ${OpenCV_LIBRARIES}
