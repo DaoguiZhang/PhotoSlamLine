@@ -22,4 +22,5 @@
 
 typedef std::uint32_t point2D_idx_t;
 typedef std::uint64_t point3D_id_t;
+typedef std::uint64_t line3D_id_t;
 typedef std::uint32_t camera_id_t;

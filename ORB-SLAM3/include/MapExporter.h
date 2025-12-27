@@ -149,6 +149,18 @@ public:
         const std::string &filename = "map_lines_with_camera_axes.obj",
         float axisLength = 0.2f);
 
+    static void ExportMapLines3DWithCameraAxesOBJKeyFrame(
+        KeyFrame *pKF,
+        const std::vector<MapLine*> &mapLines,
+        const std::string &filename = "map_lines_3D_with_camera_axes.obj",
+        float axisLength = 0.2f);
+    static void ExportMapLinesSampled3DWithColorAndCameraAxesOBJ(
+        KeyFrame *pKF,
+        const std::vector<MapLine*> &mapLines,
+        const std::string &filename = "map_lines_3D_with_color_camera_axes.obj",
+        float axisLength = 0.2f
+    );
+
     void ExportFullSceneOBJ(
         const std::vector<MapPoint*> &mapPoints,
         const std::vector<MapLine*> &mapLines,

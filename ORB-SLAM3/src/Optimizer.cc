@@ -4175,9 +4175,9 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     }
 
     // // --------- add Line Length Prior edges (ONCE per MapLine) ----------
-    const double lambdaL = 5.0;   // 1~5
-    const double lambdaD = 2.0;   // 0.5~2
-    const double lambdaM = 0.5;   // 0.05~0.5  (不要太大，防止锁死)
+    const double lambdaL = 50.0;   // 1~5
+    const double lambdaD = 20.0;   // 0.5~2
+    const double lambdaM = 5.0;   // 0.05~0.5  (不要太大，防止锁死)
 
     for (MapLine* pML : lLocalMapLines)
     {
@@ -4429,7 +4429,12 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
             vP2->estimate().cast<float>()
         );
         // mark retrieved for reporting
-        if (!pML->isRetrived()) { pML->setRetrived(true); opr.addMapLine(pML); }
+        if (!pML->isRetrived()) 
+        { 
+            pML->setRetrived(true); 
+            opr.addMapLine(pML); 
+            //在线段上采样顶点，如果线段是Combine两个线段的情况下，怎么处理(后续再处理)
+        }
     }   //end for each MapLine
     // keep mapline; mark retrieved for reporting
     pMap->IncreaseChangeIndex();

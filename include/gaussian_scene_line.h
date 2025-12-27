@@ -30,6 +30,7 @@
 #include "point3d.h"
 #include "point2d.h"
 #include "line_2d.h"
+#include "line_3d.h"
 #include "gaussian_parameters_line.h"
 #include "gaussian_model_line.h"
 #include "gaussian_keyframe_line.h"
@@ -52,14 +53,23 @@ public:
     std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>>& keyframes();
     std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>> getAllKeyframes();
 
-    void addKeyframeWithLine(std::shared_ptr<GaussianKeyframeLine> new_kf, bool* shuffled);
-    std::shared_ptr<GaussianKeyframeLine> getKeyframeWithLine(std::size_t fid);
-    std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>>& keyframesWithLine();
-    std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>> getAllKeyframesWithLine();
+    //void addKeyframeWithLine(std::shared_ptr<GaussianKeyframeLine> new_kf, bool* shuffled);
+    //std::shared_ptr<GaussianKeyframeLine> getKeyframeWithLine(std::size_t fid);
+    //std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>>& keyframesWithLine();
+    //std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>> getAllKeyframesWithLine();
 
     void cachePoint3D(point3D_id_t point3D_id, Point3D& point3d);
+    void cacheLine3D(line3D_id_t line3D_id, Line3D& line3d);    //Set line3d into cache
     Point3D& getPoint3D(point3D_id_t point3DId);
+    Line3D& getLine3D(line3D_id_t line3DId);    //Get line3D from cache
     void clearCachedPoint3D();
+    void clearCachedLine3D();   //Clear line3D cache
+    void clearCachedLine3DToPoint3D();  //Clear line3D to point3D cache
+
+    //Convert line3D to point3D
+    void convertLines3DToPoints3D();  //sample the 3D line and store into Point3D
+
+    void SamplePointsAlongLines3D();    //sample points along 3D lines (first sample 2D lines in images then get point 2d image, then project into 3D)
 
     void applyScaledTransformation(
         const float s = 1.0,
@@ -79,7 +89,8 @@ public:
     std::map<camera_id_t, Camera> cameras_;
     std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>> keyframes_;
     std::map<point3D_id_t, Point3D> cached_point_cloud_;
-    std::map<point3D_id_t, Line3D> cached_line_cloud_;  // Store 3D lines
+    std::map<line3D_id_t, Line3D> cached_line3D_cloud_;  // Store 3D lines
+    std::map<line3D_id_t, Point3D> cached_line3D_to_point3D_;   // Map line3D id to its two endpoints' point3D
 
 protected:
     std::mutex mutex_kfs_;

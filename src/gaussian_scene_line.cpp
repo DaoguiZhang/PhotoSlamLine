@@ -76,6 +76,11 @@ void GaussianSceneLine::cachePoint3D(point3D_id_t point3D_id, Point3D& point3d)
     this->cached_point_cloud_[point3D_id] = point3d;
 }
 
+void GaussianSceneLine::cacheLine3D(line3D_id_t line3D_id, Line3D& line3d)
+{
+    this->cached_line3D_cloud_[line3D_id] = line3d;
+}
+
 Point3D& GaussianSceneLine::getPoint3D(point3D_id_t point3DId)
 {
     if (this->cached_point_cloud_.find(point3DId) == this->cached_point_cloud_.end())
@@ -84,9 +89,27 @@ Point3D& GaussianSceneLine::getPoint3D(point3D_id_t point3DId)
     return this->cached_point_cloud_[point3DId];
 }
 
+Line3D& GaussianSceneLine::getLine3D(line3D_id_t line3DId)
+{
+    if (this->cached_line3D_cloud_.find(line3DId) == this->cached_line3D_cloud_.end())
+        std::cout << "GaussianSceneLine::getLine3D(" << line3DId << ") invalid line Id, creating new line." << std::endl;
+
+    return this->cached_line3D_cloud_[line3DId];
+}
+
 void GaussianSceneLine::clearCachedPoint3D()
 {
     this->cached_point_cloud_.clear();
+}
+
+void GaussianSceneLine::clearCachedLine3DToPoint3D()
+{
+    this->cached_line3D_to_point3D_.clear();
+}
+
+void GaussianSceneLine::clearCachedLine3D()
+{
+    this->cached_line3D_cloud_.clear();
 }
 
 void GaussianSceneLine::applyScaledTransformation(

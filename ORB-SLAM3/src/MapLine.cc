@@ -905,6 +905,24 @@ float MapLine::GetObservationDepth1(KeyFrame* pKf, int idx)
     return (pKf->GetObservatonLineLeDepth(idx));
 }
 
+const std::vector<Eigen::Vector3f>& MapLine::GetLineSampledPoints3D()
+{
+    // TODO: Implement the function to return the 3D points sampled along the line
+    return mSampledPoints3D;
+}
+
+const std::vector<Eigen::Vector2f>& MapLine::GetLineSampledPoints2D()
+{
+    // TODO: Implement the function to return the 2D points sampled along the line in the given KeyFrame
+    return mSampledPoints2D;
+}
+
+const std::vector<cv::Vec3b>& MapLine::GetLineSampledPntsColors()
+{
+    // TODO: Implement the function to return the colors of the 3D points sampled along the line
+    return mSampledPointsColor;
+}
+
 void MapLine::SetObservationLineLsDepth(KeyFrame* pKf, int idx, float dv)
 {
     pKf->SetObservationLineLsDepth(idx, dv);
@@ -1082,6 +1100,413 @@ bool  MapLine::UpdatePluckerFromBackProjectLines()
     //std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int> > observations = GetLineObservations();
     return true;
 }
+
+void MapLine::SamplePointsAlongLinesWorld3D_old()
+{
+    // Sample points along the 3D line
+    Eigen::Vector3f line_start = mLineWorldPos.head<3>();
+    Eigen::Vector3f line_end = mLineWorldPos.tail<3>();
+    Eigen::Vector3f line_dir = (line_end - line_start).normalized();
+
+    // Sample points along the line
+    for (float t = 0; t <= 1; t += 0.1)
+    {
+        Eigen::Vector3f point = line_start + t * (line_end - line_start);
+        mSampledPoints3D.push_back(point);
+    }
+    // TODO: Project 3D points into image To get point color
+    for (const auto& point : mSampledPoints3D)
+    {
+        const auto& obs = GetLineObservations();
+        std::vector<cv::Vec3b> sampledLinePoints2DColor;
+        for(auto& mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if(!pKFi || pKFi->isBad()) continue;
+            cv::Point2f point_2d;
+            if(pKFi->ProjectPointToImage(point, point_2d))
+            {
+                //mSampledPoints2D.push_back(point_2d);
+                cv::Vec3b color = pKFi->GetColor(point_2d);
+                sampledLinePoints2DColor.push_back(color);
+                // TODO: Store or process the sampled line points 2D colors
+                cv::Vec3b avg_color = AverageColorIgnoreBlack(sampledLinePoints2DColor);
+                // Store or use avg_color as needed
+                mSampledPointsColor.push_back(avg_color);
+            }
+            
+        }
+    }
+}
+
+void MapLine::SamplePointsAlongLinesWorld3D(float sample_step /* e.g. 0.2f */)
+{
+    mSampledPoints3D.clear();
+    mSampledPointsColor.clear();
+
+    Eigen::Vector3f P0 = mLineWorldPos.head<3>();
+    Eigen::Vector3f P1 = mLineWorldPos.tail<3>();
+
+    Eigen::Vector3f d = P1 - P0;
+    float length = d.norm();
+    if (length < 1e-6f) return;
+
+    Eigen::Vector3f dir = d / length;
+
+    int num_samples = std::max(2, static_cast<int>(std::ceil(length / sample_step)));
+
+    for (int i = 0; i <= num_samples; ++i)
+    {
+        float s = std::min(length, i * sample_step);
+        Eigen::Vector3f Pw = P0 + s * dir;
+        // ---- color sampling across keyframes ----
+        std::vector<cv::Vec3b> colors;
+        const auto& obs = GetLineObservations();
+
+        for (auto& mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if (!pKFi || pKFi->isBad()) continue;
+
+            cv::Point2f uv;
+            if (!pKFi->ProjectPointToImage(Pw, uv)) continue;
+
+            if (!pKFi->IsInImage(uv.x, uv.y)) continue;
+
+            cv::Vec3b c = pKFi->GetColor(uv);
+            if (c != cv::Vec3b(0,0,0))
+                colors.push_back(c);
+        }
+
+        if (!colors.empty())
+        {
+            cv::Vec3b avg = AverageColorIgnoreBlack(colors);
+            mSampledPointsColor.push_back(avg);
+            //mSampledPoints2D.push_back(Eigen::Vector2f(uv.x, uv.y));
+            mSampledPoints3D.push_back(Pw);
+        }
+    }
+}
+
+void MapLine::SamplePointsByImageLength(KeyFrame* pKF, float pixel_step)
+{
+    mSampledPoints3D.clear();
+    mSampledPointsColor.clear();
+
+    Eigen::Vector3f P0 = mLineWorldPos.head<3>();
+    Eigen::Vector3f P1 = mLineWorldPos.tail<3>();
+
+    cv::Point2f uv0, uv1;
+    if (!pKF->ProjectPointToImage(P0, uv0) ||
+        !pKF->ProjectPointToImage(P1, uv1))
+        return;
+
+    float pixel_len = cv::norm(uv1 - uv0);
+    int num_samples = std::max(2, static_cast<int>(pixel_len / pixel_step));
+
+    for (int i = 0; i <= num_samples; ++i)
+    {
+        float t = static_cast<float>(i) / num_samples;
+        Eigen::Vector3f Pw = P0 + t * (P1 - P0);
+
+        cv::Point2f uv;
+        if (!pKF->ProjectPointToImage(Pw, uv)) continue;
+        if (!pKF->IsInImage(uv.x, uv.y)) continue;
+
+        cv::Vec3b c = pKF->GetColor(uv);
+        if (c != cv::Vec3b(0,0,0))
+        {
+            mSampledPoints3D.push_back(Pw);
+            //mSampledPoints2D.push_back(Eigen::Vector2f(uv.x, uv.y));
+            mSampledPointsColor.push_back(c);
+        }
+    }
+}
+
+//BGR->RGB（后面验证一下）
+void MapLine::SamplePointsAlongLine_MultiViewWeighted(
+    float sample_step,
+    float view_angle_power)
+{
+    mSampledPoints3D.clear();
+    mSampledPointsColor.clear();
+
+    // ---- 1. 世界线段 ----
+    Eigen::Vector3f P0 = mLineWorldPos.head<3>();
+    Eigen::Vector3f P1 = mLineWorldPos.tail<3>();
+
+    Eigen::Vector3f d = P1 - P0;
+    float length = d.norm();
+    if (length < 1e-6f) return;
+
+    Eigen::Vector3f line_dir = d / length;
+
+    int num_samples = std::max(2, static_cast<int>(std::ceil(length / sample_step)));
+
+    const auto& obs = GetLineObservations();
+
+    // ---- 2. 沿线采样 ----
+    for (int i = 0; i <= num_samples; ++i)
+    {
+        float s = std::min(length, i * sample_step);
+        Eigen::Vector3f Pw = P0 + s * line_dir;
+
+        // 累积加权颜色
+        Eigen::Vector3f color_sum(0, 0, 0);
+        float weight_sum = 0.0f;
+
+        // ---- 3. 多视角融合 ----
+        for (auto& mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if (!pKFi || pKFi->isBad()) continue;
+
+            // 投影到图像
+            cv::Point2f uv;
+            if (!pKFi->ProjectPointToImage(Pw, uv)) continue;
+            if (!pKFi->IsInImage(uv.x, uv.y)) continue;
+
+            // 取颜色
+            cv::Vec3b c = pKFi->GetColor(uv);
+            if (c == cv::Vec3b(0,0,0)) continue;
+
+            // ---- 4. 计算权重 ----
+
+            // (a) 相机中心
+            Eigen::Vector3f Cw = pKFi->GetCameraCenter();
+
+            // (b) 视线方向
+            Eigen::Vector3f view_dir = (Cw - Pw);
+            float depth = view_dir.norm();
+            if (depth < 1e-6f) continue;
+            view_dir.normalize();
+
+            // (c) 视角权重（线方向 vs 视线）
+            float cos_angle = std::fabs(line_dir.dot(view_dir));
+            cos_angle = std::max(0.0f, cos_angle);
+
+            float w_angle = std::pow(cos_angle, view_angle_power);
+
+            // (d) 深度权重（近大远小）
+            float w_depth = 1.0f / depth;
+
+            float weight = w_angle * w_depth;
+            if (!std::isfinite(weight) || weight < 1e-6f) continue;
+
+            // ---- 5. 累积 ----
+            Eigen::Vector3f cf(c[2], c[1], c[0]); // BGR → RGB
+            color_sum += weight * cf;
+            weight_sum += weight;
+        }
+
+        // ---- 6. 写回结果 ----
+        if (weight_sum > 1e-6f)
+        {
+            Eigen::Vector3f color = color_sum / weight_sum;
+            color = color.cwiseMax(0.0f).cwiseMin(255.0f);
+
+            mSampledPoints3D.push_back(Pw);
+            //mSampledPoints2D.push_back(Eigen::Vector2f(uv.x, uv.y));
+            mSampledPointsColor.emplace_back(
+                static_cast<uchar>(color(0)),
+                static_cast<uchar>(color(1)),
+                static_cast<uchar>(color(2))
+            );
+        }
+    }
+}
+
+
+void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
+    float sample_step,
+    float view_angle_power,
+    float sigma_line_pixel,
+    int   top_k)
+{
+    mSampledPoints3D.clear();
+    mSampledPointsColor.clear();
+
+    // -------- 1. 世界线段 --------
+    Eigen::Vector3f P0 = mLineWorldPos.head<3>();
+    Eigen::Vector3f P1 = mLineWorldPos.tail<3>();
+
+    Eigen::Vector3f d = P1 - P0;
+    float length = d.norm();
+    if (length < 1e-6f) return;
+
+    Eigen::Vector3f line_dir = d / length;
+
+    int num_samples = std::max(
+        2, static_cast<int>(std::ceil(length / sample_step)));
+
+    const auto& obs = GetLineObservations();
+
+    // -------- 2. 沿线采样 --------
+    for (int i = 0; i <= num_samples; ++i)
+    {
+        float s = std::min(length, i * sample_step);
+        Eigen::Vector3f Pw = P0 + s * line_dir;
+
+        // 每个观测的 (weight, color)
+        struct WeightedColor {
+            float w;
+            Eigen::Vector3f c;
+        };
+        std::vector<WeightedColor> candidates;
+
+        // -------- 3. 多视角观测 --------
+        for (auto& mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if (!pKFi || pKFi->isBad()) continue;
+
+            int idxLine = std::get<0>(mit.second);
+            if (idxLine < 0 || idxLine >= (int)pKFi->mvKeyLines.size())
+                continue;
+
+            const cv::line_descriptor::KeyLine& kl =
+                pKFi->mvKeyLines[idxLine];
+
+            // ---- 投影 ----
+            cv::Point2f uv;
+            if (!pKFi->ProjectPointToImage(Pw, uv)) continue;
+            if (!pKFi->IsInImage(uv.x, uv.y)) continue;
+
+            cv::Vec3b color_bgr = pKFi->GetColor(uv);
+            if (color_bgr == cv::Vec3b(0,0,0)) continue;
+
+            // -------- 权重计算 --------
+
+            // (1) 深度 + 视角
+            Eigen::Vector3f Cw = pKFi->GetCameraCenter();
+            Eigen::Vector3f view_dir = (Cw - Pw);
+            float depth = view_dir.norm();
+            if (depth < 1e-6f) continue;
+            view_dir.normalize();
+
+            float cos_angle = std::fabs(line_dir.dot(view_dir));
+            cos_angle = std::max(0.0f, cos_angle);
+            float w_angle = std::pow(cos_angle, view_angle_power);
+            float w_depth = 1.0f / depth;
+
+            // (2) 图像线一致性（点到 2D 线距离）
+            float a, b, c;
+            if (!ComputeLineABCFromKeyLine(kl, a, b, c))
+                continue;   // 退化线，跳过
+            float norm = std::sqrt(a*a + b*b);
+            if (norm < 1e-6f) continue;
+
+            float dist_line =
+                std::fabs(a * uv.x + b * uv.y + c) / norm;
+
+            float w_line =
+                std::exp(-(dist_line * dist_line) /
+                         (sigma_line_pixel * sigma_line_pixel));
+
+            float weight = w_angle * w_depth * w_line;
+            if (!std::isfinite(weight) || weight < 1e-6f) continue;
+
+            Eigen::Vector3f color_rgb(
+                color_bgr[2], color_bgr[1], color_bgr[0]);
+
+            candidates.push_back({weight, color_rgb});
+        }
+
+        if (candidates.empty()) continue;
+
+        // -------- 4. Top-K 视角选择 --------
+        if ((int)candidates.size() > top_k)
+        {
+            std::nth_element(
+                candidates.begin(),
+                candidates.begin() + top_k,
+                candidates.end(),
+                [](const WeightedColor& a, const WeightedColor& b) {
+                    return a.w > b.w;
+                });
+            candidates.resize(top_k);
+        }
+
+        // -------- 5. 加权融合 --------
+        Eigen::Vector3f color_sum(0,0,0);
+        float weight_sum = 0.0f;
+
+        for (const auto& wc : candidates)
+        {
+            color_sum += wc.w * wc.c;
+            weight_sum += wc.w;
+        }
+
+        if (weight_sum < 1e-6f) continue;
+
+        Eigen::Vector3f color = color_sum / weight_sum;
+        color = color.cwiseMax(0.0f).cwiseMin(255.0f);
+
+        mSampledPoints3D.push_back(Pw);
+        //mSampledPoints2D.push_back(Eigen::Vector2f(uv.x, uv.y));
+        mSampledPointsColor.emplace_back(
+            static_cast<unsigned char>(color(0)),
+            static_cast<unsigned char>(color(1)),
+            static_cast<unsigned char>(color(2)));
+    }
+}
+
+
+cv::Vec3b MapLine::AverageColorIgnoreBlack(
+    const std::vector<cv::Vec3b>& colors,
+    int black_thresh)
+{
+    if (colors.empty())
+        return cv::Vec3b(0, 0, 0);
+
+    int sum_b = 0, sum_g = 0, sum_r = 0;
+    int cnt = 0;
+
+    for (const auto& c : colors)
+    {
+        if (IsBlackZDG(c, black_thresh))
+            continue;
+
+        sum_b += c[0];
+        sum_g += c[1];
+        sum_r += c[2];
+        cnt++;
+    }
+
+    // 如果全部都是黑色
+    if (cnt == 0)
+        return cv::Vec3b(0, 0, 0);
+
+    return cv::Vec3b(
+        static_cast<uchar>(sum_b / cnt),
+        static_cast<uchar>(sum_g / cnt),
+        static_cast<uchar>(sum_r / cnt)
+    );
+}
+
+// 从 KeyLine 端点计算直线 ax + by + c = 0
+bool MapLine::ComputeLineABCFromKeyLine(
+    const cv::line_descriptor::KeyLine& kl,
+    float& a, float& b, float& c)
+{
+    float x1 = kl.startPointX;
+    float y1 = kl.startPointY;
+    float x2 = kl.endPointX;
+    float y2 = kl.endPointY;
+
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float norm = std::sqrt(dx*dx + dy*dy);
+    if (norm < 1e-6f)
+        return false;
+
+    // 法向量 (a,b)
+    a =  dy / norm;
+    b = -dx / norm;
+    c = -(a * x1 + b * y1);
+    return true;
+}
+
 
 #if 0
 

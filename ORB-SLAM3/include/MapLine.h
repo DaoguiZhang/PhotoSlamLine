@@ -159,6 +159,9 @@ public:
 
     float GetObservationDepth0(KeyFrame* pKf, int idx);
     float GetObservationDepth1(KeyFrame* pKf, int idx);
+    const std::vector<Eigen::Vector3f>& GetLineSampledPoints3D();
+    const std::vector<Eigen::Vector2f>& GetLineSampledPoints2D();  //image pnts coordinate
+    const std::vector<cv::Vec3b>& GetLineSampledPntsColors();
 
     void SetObservationLineLsDepth(KeyFrame* pKf, int idx, float dv);
     void SetObservationLineLeDepth(KeyFrame* pKf, int idx, float dv);
@@ -245,6 +248,23 @@ public:
 
     bool  UpdatePluckerFromBackProjectLines();  //to do next
 
+    void SamplePointsAlongLinesWorld3D(float sample_step = 0.2f);   //sample points along 3D lines（先在图像中采样2D线段，然后获取点2D图像，再投影到3D中）
+    void SamplePointsAlongLinesWorld3D_old();
+    void SamplePointsByImageLength(KeyFrame* pKF, float pixel_step = 0.05f);
+    void SamplePointsAlongLine_MultiViewWeighted(
+        float sample_step,
+        float view_angle_power);
+    void SamplePointsAlongLine_MultiViewWeighted_Advanced(
+        float sample_step,        // 世界坐标采样步长 (e.g. 0.05f)
+        float view_angle_power,   // 视角权重指数 (e.g. 2.0)
+        float sigma_line_pixel,   // 图像线一致性 σ (e.g. 3.0 px)
+        int   top_k               // Top-K 视角 (e.g. 3)
+    );
+
+    // 计算颜色均值，忽略“黑色 / 近黑色”点
+    cv::Vec3b AverageColorIgnoreBlack(const std::vector<cv::Vec3b>& colors, int black_thresh = 5);
+
+    bool ComputeLineABCFromKeyLine(const cv::line_descriptor::KeyLine& kl, float& a, float& b, float& c);
 
 public:
     long unsigned int mnId;
@@ -314,11 +334,21 @@ public:
 
     unsigned int mnOriginMapId;
 
-protected:    
+protected:
+
+    // 判定是否为“黑色 / 近黑色”
+    inline bool IsBlackZDG(const cv::Vec3b& c, int thresh = 5)
+    {
+        return (c[0] <= thresh && c[1] <= thresh && c[2] <= thresh);
+    }
 
      // Position in absolute coordinates
      Eigen::Matrix<float,6,1> mLineWorldPos;
      Eigen::Vector3f mLsWorldPos, mLeWorldPos;  //line start and end point
+
+     std::vector<Eigen::Vector3f> mSampledPoints3D;  // sampled 3D points
+     std::vector<Eigen::Vector2f> mSampledPoints2D;  // projected 2D points
+     std::vector<cv::Vec3b> mSampledPointsColor;    // color of sampled 3D points
 
      //
      Eigen::Matrix<double,6,1> mWorldPlucker;   //plucker

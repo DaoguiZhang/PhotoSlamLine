@@ -1048,6 +1048,28 @@ bool KeyFrame::UnprojectDepthLine(const int& i, Eigen::Vector3f& ls3D, Eigen::Ve
     return true;
 }
 
+bool KeyFrame::ProjectPointToImage(const Eigen::Vector3f& point, cv::Point2f& point_2d)
+{
+    // 将3D点投影到图像平面
+    Eigen::Vector3f p_cam = mRwc.transpose() * (point - mTwc.translation());
+    if (p_cam(2) < 0.1) // 视距阈值
+        return false;
+
+    point_2d.x = fx * p_cam(0) / p_cam(2) + cx;
+    point_2d.y = fy * p_cam(1) / p_cam(2) + cy;
+
+    return true;
+}
+
+cv::Vec3b KeyFrame::GetColor(const cv::Point2f &p)
+{
+    int u = static_cast<int>(std::round(p.x));
+    int v = static_cast<int>(std::round(p.y));
+    if (u < 0 || u >= imgLeftRGB.cols || v < 0 || v >= imgLeftRGB.rows)
+        return cv::Vec3b(0, 0, 0);
+
+    return imgLeftRGB.at<cv::Vec3b>(v, u);
+}
 
 // std::vector<size_t> KeyFrame::GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
 //         const float  &r, const int minLevel, const int maxLevel, const bool bRight) const

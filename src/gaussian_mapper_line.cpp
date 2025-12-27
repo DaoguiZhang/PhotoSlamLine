@@ -398,6 +398,15 @@ void GaussianMapperLine::run()
                     point3D.color_(2) = color(2);
                     scene_->cachePoint3D(pMP->mnId, point3D);
                 }
+                //Sample Point 3d from vpMPLs
+                for(size_t i = 0; i < vpMPLs.size(); ++i)
+                {
+                    float sample_step = 0.1f;        // 世界坐标采样步长 (e.g. 0.05f)
+                    float view_angle_power = 2.0f;   // 视角权重指数 (e.g. 2.0)
+                    float sigma_line_pixel = 3.0f;   // 图像线一致性 σ (e.g. 3.0 px)
+                    int   top_k = 3;               // Top-K 视角 (e.g. 3)
+                    vpMPLs[i]->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);    //调用这个函数是否出现bug之类的。
+                }
                 for (size_t i = 0; i < vpMPLs.size(); i++)
                 {
                     const auto& pML = vpMPLs[i];
@@ -406,6 +415,21 @@ void GaussianMapperLine::run()
                     //line3D.end_ = scene_->getPoint3D(pML->GetEndPointId());
                     //line3D.color_ = pML->GetColorRGB();
                     //scene_->cacheLine3D(pML->mnId, line3D);
+                    //在MapLine类中采样3D线段并存储到Point3D中。需要再写一下MapLine类的函数
+                    const std::vector<Eigen::Vector3f> sampledPoints3D = pML->GetLineSampledPoints3D();
+                    const std::vector<cv::Vec3b> sampledColors = pML->GetLineSampledPntsColors();
+                    for (size_t j = 0; j < sampledPoints3D.size(); ++j)
+                    {
+                        Point3D point3D;
+                        point3D.xyz_[0] = sampledPoints3D[j][0];
+                        point3D.xyz_[1] = sampledPoints3D[j][1];
+                        point3D.xyz_[2] = sampledPoints3D[j][2];
+                        point3D.color_(0) = (float)(sampledColors[j][0]/255.0);
+                        point3D.color_(1) = (float)(sampledColors[j][1]/255.0);
+                        point3D.color_(2) = (float)(sampledColors[j][2]/255.0);
+                        //TO DO:这里需要区分点的ID，不能直接用线段的ID
+                        ///scene_->cachePoint3D(pML->mnId, point3D);
+                    }
                 }
                 
                 for (const auto& pKF : vpKFs){

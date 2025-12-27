@@ -292,6 +292,8 @@ public:
         std::pair<Eigen::Vector3f, Eigen::Vector3f> &xLine3D,
         std::pair<Eigen::Vector3f, Eigen::Vector3f> &colorLine3DRGB);
     bool UnprojectDepthLine(const int& i, Eigen::Vector3f& ls3D, Eigen::Vector3f& le3D);
+    // Project a 3D point to the image plane
+    bool ProjectPointToImage(const Eigen::Vector3f& point, cv::Point2f& point_2d);
 
     // Image
     bool IsInImage(const float &x, const float &y) const;
@@ -314,6 +316,8 @@ public:
     static bool lId(KeyFrame* pKF1, KeyFrame* pKF2){
         return pKF1->mnId<pKF2->mnId;
     }
+
+    cv::Vec3b GetColor(const cv::Point2f &p);
 
     Map* GetMap();
     void UpdateMap(Map* pMap);

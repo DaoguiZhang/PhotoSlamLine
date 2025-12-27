@@ -366,6 +366,29 @@ void LocalMapping::RunWithLine()
                         MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
                         std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_before.obj";
                         MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
+                        std::string map_lines_points3d_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_points3d_before.obj";
+                        //用于测试在世界坐标系下的线段采样点的颜色。它为后续的gaussian splatting的优化提供好的初始值
+                        // float sample_step = 0.05f;        // 世界坐标采样步长 (e.g. 0.05f)
+                        // float view_angle_power = 2.0f;   // 视角权重指数 (e.g. 2.0)
+                        // float sigma_line_pixel = 3.0f;   // 图像线一致性 σ (e.g. 3.0 px)
+                        // int   top_k = 3;               // Top-K 视角 (e.g. 3)
+                        // for(int j = 0; j < mpCurrentKeyFrame->GetMapLineMatches().size(); ++j)
+                        // {
+                        //     MapLine* pML = mpCurrentKeyFrame->GetMapLineMatches()[j];
+                        //     if(!pML)
+                        //         continue;
+                        //     pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);
+                        // }
+                        //用于测试在世界坐标系下的线段采样点的颜色。它为后续的gaussian splatting的优化提供好的初始值
+                        // float sample_step = 0.2f;
+                        // for(int j = 0; j < mpCurrentKeyFrame->GetMapLineMatches().size(); ++j)
+                        // {
+                        //     MapLine* pML = mpCurrentKeyFrame->GetMapLineMatches()[j];
+                        //     if(!pML)
+                        //         continue;
+                        //     pML->SamplePointsByImageLength(mpCurrentKeyFrame, sample_step);
+                        // }
+                        // MapExporter::ExportMapLinesSampled3DWithColorAndCameraAxesOBJ(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_points3d_filename);
                     }
                     //
                     //std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";

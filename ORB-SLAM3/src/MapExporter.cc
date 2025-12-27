@@ -367,69 +367,190 @@ namespace ORB_SLAM3
                     << filename << std::endl;
             return;
         }
-    file << "# Map lines + keyframe camera axes exported as OBJ format\n";
-    file << "# Total lines: " << mapLines.size() << "\n";
+        file << "# Map lines + keyframe camera axes exported as OBJ format\n";
+        file << "# Total lines: " << mapLines.size() << "\n";
 
-    int vertexCount = 0;
-    int lineCount   = 0;
+        int vertexCount = 0;
+        int lineCount   = 0;
 
     // --- 导出 MapLines ---
-    for (const auto &l : mapLines) {
-        if (!l) continue;
-        if (l->isBad()) continue;
+        for (const auto &l : mapLines) 
+        {
+            if (!l) continue;
+            if (l->isBad()) continue;
 
-        auto linePos = l->GetLineWorldPos();
-        Eigen::Vector3f P1 = linePos.first;
-        Eigen::Vector3f P2 = linePos.second;
+            auto linePos = l->GetLineWorldPos();
+            Eigen::Vector3f P1 = linePos.first;
+            Eigen::Vector3f P2 = linePos.second;
 
-        if (!P1.allFinite() || !P2.allFinite()) continue;
+            if (!P1.allFinite() || !P2.allFinite()) continue;
 
-        // 写入两个顶点
-        file << "v " << P1.x() << " " << P1.y() << " " << P1.z() << "\n";
-        file << "v " << P2.x() << " " << P2.y() << " " << P2.z() << "\n";
+            // 写入两个顶点
+            file << "v " << P1.x() << " " << P1.y() << " " << P1.z() << "\n";
+            file << "v " << P2.x() << " " << P2.y() << " " << P2.z() << "\n";
 
-        // 写入一条线（OBJ 索引从 1 开始）
-        file << "l " << vertexCount + 1 << " " << vertexCount + 2 << "\n";
+            // 写入一条线（OBJ 索引从 1 开始）
+            file << "l " << vertexCount + 1 << " " << vertexCount + 2 << "\n";
 
-        vertexCount += 2;
-        lineCount++;
+            vertexCount += 2;
+            lineCount++;
+        }
+
+        // --- KeyFrame 的相机坐标系 ---
+        Eigen::Vector3f camPos = pKF->GetCameraCenter();
+        Sophus::SE3f Tcw = pKF->GetPose();
+        Eigen::Matrix4f Tcw_eign = Tcw.matrix();
+        Eigen::Matrix3f Rcw = Tcw_eign.block<3,3>(0,0);
+
+        Eigen::Vector3f X = camPos + axisLength * Rcw.row(0).transpose();
+        Eigen::Vector3f Y = camPos + axisLength * Rcw.row(1).transpose();
+        Eigen::Vector3f Z = camPos + axisLength * Rcw.row(2).transpose();
+
+        // 相机中心（黑色）
+        file << "v " << camPos.x() << " " << camPos.y() << " " << camPos.z() << " 0 0 0\n";
+        int camIdx = ++vertexCount;
+
+        // X 轴（红色）
+        file << "v " << X.x() << " " << X.y() << " " << X.z() << " 1 0 0\n";
+        file << "l " << camIdx << " " << camIdx + 1 << "\n";
+        vertexCount++;
+
+        // Y 轴（绿色）
+        file << "v " << Y.x() << " " << Y.y() << " " << Y.z() << " 0 1 0\n";
+        file << "l " << camIdx << " " << camIdx + 2 << "\n";
+        vertexCount++;
+
+        // Z 轴（蓝色）
+        file << "v " << Z.x() << " " << Z.y() << " " << Z.z() << " 0 0 1\n";
+        file << "l " << camIdx << " " << camIdx + 3 << "\n";
+        vertexCount++;
+
+        file.close();
+
+        std::cout << "[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported "
+                << lineCount << " map lines and camera axes to "
+                << filename << std::endl;
     }
 
-    // --- KeyFrame 的相机坐标系 ---
-    Eigen::Vector3f camPos = pKF->GetCameraCenter();
+void MapExporter::ExportMapLinesSampled3DWithColorAndCameraAxesOBJ(
+    KeyFrame *pKF,
+    const std::vector<MapLine*> &mapLines,
+    const std::string &filename,
+    float axisLength)
+{
+    if (!pKF)
+    {
+        std::cerr << "[ExportMapLinesSampled3DWithColorAndCameraAxesOBJ] KeyFrame is null\n";
+        return;
+    }
+
+    std::ofstream file(filename);
+    if (!file.is_open())
+    {
+        std::cerr << "[ExportMapLinesSampled3DWithColorAndCameraAxesOBJ] Cannot open file: "
+                  << filename << std::endl;
+        return;
+    }
+
+    file << "# Sampled MapLines with per-vertex color + KeyFrame camera axes\n";
+    file << "# OBJ with vertex color extension: v x y z r g b\n";
+
+    int vertexCount = 0;
+    int polylineCount = 0;
+
+    // =========================================================
+    // 1. Export sampled MapLines (colored polyline)
+    // =========================================================
+    for (const auto & ml : mapLines)
+    {
+        if (!ml) continue;
+        if (ml->isBad()) continue;
+
+        const auto& pts   = ml->GetLineSampledPoints3D();
+        const auto& cols  = ml->GetLineSampledPntsColors();
+
+        if (pts.empty() || pts.size() != cols.size())
+            continue;  // 防御：数据不一致直接跳过
+
+        int baseIdx = vertexCount + 1;
+
+        // ---- write vertices with color ----
+        for (size_t i = 0; i < pts.size(); ++i)
+        {
+            const Eigen::Vector3f& P = pts[i];
+            const cv::Vec3b& C = cols[i];
+
+            if (!P.allFinite()) continue;
+
+            // OBJ: v x y z r g b  (颜色归一化到 [0,1])
+            file << "v "
+                 << P.x() << " " << P.y() << " " << P.z() << " "
+                 << (float)C[2] / 255.f << " "
+                 << (float)C[1] / 255.f << " "
+                 << (float)C[0] / 255.f << "\n";
+
+            vertexCount++;
+        }
+
+        // ---- connect as polyline ----
+        if (pts.size() >= 2)
+        {
+            file << "l ";
+            for (size_t i = 0; i < pts.size(); ++i)
+            {
+                file << (baseIdx + i);
+                if (i + 1 < pts.size()) file << " ";
+            }
+            file << "\n";
+            polylineCount++;
+        }
+    }
+
+    // =========================================================
+    // 2. Export KeyFrame camera axes
+    // =========================================================
+    Eigen::Vector3f Cw = pKF->GetCameraCenter();
     Sophus::SE3f Tcw = pKF->GetPose();
-    Eigen::Matrix4f Tcw_eign = Tcw.matrix();
-    Eigen::Matrix3f Rcw = Tcw_eign.block<3,3>(0,0);
+    Eigen::Matrix3f Rcw = Tcw.rotationMatrix();
+    Eigen::Matrix3f Rwc = Rcw.transpose();
 
-    Eigen::Vector3f X = camPos + axisLength * Rcw.row(0).transpose();
-    Eigen::Vector3f Y = camPos + axisLength * Rcw.row(1).transpose();
-    Eigen::Vector3f Z = camPos + axisLength * Rcw.row(2).transpose();
+    Eigen::Vector3f X = Cw + axisLength * Rwc.col(0);
+    Eigen::Vector3f Y = Cw + axisLength * Rwc.col(1);
+    Eigen::Vector3f Z = Cw + axisLength * Rwc.col(2);
 
-    // 相机中心（黑色）
-    file << "v " << camPos.x() << " " << camPos.y() << " " << camPos.z() << " 0 0 0\n";
-    int camIdx = ++vertexCount;
+    int camBase = vertexCount + 1;
 
-    // X 轴（红色）
-    file << "v " << X.x() << " " << X.y() << " " << X.z() << " 1 0 0\n";
-    file << "l " << camIdx << " " << camIdx + 1 << "\n";
+    // Camera center (black)
+    file << "v " << Cw.x() << " " << Cw.y() << " " << Cw.z()
+         << " 0 0 0\n";
     vertexCount++;
 
-    // Y 轴（绿色）
-    file << "v " << Y.x() << " " << Y.y() << " " << Y.z() << " 0 1 0\n";
-    file << "l " << camIdx << " " << camIdx + 2 << "\n";
+    // X axis (red)
+    file << "v " << X.x() << " " << X.y() << " " << X.z()
+         << " 1 0 0\n";
+    file << "l " << camBase << " " << camBase + 1 << "\n";
     vertexCount++;
 
-    // Z 轴（蓝色）
-    file << "v " << Z.x() << " " << Z.y() << " " << Z.z() << " 0 0 1\n";
-    file << "l " << camIdx << " " << camIdx + 3 << "\n";
+    // Y axis (green)
+    file << "v " << Y.x() << " " << Y.y() << " " << Y.z()
+         << " 0 1 0\n";
+    file << "l " << camBase << " " << camBase + 2 << "\n";
+    vertexCount++;
+
+    // Z axis (blue)
+    file << "v " << Z.x() << " " << Z.y() << " " << Z.z()
+         << " 0 0 1\n";
+    file << "l " << camBase << " " << camBase + 3 << "\n";
     vertexCount++;
 
     file.close();
 
-    std::cout << "[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported "
-              << lineCount << " map lines and camera axes to "
-              << filename << std::endl;
+    std::cout << "[ExportMapLinesSampled3DWithColorAndCameraAxesOBJ] Done.\n"
+              << "  polylines: " << polylineCount
+              << ", vertices: " << vertexCount
+              << ", file: " << filename << std::endl;
 }
+
 
 void MapExporter::ExportFullSceneOBJ(
     const std::vector<MapPoint*> &mapPoints,
