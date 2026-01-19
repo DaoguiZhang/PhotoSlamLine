@@ -60,15 +60,15 @@ public:
 
     void cachePoint3D(point3D_id_t point3D_id, Point3D& point3d);
     void cacheLine3D(line3D_id_t line3D_id, Line3D& line3d);    //Set line3d into cache
+    void cacheLineSampledPnts3D(line3D_id_t line3D_id, Point3D& point3d);   //
     Point3D& getPoint3D(point3D_id_t point3DId);
     Line3D& getLine3D(line3D_id_t line3DId);    //Get line3D from cache
     void clearCachedPoint3D();
     void clearCachedLine3D();   //Clear line3D cache
     void clearCachedLine3DToPoint3D();  //Clear line3D to point3D cache
 
-    //Convert line3D to point3D
+    //Convert line3D to point3D(TO DO NEXT)
     void convertLines3DToPoints3D();  //sample the 3D line and store into Point3D
-
     void SamplePointsAlongLines3D();    //sample points along 3D lines (first sample 2D lines in images then get point 2d image, then project into 3D)
 
     void applyScaledTransformation(

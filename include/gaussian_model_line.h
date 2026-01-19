@@ -72,13 +72,20 @@ public:
     torch::Tensor getOpacityActivation();
     torch::Tensor getCovarianceActivation(int scaling_modifier = 1);
 
+    // along-line: 0.5~1.0
+    // normal:     0.3~0.6
+    static float minWorldScaleFromPixelFootprint(float z, float focal);
+    static Eigen::Vector3f initLineSampleLogScale(float sample_step, float ref_depth_z,float ref_focal, float k_t = 0.7f,float k_n = 0.4f);
+    static Eigen::Vector4f initQuatAlignXToDir(const Eigen::Vector3f& dir_unit);
+              
+
     void oneUpShDegree();
     void setShDegree(const int sh);
 
     void createFromPcd(
         std::map<point3D_id_t, Point3D> pcd,
         const float spatial_lr_scale);
-
+    void increasePcd(const std::vector<Point3D>& new_points, const int iteration);
     void increasePcd(std::vector<float> points, std::vector<float> colors, const int iteration);
     void increasePcd(torch::Tensor& new_point_cloud, torch::Tensor& new_colors, const int iteration);
 
@@ -111,6 +118,7 @@ public:
     torch::Tensor replaceTensorToOptimizer(torch::Tensor& t, int tensor_idx);
 
     void prunePoints(torch::Tensor& mask);
+    void prunePointsWithLineAwareness(torch::Tensor& mask);
 
     void densificationPostfix(
         torch::Tensor& new_xyz,
@@ -120,6 +128,24 @@ public:
         torch::Tensor& new_scaling,
         torch::Tensor& new_rotation,
         torch::Tensor& new_exist_since_iter);
+    void densificationPostfixWithLineAwareness(
+        torch::Tensor& new_xyz,
+        torch::Tensor& new_features_dc,
+        torch::Tensor& new_features_rest,
+        torch::Tensor& new_opacities,
+        torch::Tensor& new_scaling,
+        torch::Tensor& new_rotation,
+        torch::Tensor& new_exist_since_iter,
+        // -------- 新增：line-aware --------
+        torch::Tensor& new_is_line,        // [N_new]
+        torch::Tensor& new_line_dir_w      // [N_new,3]
+    );
+
+    torch::Tensor computeLineLevelPruneMaskGPU(
+        const torch::Tensor& base_prune_mask,
+        float dir_thresh_deg,
+        float dist_thresh,
+        float min_line_opacity_sum);
 
     void densifyAndSplit(
         torch::Tensor& grads,
@@ -127,7 +153,18 @@ public:
         float scene_extent,
         int N = 2);
 
+    void densifyAndSplitWithLineAwareness(
+        torch::Tensor& grads,
+        float grad_threshold,
+        float scene_extent,
+        int N);
+
     void densifyAndClone(
+        torch::Tensor& grads,
+        float grad_threshold,
+        float scene_extent);
+
+    void densifyAndCloneWithLineAwareness(
         torch::Tensor& grads,
         float grad_threshold,
         float scene_extent);
@@ -137,6 +174,19 @@ public:
         float min_opacity,
         float extent,
         int max_screen_size);
+
+    void densifyAndPruneWithLineAwareness(
+        float max_grad,
+        float min_opacity,
+        float extent,
+        int max_screen_size);
+    
+    torch::Tensor computeLineLevelPruneMask(
+        const torch::Tensor& base_prune_mask,
+        float dir_thresh_deg,
+        float dist_thresh,
+        float min_line_opacity_sum
+    );
 
     void addDensificationStats(
         torch::Tensor& viewspace_point_tensor,
@@ -161,6 +211,9 @@ public:
     int max_sh_degree_;
 
     torch::Tensor xyz_;
+    torch::Tensor is_line_;   // [P] bool, check whether point is line sampled or not
+    // 可选：每个 line Gaussian 的方向（世界系）
+    torch::Tensor line_dir_w_;  // N x 3, float
     torch::Tensor features_dc_;
     torch::Tensor features_rest_;
     torch::Tensor scaling_;
@@ -184,6 +237,13 @@ public:
 
     torch::Tensor sparse_points_xyz_;
     torch::Tensor sparse_points_color_;
+
+    //Debug
+    // GaussianModelLine.h 用于统计：在一次 forward render 中，
+    //统计: 1: 每个 Gaussian 累计 alpha; 2: 被命中的像素数量
+    torch::Tensor debug_hit_count_;     // [N]
+    torch::Tensor debug_alpha_accum_;   // [N]
+
 
     // Line-specific tensors
     //torch::Tensor line_features_; // TO DO: optimize line gaussian splatting(point in line)

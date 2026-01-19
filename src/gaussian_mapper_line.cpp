@@ -406,6 +406,7 @@ void GaussianMapperLine::run()
                     float sigma_line_pixel = 3.0f;   // 图像线一致性 σ (e.g. 3.0 px)
                     int   top_k = 3;               // Top-K 视角 (e.g. 3)
                     vpMPLs[i]->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);    //调用这个函数是否出现bug之类的。
+                    //std::vector<Eigen::Vector3f> sampled_line_pnts = 
                 }
                 for (size_t i = 0; i < vpMPLs.size(); i++)
                 {
@@ -414,7 +415,19 @@ void GaussianMapperLine::run()
                     //line3D.start_ = scene_->getPoint3D(pML->GetStartPointId());
                     //line3D.end_ = scene_->getPoint3D(pML->GetEndPointId());
                     //line3D.color_ = pML->GetColorRGB();
-                    //scene_->cacheLine3D(pML->mnId, line3D);
+                    line3D.p1_[0] = pML->GetLineWorldPos().first[0];
+                    line3D.p1_[1] = pML->GetLineWorldPos().first[1];
+                    line3D.p1_[2] = pML->GetLineWorldPos().first[2];
+                    line3D.p2_[0] = pML->GetLineWorldPos().second[0];
+                    line3D.p2_[1] = pML->GetLineWorldPos().second[1];
+                    line3D.p2_[2] = pML->GetLineWorldPos().second[2];
+                    line3D.color1_[0] = pML->GetLineColorRGB().first[0];
+                    line3D.color1_[1] = pML->GetLineColorRGB().first[1];
+                    line3D.color1_[2] = pML->GetLineColorRGB().first[2];
+                    line3D.color2_[0] = pML->GetLineColorRGB().second[0];
+                    line3D.color2_[1] = pML->GetLineColorRGB().second[1];
+                    line3D.color2_[2] = pML->GetLineColorRGB().second[2];
+                    scene_->cacheLine3D(pML->mnId, line3D);
                     //在MapLine类中采样3D线段并存储到Point3D中。需要再写一下MapLine类的函数
                     const std::vector<Eigen::Vector3f> sampledPoints3D = pML->GetLineSampledPoints3D();
                     const std::vector<cv::Vec3b> sampledColors = pML->GetLineSampledPntsColors();
@@ -543,7 +556,7 @@ void GaussianMapperLine::run()
     while (!isStopped()) {
         // Check conditions for incremental mapping
         if (hasMetIncrementalMappingConditions()) {
-            combineMappingOperations();
+            combineMappingOperations_withLine();
             if (cull_keyframes_)
                 cullKeyframes();
         }

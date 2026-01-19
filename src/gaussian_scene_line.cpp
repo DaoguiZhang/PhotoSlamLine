@@ -81,6 +81,11 @@ void GaussianSceneLine::cacheLine3D(line3D_id_t line3D_id, Line3D& line3d)
     this->cached_line3D_cloud_[line3D_id] = line3d;
 }
 
+void GaussianSceneLine::cacheLineSampledPnts3D(line3D_id_t line3D_id, Point3D& point3d)
+{
+    this->cached_line3D_to_point3D_[line3D_id] = point3d;   //这是非常重要
+}
+
 Point3D& GaussianSceneLine::getPoint3D(point3D_id_t point3DId)
 {
     if (this->cached_point_cloud_.find(point3DId) == this->cached_point_cloud_.end())

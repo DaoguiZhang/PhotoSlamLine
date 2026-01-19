@@ -20,6 +20,11 @@
 
 #include <Eigen/Core>
 
+enum class PointSourceType {
+    MAP_POINT = 0,
+    LINE_SAMPLED = 1
+};
+
 class Point3D
 {
 public:
@@ -28,13 +33,25 @@ public:
           color_(0.0f, 0.0f, 0.0f),
           color256_(0, 0, 0),
           error_(-1.0)
-    {}
+    {
+        source_ = PointSourceType::MAP_POINT;   //默认MAP_POINT
+    }
 
 public:
     Eigen::Vector3d xyz_;
 
     Eigen::Matrix<uint8_t, 3, 1> color256_; // not needed if we get color_ directly
     Eigen::Matrix<float, 3, 1> color_;
+
+    PointSourceType source_;   // 新增 added by zdg
+    float line_sample_step_;   // 仅对 line 点有效（可选）(to  delete next)
+    Eigen::Vector3f line_dir_ = Eigen::Vector3f::UnitX(); // 线方向(单位向量)
+
+    // 用于“严格对齐 CUDA my_radius 门槛”的初始化（推荐填写）
+    float ref_depth_z_ = -1.0f;                // 该点在参考视角下的深度 z (camera/view space 的 z)
+    float ref_focal_   = -1.0f;                // 参考视角的 focal（建议 (fx+fy)/2）
+
+    float sample_step_ = -1.0f;                // 线采样步长（世界坐标）
 
     double error_;
 };

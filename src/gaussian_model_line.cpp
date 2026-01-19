@@ -15,6 +15,61 @@
 
 #include "include/gaussian_model_line.h"
 
+
+// 由 CUDA 逻辑反推：保证 my_radius>=1 的最小 world scale 近似：scale >= z/(3f)
+inline float GaussianModelLine::minWorldScaleFromPixelFootprint(float z, float focal)
+{
+    if (z <= 0.f || focal <= 0.f) return 0.f;
+    return z / (3.0f * focal);
+}
+
+// 线采样点的 anisotropic scale 初始化（严格对齐 preprocessCUDA 的 my_radius 门槛）
+// 返回的是 “log-space scale”，对应你模型里的 scaling_
+inline Eigen::Vector3f GaussianModelLine::initLineSampleLogScale(
+    float sample_step,
+    float ref_depth_z,
+    float ref_focal,
+    float k_t = 0.7f,      // along-line: 0.5~1.0
+    float k_n = 0.4f)      // normal:     0.3~0.6
+{
+    // 1) 沿线方向：由采样步长控制
+    float scale_t = std::max(1e-6f, k_t * sample_step);
+
+    // 2) 法向方向：至少保证 1px footprint（对齐 CUDA my_radius）
+    float scale_n = std::max(1e-6f, k_n * sample_step);
+
+    if (ref_depth_z > 0.f && ref_focal > 0.f) {
+        float scale_n_min = minWorldScaleFromPixelFootprint(ref_depth_z, ref_focal);
+        scale_n = std::max(scale_n, scale_n_min);
+    }
+
+    Eigen::Vector3f s(scale_t, scale_n, scale_n);
+    return s.array().log().matrix();
+}
+
+// 初始化 rotation：让局部 X 轴对齐线方向（这样 anisotropic 的 scale_t 真正沿线）
+// 返回 (w,x,y,z) 且与你 CUDA computeCov3D 的读取方式一致：rot.x=r(w), rot.y=x, rot.z=y, rot.w=z
+inline Eigen::Vector4f GaussianModelLine::initQuatAlignXToDir(const Eigen::Vector3f& dir_unit)
+{
+    Eigen::Vector3f d = dir_unit;
+    float n = d.norm();
+    if (n < 1e-8f) d = Eigen::Vector3f::UnitX();
+    else d /= n;
+
+    // Eigen::Quaternionf::FromTwoVectors 把 UnitX 旋到 d
+    Eigen::Quaternionf q = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitX(), d);
+    q.normalize();
+
+    // CUDA computeCov3D: glm::vec4 rot; q.x=r, q.y=x, q.z=y, q.w=z
+    Eigen::Vector4f out;
+    out[0] = q.w();
+    out[1] = q.x();
+    out[2] = q.y();
+    out[3] = q.z();
+    return out;
+}
+
+
 GaussianModelLine::GaussianModelLine(const int sh_degree)
     : active_sh_degree_(0), spatial_lr_scale_(0.0),
       lr_delay_steps_(0), lr_delay_mult_(1.0), max_steps_(1000000)
@@ -123,6 +178,13 @@ void GaussianModelLine::createFromPcd(
     torch::Tensor color = torch::zeros(
         {num_points, 3},
         torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+    is_line_ = torch::zeros(
+        {num_points},
+        torch::TensorOptions().dtype(torch::kBool).device(device_type_));
+    line_dir_w_ = torch::zeros({num_points, 3}, torch::TensorOptions().dtype(torch::kFloat).device(device_type_));  //Set line direction
+
+    auto is_line_cpu = is_line_.cpu();
+    auto line_acc = is_line_cpu.accessor<bool, 1>();    //这个函数作用
     auto pcd_it = pcd.begin();
     for (int point_idx = 0; point_idx < num_points; ++point_idx) {
         auto& point = (*pcd_it).second;
@@ -132,6 +194,7 @@ void GaussianModelLine::createFromPcd(
         color.index({point_idx, 0}) = point.color_(0);
         color.index({point_idx, 1}) = point.color_(1);
         color.index({point_idx, 2}) = point.color_(2);
+        line_acc[point_idx] = (point.source_ == PointSourceType::LINE_SAMPLED); //check it point is line sampled
         ++pcd_it;
     }
 
@@ -151,13 +214,72 @@ void GaussianModelLine::createFromPcd(
 
     // std::cout << "[Gaussian Model]Number of points at initialization : " << fused_point_cloud.size(0) << std::endl;
 
-    torch::Tensor point_cloud_copy = fused_point_cloud.clone();
-    torch::Tensor dist2 = torch::clamp_min(distCUDA2(point_cloud_copy), 0.0000001);
-    torch::Tensor scales = torch::log(torch::sqrt(dist2));
-    auto scales_ndimension = scales.ndimension();
-    scales = scales.unsqueeze(scales_ndimension).repeat({1, 3});
     torch::Tensor rots = torch::zeros({fused_point_cloud.size(0), 4}, torch::TensorOptions().device(device_type_));
     rots.index({torch::indexing::Slice(), 0}) = 1;
+    
+    // ---- init scales: 分两类 ----
+    // 先给普通点按原始策略算一个 scales_dist（log-space）
+    torch::Tensor scales = torch::zeros({num_points, 3},
+        torch::TensorOptions().dtype(torch::kFloat));
+
+    {
+        // distCUDA2 需要 CUDA tensor
+        torch::Tensor point_cloud_copy = fused_point_cloud.clone();
+        torch::Tensor dist2 = torch::clamp_min(distCUDA2(point_cloud_copy), 0.0000001);
+        torch::Tensor scales_dist = torch::log(torch::sqrt(dist2));          // [N]
+        scales_dist = scales_dist.unsqueeze(1).repeat({1, 3});               // [N,3]
+        scales.copy_(scales_dist);
+    }
+
+    // 再把 line-sampled 点覆盖成 anisotropic log-scale，并把 rotation 对齐线方向
+    // 这里用 CPU 循环写回 scales/rots（不重），点数再大也没你训练耗时大
+    // 注意：pts[i].sample_step_ / ref_depth_z_ / ref_focal_ 要尽量填对
+    // 3) 在 CPU 上改 line-sampled 点的 scales/rots（避免 GPU 上逐点 index_put_ 慢）
+    //    关键：先保存 cpu tensor，再 accessor
+    torch::Tensor scales_cpu = scales.to(torch::kCPU).contiguous();
+    torch::Tensor rots_cpu   = rots.to(torch::kCPU).contiguous();
+
+    torch::Tensor line_dir_cpu = line_dir_w_.cpu().contiguous();
+    auto dir_acc = line_dir_cpu.accessor<float, 2>();
+
+    auto scales_acc = scales_cpu.accessor<float, 2>();
+    auto rots_acc   = rots_cpu.accessor<float, 2>();
+    pcd_it = pcd.begin();
+    for (int i = 0; i < num_points; ++i) {
+        const Point3D& p = (*pcd_it).second;
+        //Set sampled points' line direction
+        if (p.source_ == PointSourceType::MAP_POINT)
+        {
+            // Do something for MAP_POINT
+             // 对 point gaussian：给个合法但无关的值
+            dir_acc[i][0] = 1.f;
+            dir_acc[i][1] = 0.f;
+            dir_acc[i][2] = 0.f;
+            continue;
+        }
+        
+        Eigen::Vector3f d = p.line_dir_.normalized();
+        dir_acc[i][0] = d.x();
+        dir_acc[i][1] = d.y();
+        dir_acc[i][2] = d.z();
+
+
+        // --- scale ---
+        const float step  = (p.sample_step_ > 0.f) ? p.sample_step_ : 0.05f; // fallback
+        Eigen::Vector3f log_s = initLineSampleLogScale(step, p.ref_depth_z_, p.ref_focal_);
+        scales_acc[i][0] = log_s[0];
+        scales_acc[i][1] = log_s[1];
+        scales_acc[i][2] = log_s[2];
+
+        // --- rotation: align local X to line_dir ---
+        Eigen::Vector4f q = initQuatAlignXToDir(p.line_dir_);
+        rots_acc[i][0] = q[0];
+        rots_acc[i][1] = q[1];
+        rots_acc[i][2] = q[2];
+        rots_acc[i][3] = q[3];
+    }
+
+    
 
     torch::Tensor opacities = general_utils::inverse_sigmoid(
         0.1f * torch::ones(
@@ -187,8 +309,151 @@ void GaussianModelLine::createFromPcd(
 
     GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
 
+    //debug
+    this->debug_hit_count_ =
+        torch::zeros({this->getXYZ().size(0)},
+                 torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
+    this->debug_alpha_accum_ =
+        torch::zeros({this->getXYZ().size(0)},
+                 torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+
     this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
+    this->is_line_ = is_line_cpu.to(device_type_);  //cp back to gpu
 }
+
+void GaussianModelLine::increasePcd(
+    const std::vector<Point3D>& new_points,
+    const int iteration)
+{
+    const int N = static_cast<int>(new_points.size());
+    if (N == 0) return;
+
+    // ------------------------------------------------------------------
+    // 1) pack xyz / color on CPU (safe for accessor)
+    // ------------------------------------------------------------------
+    torch::Tensor xyz_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    torch::Tensor col_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+
+    {
+        auto xyz_acc = xyz_cpu.accessor<float, 2>();
+        auto col_acc = col_cpu.accessor<float, 2>();
+        for (int i = 0; i < N; ++i) {
+            const auto& p = new_points[i];
+            xyz_acc[i][0] = p.xyz_.x();
+            xyz_acc[i][1] = p.xyz_.y();
+            xyz_acc[i][2] = p.xyz_.z();
+            col_acc[i][0] = p.color_.x();
+            col_acc[i][1] = p.color_.y();
+            col_acc[i][2] = p.color_.z();
+        }
+    }
+
+    // Move to target device (CUDA/CPU)
+    torch::Tensor new_xyz   = xyz_cpu.to(device_type_, /*non_blocking=*/false).contiguous();
+    torch::Tensor new_color = col_cpu.to(device_type_, /*non_blocking=*/false).contiguous();
+
+    torch::Tensor new_is_line =
+        torch::zeros({new_xyz.size(0)},
+        torch::TensorOptions().dtype(torch::kBool).device(device_type_));
+    new_is_line.fill_(false);
+
+    // ------------------------------------------------------------------
+    // 2) SH features (same as createFromPcd)
+    // ------------------------------------------------------------------
+    torch::Tensor fused_color = sh_utils::RGB2SH(new_color);
+    const int sh_dim = (max_sh_degree_ + 1) * (max_sh_degree_ + 1);
+
+    torch::Tensor features = torch::zeros(
+        {N, 3, sh_dim},
+        torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
+    features.index({torch::indexing::Slice(), torch::indexing::Slice(0, 3), 0}) = fused_color;
+
+    torch::Tensor new_features_dc =
+        features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, 1)})
+                .transpose(1, 2).contiguous();
+    torch::Tensor new_features_rest =
+        features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(1, sh_dim)})
+                .transpose(1, 2).contiguous();
+
+    // ------------------------------------------------------------------
+    // 3) scale & rotation init (aligned with createFromPcd)
+    // ------------------------------------------------------------------
+    // rotation: identity quat
+    torch::Tensor new_rotation = torch::zeros({N, 4}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
+    new_rotation.index({torch::indexing::Slice(), 0}) = 1.f;
+
+    // baseline scale: dist-based isotropic (log-space)
+    torch::Tensor new_scaling;
+    {
+        torch::Tensor dist2 = torch::clamp_min(distCUDA2(new_xyz.clone()), 1e-7);
+        torch::Tensor s = torch::log(torch::sqrt(dist2)).unsqueeze(1).repeat({1, 3}); // [N,3] log-scale
+        new_scaling = s.contiguous();
+    }
+
+    // overwrite line-sampled on CPU (safe)
+    torch::Tensor scaling_cpu  = new_scaling.to(torch::kCPU).contiguous();
+    torch::Tensor rotation_cpu = new_rotation.to(torch::kCPU).contiguous();
+    torch::Tensor new_is_line_cpu = new_is_line.to(torch::kCPU).contiguous();
+
+    {
+        auto s_acc = scaling_cpu.accessor<float, 2>();
+        auto r_acc = rotation_cpu.accessor<float, 2>();
+        auto new_is_line_acc = new_is_line_cpu.accessor<bool, 1>();
+
+        for (int i = 0; i < N; ++i) {
+            const auto& p = new_points[i];
+            if (p.source_ != PointSourceType::LINE_SAMPLED) continue;
+
+            const float step = (p.sample_step_ > 0.f) ? p.sample_step_ : 0.05f;
+
+            // anisotropic log-scale (your function must output log-scale!)
+            Eigen::Vector3f log_s = initLineSampleLogScale(step, p.ref_depth_z_, p.ref_focal_);
+            s_acc[i][0] = log_s[0];
+            s_acc[i][1] = log_s[1];
+            s_acc[i][2] = log_s[2];
+
+            // rotation align local X -> line_dir
+            Eigen::Vector4f q = initQuatAlignXToDir(p.line_dir_);
+            r_acc[i][0] = q[0];
+            r_acc[i][1] = q[1];
+            r_acc[i][2] = q[2];
+            r_acc[i][3] = q[3];
+
+            new_is_line_acc[i] = true;
+        }
+    }
+
+    new_scaling  = scaling_cpu.to(device_type_).contiguous();
+    new_rotation = rotation_cpu.to(device_type_).contiguous();
+
+    // ------------------------------------------------------------------
+    // 4) opacity & existence
+    // ------------------------------------------------------------------
+    torch::Tensor new_opacity =
+        general_utils::inverse_sigmoid(
+            0.1f * torch::ones({N, 1},
+                torch::TensorOptions().dtype(torch::kFloat32).device(device_type_)));
+
+    torch::Tensor new_exist_since_iter =
+        torch::full({N}, iteration,
+            torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
+
+    // ------------------------------------------------------------------
+    // 5) densification postfix (unchanged)
+    // ------------------------------------------------------------------
+    densificationPostfix(
+        new_xyz,
+        new_features_dc,
+        new_features_rest,
+        new_opacity,
+        new_scaling,
+        new_rotation,
+        new_exist_since_iter
+    );
+
+    c10::cuda::CUDACachingAllocator::emptyCache();
+}
+
 
 void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float> colors, const int iteration)
 {
@@ -645,6 +910,194 @@ void GaussianModelLine::prunePoints(torch::Tensor& mask)
     this->max_radii2D_ = this->max_radii2D_.index({valid_points_mask});
 }
 
+void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
+{
+    using namespace torch::indexing;
+
+    auto valid_points_mask = ~mask;
+
+    // =====================================================
+    // A. Optimizer-managed tensors (Adam state-aware pruning)
+    // =====================================================
+    std::vector<torch::Tensor> optimizable_tensors(6);
+    auto& param_groups = this->optimizer_->param_groups();
+    auto& state = this->optimizer_->state();
+
+    for (int group_idx = 0; group_idx < 6; ++group_idx)
+    {
+        auto& param = param_groups[group_idx].params()[0];
+        auto key = param.unsafeGetTensorImpl();
+
+        if (state.find(key) != state.end())
+        {
+            auto& stored_state =
+                static_cast<torch::optim::AdamParamState&>(*state[key]);
+
+            auto new_state =
+                std::make_unique<torch::optim::AdamParamState>();
+
+            new_state->step(stored_state.step());
+            new_state->exp_avg(
+                stored_state.exp_avg().index({valid_points_mask}).clone());
+            new_state->exp_avg_sq(
+                stored_state.exp_avg_sq().index({valid_points_mask}).clone());
+
+            state.erase(key);
+
+            param =
+                param.index({valid_points_mask}).requires_grad_();
+
+            key = param.unsafeGetTensorImpl();
+            state[key] = std::move(new_state);
+
+            optimizable_tensors[group_idx] = param;
+        }
+        else
+        {
+            param =
+                param.index({valid_points_mask}).requires_grad_();
+            optimizable_tensors[group_idx] = param;
+        }
+    }
+
+    // =====================================================
+    // B. Assign back optimizer-managed tensors
+    // =====================================================
+    this->xyz_           = optimizable_tensors[0];
+    this->features_dc_   = optimizable_tensors[1];
+    this->features_rest_ = optimizable_tensors[2];
+    this->opacity_       = optimizable_tensors[3];
+    this->scaling_       = optimizable_tensors[4];
+    this->rotation_      = optimizable_tensors[5];
+
+    GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
+
+    // =====================================================
+    // C. Structure-only & auxiliary tensors (NO optimizer)
+    // =====================================================
+    this->is_line_ =
+        this->is_line_.index({valid_points_mask});
+
+    this->line_dir_w_ =
+        this->line_dir_w_.index({valid_points_mask});
+
+    this->exist_since_iter_ =
+        this->exist_since_iter_.index({valid_points_mask});
+
+    this->xyz_gradient_accum_ =
+        this->xyz_gradient_accum_.index({valid_points_mask});
+
+    this->denom_ =
+        this->denom_.index({valid_points_mask});
+
+    this->max_radii2D_ =
+        this->max_radii2D_.index({valid_points_mask});
+}
+
+void GaussianModelLine::densificationPostfixWithLineAwareness(
+    torch::Tensor& new_xyz,
+    torch::Tensor& new_features_dc,
+    torch::Tensor& new_features_rest,
+    torch::Tensor& new_opacities,
+    torch::Tensor& new_scaling,
+    torch::Tensor& new_rotation,
+    torch::Tensor& new_exist_since_iter,
+    // -------- 新增：line-aware --------
+    torch::Tensor& new_is_line,        // [N_new]
+    torch::Tensor& new_line_dir_w      // [N_new,3]
+)
+{
+    // =====================================================
+    // A. Optimizer-managed tensors (Adam needs to be extended)
+    // =====================================================
+    std::vector<torch::Tensor> optimizable_tensors(6);
+    std::vector<torch::Tensor> tensors_dict = {
+        new_xyz,
+        new_features_dc,
+        new_features_rest,
+        new_opacities,
+        new_scaling,
+        new_rotation
+    };
+
+    auto& param_groups = this->optimizer_->param_groups();
+    auto& state = this->optimizer_->state();
+
+    for (int group_idx = 0; group_idx < 6; ++group_idx) {
+        auto& group = param_groups[group_idx];
+        assert(group.params().size() == 1);
+
+        auto& extension_tensor = tensors_dict[group_idx];
+        auto& param = group.params()[0];
+        auto key = param.unsafeGetTensorImpl();
+
+        if (state.find(key) != state.end()) {
+            // ---- extend Adam state ----
+            auto& stored_state =
+                static_cast<torch::optim::AdamParamState&>(*state[key]);
+
+            auto new_state = std::make_unique<torch::optim::AdamParamState>();
+            new_state->step(stored_state.step());
+            new_state->exp_avg(
+                torch::cat({stored_state.exp_avg().clone(),
+                            torch::zeros_like(extension_tensor)}, 0));
+            new_state->exp_avg_sq(
+                torch::cat({stored_state.exp_avg_sq().clone(),
+                            torch::zeros_like(extension_tensor)}, 0));
+
+            state.erase(key);
+
+            param = torch::cat({param, extension_tensor}, 0).requires_grad_();
+            key = param.unsafeGetTensorImpl();
+            state[key] = std::move(new_state);
+
+            optimizable_tensors[group_idx] = param;
+        }
+        else {
+            // no state yet (should rarely happen)
+            param = torch::cat({param, extension_tensor}, 0).requires_grad_();
+            optimizable_tensors[group_idx] = param;
+        }
+    }
+
+    // ---- assign back ----
+    this->xyz_           = optimizable_tensors[0];
+    this->features_dc_   = optimizable_tensors[1];
+    this->features_rest_ = optimizable_tensors[2];
+    this->opacity_       = optimizable_tensors[3];
+    this->scaling_       = optimizable_tensors[4];
+    this->rotation_      = optimizable_tensors[5];
+
+    GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
+
+    // =====================================================
+    // B. Structure-only tensors (NO optimizer state)
+    // =====================================================
+    this->is_line_ =
+        torch::cat({this->is_line_, new_is_line.to(this->is_line_.device())}, 0);
+
+    this->line_dir_w_ =
+        torch::cat({this->line_dir_w_, new_line_dir_w.to(this->line_dir_w_.device())}, 0);
+
+    this->exist_since_iter_ =
+        torch::cat({this->exist_since_iter_, new_exist_since_iter}, 0);
+
+    // =====================================================
+    // C. Reset auxiliary buffers (size must match new total)
+    // =====================================================
+    const int N = this->getXYZ().size(0);
+
+    this->xyz_gradient_accum_ =
+        torch::zeros({N, 1}, torch::TensorOptions().device(device_type_));
+
+    this->denom_ =
+        torch::zeros({N, 1}, torch::TensorOptions().device(device_type_));
+
+    this->max_radii2D_ =
+        torch::zeros({N}, torch::TensorOptions().device(device_type_));
+}
+
+
 void GaussianModelLine::densificationPostfix(
     torch::Tensor& new_xyz,
     torch::Tensor& new_features_dc,
@@ -719,6 +1172,223 @@ void GaussianModelLine::densificationPostfix(
     this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
 }
 
+
+void GaussianModelLine::densifyAndSplitWithLineAwareness(
+    torch::Tensor& grads,
+    float grad_threshold,
+    float scene_extent,
+    int N)
+{
+    using namespace torch::indexing;
+
+    const int64_t n_init = this->getXYZ().size(0);
+    if (n_init == 0) return;
+
+    // =========================================================
+    // 1. Gradient-based selection
+    // =========================================================
+    auto padded_grad = torch::zeros(
+        {n_init},
+        torch::TensorOptions().device(device_type_).dtype(grads.dtype())
+    );
+
+    // grads may be shorter than n_init (same as original GS impl)
+    padded_grad.slice(0, 0, grads.size(0)).copy_(grads.squeeze());
+
+    auto selected_mask = padded_grad >= grad_threshold;
+    selected_mask = torch::logical_and(
+        selected_mask,
+        std::get<0>(torch::max(this->getScalingActivation(), 1))
+            > percentDense() * scene_extent
+    );
+
+    const int64_t M = selected_mask.sum().item<int64_t>();
+    if (M == 0) return;
+
+    // =========================================================
+    // 2. Gather parameters (selected subset)
+    // =========================================================
+    auto xyz_sel       = this->getXYZ().index({selected_mask});                 // (M,3)
+    auto scale_act_sel = this->getScalingActivation().index({selected_mask});   // (M,3)
+    auto rot_sel       = this->rotation_.index({selected_mask});                // (M,*)
+
+    // Structure tensors for selected subset
+    auto is_line_sel     = this->is_line_.index({selected_mask});               // (M)
+    auto line_dir_w_sel  = this->line_dir_w_.index({selected_mask});            // (M,3)
+
+    auto R = general_utils::build_rotation(rot_sel); // (M,3,3)
+
+    // =========================================================
+    // 3. Classify: point-like vs line-like (same rule as before)
+    // =========================================================
+    auto sorted = std::get<0>(scale_act_sel.sort(1, /*descending=*/true));
+    auto sigma0 = sorted.index({Slice(), 0});
+    auto sigma1 = sorted.index({Slice(), 1});
+
+    const float line_ratio_thresh = 4.0f;
+    auto geom_is_line = sigma0 / (sigma1 + 1e-6) > line_ratio_thresh;
+
+    // Final line mask: (recommended) trust stored is_line_ AND geometry check
+    // If you want purely geometric, replace with: auto is_line = geom_is_line;
+    auto is_line  = torch::logical_and(is_line_sel, geom_is_line);
+    auto is_point = ~is_line;
+
+    // =========================================================
+    // 4. Containers for newly generated Gaussians (+ structure)
+    // =========================================================
+    std::vector<torch::Tensor> new_xyz_list;
+    std::vector<torch::Tensor> new_scaling_list;
+    std::vector<torch::Tensor> new_rot_list;
+    std::vector<torch::Tensor> new_feat_dc_list;
+    std::vector<torch::Tensor> new_feat_rest_list;
+    std::vector<torch::Tensor> new_opacity_list;
+    std::vector<torch::Tensor> new_exist_iter_list;
+
+    // line-aware
+    std::vector<torch::Tensor> new_is_line_list;     // (K)
+    std::vector<torch::Tensor> new_line_dir_w_list;  // (K,3)
+
+    auto opts_f = torch::TensorOptions().device(device_type_).dtype(scale_act_sel.dtype());
+
+    // =========================================================
+    // 5. POINT-AWARE split (original behavior)
+    // =========================================================
+    if (is_point.any().item<bool>())
+    {
+        auto xyz_p   = xyz_sel.index({is_point});
+        auto scale_p = scale_act_sel.index({is_point});
+        auto R_p     = R.index({is_point});
+        const int64_t Mp = xyz_p.size(0);
+
+        auto stds = scale_p.repeat({N, 1});
+        auto samples = at::normal(
+            torch::zeros({Mp * N, 3}, opts_f),
+            stds
+        );
+
+        auto new_xyz = torch::bmm(
+            R_p.repeat({N,1,1}),
+            samples.unsqueeze(-1)
+        ).squeeze(-1) + xyz_p.repeat({N,1});
+
+        auto new_scaling = torch::log(scale_p.repeat({N,1}) / (0.8f * float(N)));
+
+        new_xyz_list.push_back(new_xyz);
+        new_scaling_list.push_back(new_scaling);
+
+        new_rot_list.push_back(rot_sel.index({is_point}).repeat({N,1}));
+        new_feat_dc_list.push_back(this->features_dc_.index({selected_mask}).index({is_point}).repeat({N,1,1}));
+        new_feat_rest_list.push_back(this->features_rest_.index({selected_mask}).index({is_point}).repeat({N,1,1}));
+        new_opacity_list.push_back(this->opacity_.index({selected_mask}).index({is_point}).repeat({N,1}));
+        new_exist_iter_list.push_back(this->exist_since_iter_.index({selected_mask}).index({is_point}).repeat({N}));
+
+        // --- structure: point ---
+        new_is_line_list.push_back(torch::zeros({Mp * N}, torch::TensorOptions().device(device_type_).dtype(torch::kBool)));
+        new_line_dir_w_list.push_back(torch::zeros({Mp * N, 3}, opts_f));
+    }
+
+    // =========================================================
+    // 6. LINE-AWARE split (1D densification along local x-axis)
+    // =========================================================
+    if (is_line.any().item<bool>())
+    {
+        const int axis = 0; // local x-axis = line direction (confirmed)
+
+        auto xyz_l   = xyz_sel.index({is_line});
+        auto scale_l = scale_act_sel.index({is_line});
+        auto R_l     = R.index({is_line});
+
+        auto rot_l   = rot_sel.index({is_line});
+        auto dir_l_w = line_dir_w_sel.index({is_line}); // (Ml,3), should already be unit
+
+        const int64_t Ml = xyz_l.size(0);
+
+        auto sigma_par = scale_l.index({Slice(), axis}).unsqueeze(1);
+
+        auto eps = at::normal(
+            torch::zeros({Ml * N, 1}, opts_f),
+            sigma_par.repeat({N,1})
+        );
+
+        auto local_offset = torch::zeros({Ml * N, 3}, opts_f);
+        local_offset.index_put_({Slice(), axis}, eps.squeeze(1));
+
+        auto new_xyz = torch::bmm(
+            R_l.repeat({N,1,1}),
+            local_offset.unsqueeze(-1)
+        ).squeeze(-1) + xyz_l.repeat({N,1});
+
+        auto new_scale_act = scale_l.repeat({N,1});
+        new_scale_act.index_put_(
+            {Slice(), axis},
+            new_scale_act.index({Slice(), axis}) / (0.8f * float(N))
+        );
+
+        auto new_scaling = torch::log(new_scale_act);
+
+        new_xyz_list.push_back(new_xyz);
+        new_scaling_list.push_back(new_scaling);
+
+        new_rot_list.push_back(rot_l.repeat({N,1}));
+        new_feat_dc_list.push_back(this->features_dc_.index({selected_mask}).index({is_line}).repeat({N,1,1}));
+        new_feat_rest_list.push_back(this->features_rest_.index({selected_mask}).index({is_line}).repeat({N,1,1}));
+        new_opacity_list.push_back(this->opacity_.index({selected_mask}).index({is_line}).repeat({N,1}));
+        new_exist_iter_list.push_back(this->exist_since_iter_.index({selected_mask}).index({is_line}).repeat({N}));
+
+        // --- structure: line ---
+        new_is_line_list.push_back(torch::ones({Ml * N}, torch::TensorOptions().device(device_type_).dtype(torch::kBool)));
+        // repeat world direction (no change during split)
+        auto new_dir = dir_l_w.repeat({N,1});
+        // safety normalize
+        new_dir = new_dir / (new_dir.norm(2, 1, true) + 1e-6);
+        new_line_dir_w_list.push_back(new_dir);
+    }
+
+    // =========================================================
+    // 7. Concatenate & append
+    // =========================================================
+    if (new_xyz_list.empty()) return; // safety
+
+    auto new_xyz          = torch::cat(new_xyz_list, 0);
+    auto new_scaling      = torch::cat(new_scaling_list, 0);
+    auto new_rotation     = torch::cat(new_rot_list, 0);
+    auto new_features_dc  = torch::cat(new_feat_dc_list, 0);
+    auto new_features_rst = torch::cat(new_feat_rest_list, 0);
+    auto new_opacity      = torch::cat(new_opacity_list, 0);
+    auto new_exist_iter   = torch::cat(new_exist_iter_list, 0);
+
+    auto new_is_line      = torch::cat(new_is_line_list, 0);
+    auto new_line_dir_w   = torch::cat(new_line_dir_w_list, 0);
+
+    // size checks (debug-friendly)
+    TORCH_CHECK(new_xyz.size(0) == new_is_line.size(0), "new_xyz and new_is_line size mismatch");
+    TORCH_CHECK(new_xyz.size(0) == new_line_dir_w.size(0), "new_xyz and new_line_dir_w size mismatch");
+    TORCH_CHECK(new_line_dir_w.size(1) == 3, "new_line_dir_w must be [N,3]");
+
+    this->densificationPostfixWithLineAwareness(
+        new_xyz,
+        new_features_dc,
+        new_features_rst,
+        new_opacity,
+        new_scaling,
+        new_rotation,
+        new_exist_iter,
+        new_is_line,
+        new_line_dir_w
+    );
+
+    // =========================================================
+    // 8. Prune original Gaussians
+    // =========================================================
+    auto prune_filter = torch::cat({
+        selected_mask,
+        torch::zeros({new_xyz.size(0)},
+            torch::TensorOptions().device(device_type_).dtype(torch::kBool))
+    });
+    this->prunePointsWithLineAwareness(prune_filter);
+}
+
+
 void GaussianModelLine::densifyAndSplit(
     torch::Tensor& grads,
     float grad_threshold,
@@ -765,6 +1435,184 @@ void GaussianModelLine::densifyAndSplit(
     });
     this->prunePoints(prune_filter);
 }
+
+
+void GaussianModelLine::densifyAndCloneWithLineAwareness(
+    torch::Tensor& grads,
+    float grad_threshold,
+    float scene_extent)
+{
+    using namespace torch::indexing;
+
+    // =========================================================
+    // 1. Gradient-based selection
+    // =========================================================
+    auto grad_norm = torch::frobenius_norm(grads, /*dim=*/-1);
+    auto selected_mask = grad_norm >= grad_threshold;
+
+    selected_mask = torch::logical_and(
+        selected_mask,
+        std::get<0>(torch::max(this->getScalingActivation(), 1))
+            <= percentDense() * scene_extent
+    );
+
+    const int64_t M = selected_mask.sum().item<int64_t>();
+    if (M == 0) return;
+
+    // =========================================================
+    // 2. Gather parameters (selected subset)
+    // =========================================================
+    auto xyz_sel       = this->xyz_.index({selected_mask});                     // (M,3)
+    auto scale_act_sel = this->getScalingActivation().index({selected_mask});   // (M,3)
+    auto rot_sel       = this->rotation_.index({selected_mask});                // (M,*)
+
+    // structure tensors (selected subset)
+    auto is_line_sel    = this->is_line_.index({selected_mask});                // (M)
+    auto line_dir_w_sel = this->line_dir_w_.index({selected_mask});             // (M,3)
+
+    // =========================================================
+    // 3. Classify: point-like vs line-like (geometry)
+    // =========================================================
+    auto sorted = std::get<0>(scale_act_sel.sort(1, /*descending=*/true));
+    auto sigma0 = sorted.index({Slice(), 0});
+    auto sigma1 = sorted.index({Slice(), 1});
+
+    const float line_ratio_thresh = 4.0f;
+    auto geom_is_line = sigma0 / (sigma1 + 1e-6) > line_ratio_thresh;
+
+    // Final line mask: trust stored label AND geometry (recommended)
+    // If you prefer pure geometry: auto is_line = geom_is_line;
+    auto is_line  = torch::logical_and(is_line_sel, geom_is_line);
+    auto is_point = ~is_line;
+
+    // =========================================================
+    // 4. Containers (data + structure)
+    // =========================================================
+    std::vector<torch::Tensor> xyz_list;
+    std::vector<torch::Tensor> scale_list;
+    std::vector<torch::Tensor> rot_list;
+    std::vector<torch::Tensor> feat_dc_list;
+    std::vector<torch::Tensor> feat_rest_list;
+    std::vector<torch::Tensor> opacity_list;
+    std::vector<torch::Tensor> exist_iter_list;
+
+    // line-aware
+    std::vector<torch::Tensor> new_is_line_list;      // (K)
+    std::vector<torch::Tensor> new_line_dir_w_list;   // (K,3)
+
+    auto opts_f = torch::TensorOptions().device(device_type_).dtype(scale_act_sel.dtype());
+
+    // =========================================================
+    // 5. POINT clone (exact copy)
+    // =========================================================
+    if (is_point.any().item<bool>())
+    {
+        auto xyz_p   = xyz_sel.index({is_point});
+        const int64_t Mp = xyz_p.size(0);
+
+        xyz_list.push_back(xyz_p);
+        scale_list.push_back(this->scaling_.index({selected_mask}).index({is_point}));
+        rot_list.push_back(rot_sel.index({is_point}));
+        feat_dc_list.push_back(this->features_dc_.index({selected_mask}).index({is_point}));
+        feat_rest_list.push_back(this->features_rest_.index({selected_mask}).index({is_point}));
+        opacity_list.push_back(this->opacity_.index({selected_mask}).index({is_point}));
+        exist_iter_list.push_back(this->exist_since_iter_.index({selected_mask}).index({is_point}));
+
+        // structure for point clones
+        new_is_line_list.push_back(
+            torch::zeros({Mp}, torch::TensorOptions().device(device_type_).dtype(torch::kBool))
+        );
+        new_line_dir_w_list.push_back(
+            torch::zeros({Mp, 3}, opts_f)
+        );
+    }
+
+    // =========================================================
+    // 6. LINE-aware clone
+    //    - same scale / rotation
+    //    - tiny perturbation along line direction (local x-axis)
+    //    - keep line_dir_w unchanged
+    // =========================================================
+    if (is_line.any().item<bool>())
+    {
+        const int axis = 0; // line direction = local x-axis
+
+        auto xyz_l   = xyz_sel.index({is_line});
+        auto scale_l = scale_act_sel.index({is_line});
+        auto rot_l   = rot_sel.index({is_line});
+
+        auto dir_l_w = line_dir_w_sel.index({is_line}); // (Ml,3)
+
+        const int64_t Ml = xyz_l.size(0);
+
+        // tiny noise: 1% of sigma_parallel
+        auto sigma_par = scale_l.index({Slice(), axis}).unsqueeze(1);
+        auto eps = 0.01f * at::normal(
+            torch::zeros({Ml, 1}, opts_f),
+            sigma_par
+        );
+
+        auto local_offset = torch::zeros({Ml, 3}, opts_f);
+        local_offset.index_put_({Slice(), axis}, eps.squeeze(1));
+
+        auto R_l = general_utils::build_rotation(rot_l); // (Ml,3,3)
+
+        auto xyz_new = torch::bmm(
+            R_l,
+            local_offset.unsqueeze(-1)
+        ).squeeze(-1) + xyz_l;
+
+        xyz_list.push_back(xyz_new);
+        scale_list.push_back(this->scaling_.index({selected_mask}).index({is_line}));
+        rot_list.push_back(rot_l);
+        feat_dc_list.push_back(this->features_dc_.index({selected_mask}).index({is_line}));
+        feat_rest_list.push_back(this->features_rest_.index({selected_mask}).index({is_line}));
+        opacity_list.push_back(this->opacity_.index({selected_mask}).index({is_line}));
+        exist_iter_list.push_back(this->exist_since_iter_.index({selected_mask}).index({is_line}));
+
+        // structure for line clones
+        new_is_line_list.push_back(
+            torch::ones({Ml}, torch::TensorOptions().device(device_type_).dtype(torch::kBool))
+        );
+
+        // keep same world direction; normalize for safety
+        auto new_dir = dir_l_w / (dir_l_w.norm(2, 1, true) + 1e-6);
+        new_line_dir_w_list.push_back(new_dir);
+    }
+
+    // =========================================================
+    // 7. Concatenate & append
+    // =========================================================
+    if (xyz_list.empty()) return; // safety
+
+    auto new_xyz          = torch::cat(xyz_list, 0);
+    auto new_scaling      = torch::cat(scale_list, 0);
+    auto new_rotation     = torch::cat(rot_list, 0);
+    auto new_features_dc  = torch::cat(feat_dc_list, 0);
+    auto new_features_rst = torch::cat(feat_rest_list, 0);
+    auto new_opacity      = torch::cat(opacity_list, 0);
+    auto new_exist_iter   = torch::cat(exist_iter_list, 0);
+
+    auto new_is_line      = torch::cat(new_is_line_list, 0);
+    auto new_line_dir_w   = torch::cat(new_line_dir_w_list, 0);
+
+    TORCH_CHECK(new_xyz.size(0) == new_is_line.size(0), "new_xyz and new_is_line size mismatch");
+    TORCH_CHECK(new_xyz.size(0) == new_line_dir_w.size(0), "new_xyz and new_line_dir_w size mismatch");
+    TORCH_CHECK(new_line_dir_w.size(1) == 3, "new_line_dir_w must be [N,3]");
+
+    this->densificationPostfixWithLineAwareness(
+        new_xyz,
+        new_features_dc,
+        new_features_rst,
+        new_opacity,
+        new_scaling,
+        new_rotation,
+        new_exist_iter,
+        new_is_line,
+        new_line_dir_w
+    );
+}
+
 
 void GaussianModelLine::densifyAndClone(
     torch::Tensor& grads,
@@ -819,6 +1667,274 @@ void GaussianModelLine::densifyAndPrune(
 
     c10::cuda::CUDACachingAllocator::emptyCache(); // torch.cuda.empty_cache()
 }
+
+void GaussianModelLine::densifyAndPruneWithLineAwareness(
+    float max_grad,
+    float min_opacity,
+    float extent,
+    int max_screen_size)
+{
+    using namespace torch::indexing;
+
+    // =========================================================
+    // 1. Accumulated gradient (photometric-driven)
+    // =========================================================
+    auto grads = this->xyz_gradient_accum_ / this->denom_;
+    grads.index_put_({grads.isnan()}, 0.0f);
+    grads.index_put_({grads.isinf()}, 0.0f);
+
+    // =========================================================
+    // 2. Structure-aware densification
+    // =========================================================
+    this->densifyAndCloneWithLineAwareness(grads, max_grad, extent);
+
+    const int split_N = 2; // recommended
+    this->densifyAndSplitWithLineAwareness(grads, max_grad, extent, split_N);
+
+    // =========================================================
+    // 3. Base pruning criteria (opacity-driven)
+    // =========================================================
+    auto prune_mask =
+        (this->getOpacityActivation() < min_opacity).view({-1});
+
+    // =========================================================
+    // 4. Screen-space and world-space pruning
+    // =========================================================
+    if (max_screen_size > 0)
+    {
+        auto big_points_vs =
+            this->max_radii2D_ > max_screen_size;
+
+        auto big_points_ws =
+            std::get<0>(this->getScalingActivation().max(1))
+                > 0.1f * extent;
+
+        prune_mask = torch::logical_or(
+            prune_mask,
+            torch::logical_or(big_points_vs, big_points_ws)
+        );
+    }
+
+    // =========================================================
+    // 5. Prune (line-aware state-safe)
+    // =========================================================
+    this->prunePointsWithLineAwareness(prune_mask);
+
+    // =========================================================
+    // 6. Free cached CUDA memory
+    // =========================================================
+    c10::cuda::CUDACachingAllocator::emptyCache();
+}
+
+
+//
+torch::Tensor GaussianModelLine::computeLineLevelPruneMask(
+    const torch::Tensor& base_prune_mask,
+    float dir_thresh_deg,
+    float dist_thresh,
+    float min_line_opacity_sum)
+{
+    using namespace torch::indexing;
+
+    const int64_t N = this->xyz_.size(0);
+    auto prune_mask = base_prune_mask.clone();
+
+    // ---------------------------------------------------------
+    // 1. Identify line-like Gaussians
+    // ---------------------------------------------------------
+    auto scale = this->getScalingActivation(); // (N,3)
+    auto sorted = std::get<0>(scale.sort(1, /*descending=*/true));
+    auto sigma0 = sorted.index({Slice(), 0});
+    auto sigma1 = sorted.index({Slice(), 1});
+
+    const float line_ratio_thresh = 4.0f;
+    auto is_line = sigma0 / (sigma1 + 1e-6) > line_ratio_thresh;
+
+    if (!is_line.any().item<bool>())
+        return prune_mask;
+
+    // ---------------------------------------------------------
+    // 2. Extract line Gaussians
+    // ---------------------------------------------------------
+    auto idx_line = torch::nonzero(is_line).squeeze();
+    auto xyz_l    = this->xyz_.index({idx_line});
+    auto opacity  = this->getOpacityActivation().index({idx_line});
+
+    // local x-axis → world direction
+    auto rot_l = this->rotation_.index({idx_line});
+    auto R_l = general_utils::build_rotation(rot_l);
+    auto dir_l = R_l.index({Slice(), Slice(), 0}); // (Nl,3)
+
+    // normalize
+    dir_l = dir_l / (dir_l.norm(2, 1, true) + 1e-6);
+
+    const int64_t Nl = xyz_l.size(0);
+
+    // ---------------------------------------------------------
+    // 3. Build adjacency by direction + distance
+    // ---------------------------------------------------------
+    const float cos_thresh =
+        std::cos(dir_thresh_deg * M_PI / 180.0f);
+
+    auto visited = torch::zeros({Nl}, torch::kBool);
+    auto keep_line = torch::zeros({Nl}, torch::kBool);
+
+    for (int64_t i = 0; i < Nl; ++i)
+    {
+        if (visited[i].item<bool>())
+            continue;
+
+        // BFS / flood fill
+        std::vector<int64_t> stack;
+        stack.push_back(i);
+        visited[i] = true;
+
+        float opacity_sum = 0.0f;
+
+        while (!stack.empty())
+        {
+            int64_t u = stack.back();
+            stack.pop_back();
+
+            opacity_sum += opacity[u].item<float>();
+
+            auto du = dir_l[u];
+            auto pu = xyz_l[u];
+
+            for (int64_t v = 0; v < Nl; ++v)
+            {
+                if (visited[v].item<bool>())
+                    continue;
+
+                // direction consistency
+                float cos_uv = torch::dot(du, dir_l[v]).item<float>();
+                if (std::abs(cos_uv) < cos_thresh)
+                    continue;
+
+                // spatial proximity
+                float dist = torch::norm(pu - xyz_l[v]).item<float>();
+                if (dist > dist_thresh)
+                    continue;
+
+                visited[v] = true;
+                stack.push_back(v);
+            }
+        }
+
+        // -----------------------------------------------------
+        // 4. Line-level decision
+        // -----------------------------------------------------
+        if (opacity_sum >= min_line_opacity_sum)
+        {
+            // mark all visited in this component as keep
+            for (int64_t v = 0; v < Nl; ++v)
+                if (visited[v].item<bool>())
+                    keep_line[v] = true;
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 5. Override prune mask
+    // ---------------------------------------------------------
+    auto keep_global_idx = idx_line.index({keep_line});
+    prune_mask.index_put_({keep_global_idx}, false);
+
+    return prune_mask;
+}
+
+
+torch::Tensor GaussianModelLine::computeLineLevelPruneMaskGPU(
+    const torch::Tensor& base_prune_mask,
+    float dir_thresh_deg,
+    float dist_thresh,
+    float min_line_opacity_sum)
+{
+    using namespace torch::indexing;
+
+    auto prune_mask = base_prune_mask.clone();
+
+    const int64_t N = this->xyz_.size(0);
+
+    // ---------------------------------------------------------
+    // 1. Identify line-like Gaussians
+    // ---------------------------------------------------------
+    auto scale = this->getScalingActivation(); // (N,3)
+    auto sorted = std::get<0>(scale.sort(1, /*descending=*/true));
+    auto sigma0 = sorted.index({Slice(), 0});
+    auto sigma1 = sorted.index({Slice(), 1});
+
+    const float line_ratio_thresh = 4.0f;
+    auto is_line = sigma0 / (sigma1 + 1e-6) > line_ratio_thresh;
+
+    if (!is_line.any().item<bool>())
+        return prune_mask;
+
+    // ---------------------------------------------------------
+    // 2. Extract line Gaussians
+    // ---------------------------------------------------------
+    auto idx_line = torch::nonzero(is_line).squeeze(1);   // (Nl)
+    auto xyz_l    = this->xyz_.index({idx_line});         // (Nl,3)
+    auto opacity  = this->getOpacityActivation().index({idx_line}); // (Nl)
+
+    // rotation → direction (local x-axis)
+    auto rot_l = this->rotation_.index({idx_line});
+    auto R_l   = general_utils::build_rotation(rot_l);
+    auto dir_l = R_l.index({Slice(), Slice(), 0}); // (Nl,3)
+
+    // normalize directions
+    dir_l = dir_l / (dir_l.norm(2, 1, true) + 1e-6);
+
+    const int64_t Nl = xyz_l.size(0);
+
+    // ---------------------------------------------------------
+    // 3. Pairwise direction consistency
+    // ---------------------------------------------------------
+    // cos_ij = |d_i · d_j|
+    auto cos_ij = torch::matmul(dir_l, dir_l.transpose(0,1)).abs(); // (Nl,Nl)
+
+    const float cos_thresh =
+        std::cos(dir_thresh_deg * M_PI / 180.0f);
+
+    auto dir_ok = cos_ij >= cos_thresh; // (Nl,Nl)
+
+    // ---------------------------------------------------------
+    // 4. Pairwise distance consistency
+    // ---------------------------------------------------------
+    auto diff = xyz_l.unsqueeze(1) - xyz_l.unsqueeze(0); // (Nl,Nl,3)
+    auto dist = diff.norm(2, /*dim=*/2);                 // (Nl,Nl)
+
+    auto dist_ok = dist <= dist_thresh;
+
+    // ---------------------------------------------------------
+    // 5. Line affinity mask
+    // ---------------------------------------------------------
+    auto affinity = torch::logical_and(dir_ok, dist_ok); // (Nl,Nl)
+
+    // ---------------------------------------------------------
+    // 6. Line-level opacity aggregation
+    // ---------------------------------------------------------
+    // support_i = sum_j affinity_ij * opacity_j
+    auto support =
+        torch::matmul(
+            affinity.to(opacity.dtype()),
+            opacity.unsqueeze(1)
+        ).squeeze(1); // (Nl)
+
+    // ---------------------------------------------------------
+    // 7. Keep decision (line-level)
+    // ---------------------------------------------------------
+    auto keep_line = support >= min_line_opacity_sum; // (Nl)
+
+    // ---------------------------------------------------------
+    // 8. Override prune mask
+    // ---------------------------------------------------------
+    auto keep_global_idx = idx_line.index({keep_line});
+    prune_mask.index_put_({keep_global_idx}, false);
+
+    return prune_mask;
+}
+
+
 
 void GaussianModelLine::addDensificationStats(
     torch::Tensor& viewspace_point_tensor,
