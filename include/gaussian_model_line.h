@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <unordered_map>
 
 #include <torch/torch.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -77,7 +78,7 @@ public:
     static float minWorldScaleFromPixelFootprint(float z, float focal);
     static Eigen::Vector3f initLineSampleLogScale(float sample_step, float ref_depth_z,float ref_focal, float k_t = 0.7f,float k_n = 0.4f);
     static Eigen::Vector4f initQuatAlignXToDir(const Eigen::Vector3f& dir_unit);
-              
+    torch::Tensor computeLineCoherenceLoss(float lambda_line = 1.0f);
 
     void oneUpShDegree();
     void setShDegree(const int sh);
@@ -191,6 +192,12 @@ public:
     void addDensificationStats(
         torch::Tensor& viewspace_point_tensor,
         torch::Tensor& update_filter);
+    
+    torch::Tensor computeGroupedLineLoss(const std::unordered_multimap<line3D_id_t, point3D_id_t>& line_to_sample_ids,
+        const std::map<point3D_id_t, int>& pnt_id_to_tensor_idx, // 预先建立点ID到Tensor行号的映射
+        float lambda_coherence);
+
+    torch::Tensor computeLineShapeConstraint(float lambda_ecc, float lambda_ori);
 
 // void increasePointsIterationsOfExistence(const int i = 1);
 
@@ -214,6 +221,7 @@ public:
     torch::Tensor is_line_;   // [P] bool, check whether point is line sampled or not
     // 可选：每个 line Gaussian 的方向（世界系）
     torch::Tensor line_dir_w_;  // N x 3, float
+    torch::Tensor point_ids_; // [N] 类型为 kLong，存储每个点的唯一 ID （用于后续处理）
     torch::Tensor features_dc_;
     torch::Tensor features_rest_;
     torch::Tensor scaling_;

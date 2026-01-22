@@ -60,7 +60,7 @@ public:
 
     void cachePoint3D(point3D_id_t point3D_id, Point3D& point3d);
     void cacheLine3D(line3D_id_t line3D_id, Line3D& line3d);    //Set line3d into cache
-    void cacheLineSampledPnts3D(line3D_id_t line3D_id, Point3D& point3d);   //
+    void cacheLineSampledPnts3D(line3D_id_t line3D_id, Point3D& sample_pnt);   //
     Point3D& getPoint3D(point3D_id_t point3DId);
     Line3D& getLine3D(line3D_id_t line3DId);    //Get line3D from cache
     void clearCachedPoint3D();
@@ -85,12 +85,19 @@ public:
     float cameras_extent_; ///< scene_info.nerf_normalization["radius"]
 
     int loaded_iter_;
-
+    point3D_id_t global_sample_counter_ = 0; // Global counter for sampled points along lines
     std::map<camera_id_t, Camera> cameras_;
     std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>> keyframes_;
+    // 3. 所有的点（普通点 + 线采样点）都统一存在这里，方便 Gaussians->createFromPcd 调用
     std::map<point3D_id_t, Point3D> cached_point_cloud_;
-    std::map<line3D_id_t, Line3D> cached_line3D_cloud_;  // Store 3D lines
-    std::map<line3D_id_t, Point3D> cached_line3D_to_point3D_;   // Map line3D id to its two endpoints' point3D
+    
+    // 1. 原始 3D 线段本体（由 ORB-SLAM3 传入，仅存端点）
+    std::map<line3D_id_t, Line3D> cached_line3D_cloud_;
+
+    // 2. 核心改进：线到采样点的映射
+    // 使用 multimap 或者 vector，允许一个 Line ID 对应多个采样点 ID
+    std::unordered_multimap<line3D_id_t, point3D_id_t> line_to_sample_ids_;
+
 
 protected:
     std::mutex mutex_kfs_;

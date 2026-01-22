@@ -590,6 +590,25 @@ void GaussianMapperLine::run()
     signalStop();
 }
 
+// gaussian_mapper_line.cpp
+
+std::map<point3D_id_t, int> GaussianMapperLine::buildPntIdMap()
+{
+    std::map<point3D_id_t, int> id_map;
+    
+    // 将 GPU 上的 ID 下载到 CPU 进行遍历
+    // 注意：如果是频繁调用，可以考虑在 GPU 上直接处理，但 std::map 只能在 CPU 维护
+    torch::Tensor ids_cpu = gaussians_->point_ids_.to(torch::kCPU);
+    auto accessor = ids_cpu.accessor<int64_t, 1>();
+
+    for (int i = 0; i < ids_cpu.size(0); ++i) {
+        // point3D_id_t 是 unsigned long
+        id_map[static_cast<point3D_id_t>(accessor[i])] = i;
+    }
+    
+    return id_map;
+}
+
 void GaussianMapperLine::trainColmap()
 {
     // Prepare multi resolution images for training
@@ -745,6 +764,12 @@ void GaussianMapperLine::trainForOneIteration()
     float lambda_dssim = lambdaDssim();
     auto loss = (1.0 - lambda_dssim) * Ll1
                 + lambda_dssim * (1.0 - loss_utils::ssim(masked_image, gt_image, device_type_));
+    
+    //added by zdg(同一个线段上的高斯中心（XYZ）应该落在该线段的轴线上)对于属于同一条线的点 Pi​，已知其线方向单位向量为 d，线段上的一点（例如质心）为 Pcenter​
+    torch::Tensor loss_line = gaussians_->computeLineCoherenceLoss(0.1f); // 权重 0.1
+    auto loss_line_shape = gaussians_->computeLineShapeConstraint(0.05f, 0.1f); // 形状约束
+    loss = loss + loss_line + loss_line_shape;  //modified by zdg
+
     loss.backward();
 
     torch::cuda::synchronize();

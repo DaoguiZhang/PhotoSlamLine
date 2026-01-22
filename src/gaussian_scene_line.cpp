@@ -29,6 +29,7 @@ GaussianSceneLine::GaussianSceneLine(
         this->loaded_iter_ = load_iteration;
         std::cout << "Loading trained model at iteration " << load_iteration << std::endl;
     }
+    global_sample_counter_ = 500000000;
 }
 
 void GaussianSceneLine::addCamera(Camera& camera)
@@ -81,9 +82,19 @@ void GaussianSceneLine::cacheLine3D(line3D_id_t line3D_id, Line3D& line3d)
     this->cached_line3D_cloud_[line3D_id] = line3d;
 }
 
-void GaussianSceneLine::cacheLineSampledPnts3D(line3D_id_t line3D_id, Point3D& point3d)
+void GaussianSceneLine::cacheLineSampledPnts3D(line3D_id_t line_id, Point3D& sample_pnt)
 {
-    this->cached_line3D_to_point3D_[line3D_id] = point3d;   //这是非常重要
+    // 1. 生成唯一的采样点 ID (建议：线 ID + 局部计数，或全局原子计数)
+    point3D_id_t new_pnt_id = global_sample_counter_++;
+
+    // 2. 标记属性
+    sample_pnt.source_ = PointSourceType::LINE_SAMPLED;
+    
+    // 3. 存入全局点云（这是 GaussianModel 初始化唯一读取的地方）
+    this->cached_point_cloud_[new_pnt_id] = sample_pnt;
+
+    // 4. 建立索引关系（可选，用于后期的 Line-Coherence Loss 快速查找）
+    this->line_to_sample_ids_.emplace(line_id, new_pnt_id);
 }
 
 Point3D& GaussianSceneLine::getPoint3D(point3D_id_t point3DId)

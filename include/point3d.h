@@ -37,6 +37,20 @@ public:
         source_ = PointSourceType::MAP_POINT;   //默认MAP_POINT
     }
 
+    // 在 Point3D 类中
+    void setAsLineSample(const Line3D& parent, double alpha, float step) {
+        this->source_ = PointSourceType::LINE_SAMPLED;
+        this->sample_step_ = step;
+    
+        // 几何插值
+        Eigen::Vector3d dir = parent.p2_ - parent.p1_;
+        this->xyz_ = parent.p1_ + alpha * dir;
+        this->line_dir_ = dir.normalized().cast<float>();
+    
+        // 颜色插值 (LERP)
+        this->color_ = (1.0f - (float)alpha) * parent.color1_ + (float)alpha * parent.color2_;
+    }
+
 public:
     Eigen::Vector3d xyz_;
 

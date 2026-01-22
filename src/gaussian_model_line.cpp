@@ -69,6 +69,51 @@ inline Eigen::Vector4f GaussianModelLine::initQuatAlignXToDir(const Eigen::Vecto
     return out;
 }
 
+torch::Tensor GaussianModelLine::computeLineCoherenceLoss(float lambda_line)
+{
+    using namespace torch::indexing;
+
+    // 1. 筛选出属于线特征的高斯点
+    auto line_mask = this->is_line_; // [N] bool
+    if (!line_mask.any().item<bool>()) {
+        return torch::zeros({}, torch::TensorOptions().device(device_type_));
+    }
+
+    auto xyz_l = this->xyz_.index({line_mask});           // [Nl, 3]
+    auto dir_l = this->line_dir_w_.index({line_mask});    // [Nl, 3]
+
+    // 2. 这里的关键挑战是如何区分“不同的线段”
+    // 在 SLAM 场景下，通常每个点属于一个特定的 LineID。
+    // 如果你没有存储 LineID，我们可以利用空间邻近性和方向一致性做一个简单的 Local Window 约束。
+    // 这里演示一个局部重心约束逻辑：
+    
+    // 计算当前所有线点的重心 (或者你可以按 LineID 分组计算)
+    // 假设我们简化处理：约束点与其方向向量的投影一致性
+    
+    // q_i = (P_i - P_ref) 
+    // r_i = q_i - (q_i \cdot d_i) * d_i  (即垂直于方向向量的分量)
+    
+    // 为了简单且高效（无需分组），我们计算点 i 的位置与其方向向量的偏离
+    // 这种 Loss 会抑制高斯点向垂直于线方向漂移
+    
+    // 我们需要一个参考点，这里简单使用滑动窗口或全局分组。
+    // 如果你的 Point3D 结构里有 line_id，建议在这里 cat 一个 line_id_tensor 进来。
+    
+    // 简易版：惩罚每个线高斯点的 XYZ 变化在法向方向上的分量
+    // 假设 xyz_0 是初始位置（detach状态）
+    auto xyz_init = xyz_l.detach(); 
+    auto diff = xyz_l - xyz_init; // [Nl, 3] 优化过程中的位移
+    
+    // 计算位移在法向上的投影: residual = diff - (diff \cdot dir) * dir
+    auto dot = (diff * dir_l).sum(1, true); // [Nl, 1]
+    auto projection = dot * dir_l;          // [Nl, 3]
+    auto normal_component = diff - projection;
+    
+    torch::Tensor loss = normal_component.pow(2).sum();
+
+    return lambda_line * loss;
+}
+
 
 GaussianModelLine::GaussianModelLine(const int sh_degree)
     : active_sh_degree_(0), spatial_lr_scale_(0.0),
@@ -423,6 +468,9 @@ void GaussianModelLine::increasePcd(
         }
     }
 
+    this->point_ids_ = torch::arange(0, num_points, 
+        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+
     new_scaling  = scaling_cpu.to(device_type_).contiguous();
     new_rotation = rotation_cpu.to(device_type_).contiguous();
 
@@ -651,6 +699,9 @@ void GaussianModelLine::applyScaledTransformation(
     torch::Tensor T_tensor =
         tensor_utils::EigenMatrix2TorchTensor(T.matrix(), device_type_).transpose(0, 1);
     transformPoints(this->xyz_, T_tensor);
+    // 在 applyScaledTransformation 中同步变换线方向(由于 line_dir_w_ 目前在你的代码里是 requires_grad(false)，如果线本身的位置发生了旋转，line_dir_w_ 就失效了)
+    torch::Tensor R_tensor = T_tensor.slice(0, 0, 3).slice(1, 0, 3); // 提取旋转部分
+    this->line_dir_w_ = torch::matmul(R_tensor, this->line_dir_w_.transpose(0,1)).transpose(0,1);
 
 // torch::Tensor scales;
 // torch::Tensor point_cloud_copy = this->xyz_.clone();
@@ -972,6 +1023,9 @@ void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
 
     GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
 
+    // ---- 完善 point_ids_ 的维护 ----
+    this->point_ids_ = this->point_ids_.index({valid_points_mask});
+
     // =====================================================
     // C. Structure-only & auxiliary tensors (NO optimizer)
     // =====================================================
@@ -1069,6 +1123,21 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     this->rotation_      = optimizable_tensors[5];
 
     GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
+
+    // ---- 完善 point_ids_ 的维护 ----
+    // 1. 获取当前最大的 ID 值，以确保新生成的 ID 不重复
+    int64_t max_id = 0;
+    if (this->point_ids_.size(0) > 0) {
+        max_id = this->point_ids_.max().item<int64_t>();
+    }
+
+    // 2. 为新生成的点分配新 ID
+    int64_t num_new = new_xyz.size(0);
+    torch::Tensor new_ids = torch::arange(max_id + 1, max_id + 1 + num_new, 
+        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+
+    // 3. 拼接 ID Tensor
+    this->point_ids_ = torch::cat({this->point_ids_, new_ids}, 0);
 
     // =====================================================
     // B. Structure-only tensors (NO optimizer state)
@@ -1950,6 +2019,82 @@ void GaussianModelLine::addDensificationStats(
     this->denom_.index_put_(
         {update_filter},
         this->denom_.index({update_filter}) + 1);
+}
+
+torch::Tensor GaussianModelLine::computeGroupedLineLoss(
+    const std::unordered_multimap<line3D_id_t, point3D_id_t>& line_to_sample_ids,
+    const std::map<point3D_id_t, int>& pnt_id_to_tensor_idx, // 预先建立点ID到Tensor行号的映射
+    float lambda_coherence) 
+{
+    torch::Tensor total_loss = torch::zeros({}, torch::TensorOptions().device(device_type_));
+    int count = 0;
+
+    // 遍历每一条线段
+    // 注意：在实际训练循环中，为了性能，建议只对当前帧可见的线段进行计算
+    for (auto it = line_to_sample_ids.begin(); it != line_to_sample_ids.end(); ) {
+        line3D_id_t curr_line_id = it->first;
+        auto range = line_to_sample_ids.equal_range(curr_line_id);
+
+        std::vector<int> indices;
+        for (auto r = range.first; r != range.second; ++r) {
+            if (pnt_id_to_tensor_idx.count(r->second)) {
+                indices.push_back(pnt_id_to_tensor_idx.at(r->second));
+            }
+        }
+
+        if (indices.size() > 1) {
+            // 将属于同一条线的 Gaussian 索引转为 Tensor
+            auto idx_tensor = torch::tensor(indices, torch::kLong).to(device_type_);
+            
+            // 提取这些点的当前位置 [M, 3] 和 初始方向 [M, 3]
+            auto p_m = this->xyz_.index({idx_tensor});
+            auto d_m = this->line_dir_w_.index({idx_tensor}); // 假设已归一化
+
+            // 计算该组点的几何中心 (作为直线上的一点参考)
+            auto center = p_m.mean(0, true); // [1, 3]
+
+            // 计算每个点到直线的距离向量: r = (P - C) - ((P - C) · d) * d
+            auto rel_p = p_m - center; // [M, 3]
+            auto proj = torch::sum(rel_p * d_m, 1, true) * d_m; // [M, 3]
+            auto orthogonal_dist = rel_p - proj; 
+
+            total_loss = total_loss + orthogonal_dist.pow(2).sum();
+            count++;
+        }
+        it = range.second; // 跳到下一条线
+    }
+
+    return (count > 0) ? (total_loss * lambda_coherence) : total_loss;
+}
+
+torch::Tensor GaussianModelLine::computeLineShapeConstraint(float lambda_ecc, float lambda_ori) {
+    auto line_mask = this->is_line_;
+    if (!line_mask.any().item<bool>()) return torch::zeros({}, xyz_.options());
+
+    // 1. 提取 Scaling
+    // 注意：scaling_ 存储的是 log 空间的值
+    auto s = torch::exp(this->scaling_.index({line_mask})); // [N_line, 3]
+    auto s_parallel = s.index({torch::indexing::Slice(), 0}); // 沿线方向
+    auto s_perpendicular = s.index({torch::indexing::Slice(), torch::indexing::Slice(1, 3)}); // 法向方向
+
+    // 约束 1：各向异性 (希望 s_perp / s_para 趋近于 0)
+    // 我们设定一个目标比例，比如希望长宽比至少是 10:1
+    auto eccentricity_loss = (s_perpendicular.mean(1) / (s_parallel + 1e-6)).sum();
+
+    // 2. 提取 Rotation 并与初始方向对齐
+    // 假设我们在初始化时保存了初始旋转 rotation_init_
+    auto q_current = torch::nn::functional::normalize(this->rotation_.index({line_mask}));
+    
+    // 如果你没有保存初始 q，可以约束当前局部 X 轴与 line_dir_w_ 的夹角
+    auto R = general_utils::build_rotation(q_current); // [N_line, 3, 3]
+    auto local_x = R.index({torch::indexing::Slice(), torch::indexing::Slice(), 0}); // 变换后的局部 X 轴
+    auto d_init = this->line_dir_w_.index({line_mask}); // 初始线方向
+
+    // 约束 2：方向对齐 (余弦相似度接近 1)
+    auto cos_sim = torch::abs(torch::sum(local_x * d_init, 1));
+    auto orientation_loss = (1.0 - cos_sim).sum();
+
+    return lambda_ecc * eccentricity_loss + lambda_ori * orientation_loss;
 }
 
 // void GaussianModel::increasePointsIterationsOfExistence(const int i)

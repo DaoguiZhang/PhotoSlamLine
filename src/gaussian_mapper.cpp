@@ -696,6 +696,7 @@ void GaussianMapper::trainForOneIteration()
     float lambda_dssim = lambdaDssim();
     auto loss = (1.0 - lambda_dssim) * Ll1
                 + lambda_dssim * (1.0 - loss_utils::ssim(masked_image, gt_image, device_type_));
+    
     loss.backward();
 
     torch::cuda::synchronize();

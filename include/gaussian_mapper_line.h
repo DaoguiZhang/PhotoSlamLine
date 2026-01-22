@@ -112,6 +112,9 @@ public:
     void trainColmap();
     void trainForOneIteration();
 
+    //先用 Tensor 掩码法跑通流程，如果发现线段断裂严重，再引入 buildPntIdMap 做精细化的分组约束
+    std::map<point3D_id_t, int> buildPntIdMap();    //To do next...
+
     bool isStopped();
     void signalStop(const bool going_to_stop = true);
 
