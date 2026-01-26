@@ -120,7 +120,7 @@ void GaussianSceneLine::clearCachedPoint3D()
 
 void GaussianSceneLine::clearCachedLine3DToPoint3D()
 {
-    this->cached_line3D_to_point3D_.clear();
+    this->line_to_sample_ids_.clear();
 }
 
 void GaussianSceneLine::clearCachedLine3D()

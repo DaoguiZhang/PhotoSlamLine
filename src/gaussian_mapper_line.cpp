@@ -399,28 +399,38 @@ void GaussianMapperLine::run()
                     scene_->cachePoint3D(pMP->mnId, point3D);
                 }
                 //Sample Point 3d from vpMPLs
-                for(size_t i = 0; i < vpMPLs.size(); ++i)
+                // for(size_t i = 0; i < vpMPLs.size(); ++i)
+                // {
+                //     float sample_step = 0.1f;        // 世界坐标采样步长 (e.g. 0.05f)
+                //     float view_angle_power = 2.0f;   // 视角权重指数 (e.g. 2.0)
+                //     float sigma_line_pixel = 3.0f;   // 图像线一致性 σ (e.g. 3.0 px)
+                //     int   top_k = 3;               // Top-K 视角 (e.g. 3)
+                //     vpMPLs[i]->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);    //调用这个函数是否出现bug之类的。
+                //     //std::vector<Eigen::Vector3f> sampled_line_pnts = 
+                // }
+                for (const auto& pML : vpMPLs)
                 {
-                    float sample_step = 0.1f;        // 世界坐标采样步长 (e.g. 0.05f)
-                    float view_angle_power = 2.0f;   // 视角权重指数 (e.g. 2.0)
-                    float sigma_line_pixel = 3.0f;   // 图像线一致性 σ (e.g. 3.0 px)
-                    int   top_k = 3;               // Top-K 视角 (e.g. 3)
-                    vpMPLs[i]->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);    //调用这个函数是否出现bug之类的。
-                    //std::vector<Eigen::Vector3f> sampled_line_pnts = 
-                }
-                for (size_t i = 0; i < vpMPLs.size(); i++)
-                {
-                    const auto& pML = vpMPLs[i];
+                    if(!pML) continue;
+                    // 1. 获取线段端点并计算方向向量 (Crucial Step!)
+                    auto endpoints = pML->GetLineWorldPos();
+                    Eigen::Vector3f p1(endpoints.first[0], endpoints.first[1], endpoints.first[2]);
+                    Eigen::Vector3f p2(endpoints.second[0], endpoints.second[1], endpoints.second[2]);
+                    
+                    Eigen::Vector3f line_vec = p2 - p1;
+                    float line_len = line_vec.norm();
+                    Eigen::Vector3f line_dir = line_vec.normalized(); // 归一化方向
+
+                    // 2. 缓存 Line3D (用于可视化或调试)
                     Line3D line3D;
                     //line3D.start_ = scene_->getPoint3D(pML->GetStartPointId());
                     //line3D.end_ = scene_->getPoint3D(pML->GetEndPointId());
                     //line3D.color_ = pML->GetColorRGB();
-                    line3D.p1_[0] = pML->GetLineWorldPos().first[0];
-                    line3D.p1_[1] = pML->GetLineWorldPos().first[1];
-                    line3D.p1_[2] = pML->GetLineWorldPos().first[2];
-                    line3D.p2_[0] = pML->GetLineWorldPos().second[0];
-                    line3D.p2_[1] = pML->GetLineWorldPos().second[1];
-                    line3D.p2_[2] = pML->GetLineWorldPos().second[2];
+                    line3D.p1_[0] = endpoints.first[0];
+                    line3D.p1_[1] = endpoints.first[1];
+                    line3D.p1_[2] = endpoints.first[2];
+                    line3D.p2_[0] = endpoints.second[0];
+                    line3D.p2_[1] = endpoints.second[1];
+                    line3D.p2_[2] = endpoints.second[2];
                     line3D.color1_[0] = pML->GetLineColorRGB().first[0];
                     line3D.color1_[1] = pML->GetLineColorRGB().first[1];
                     line3D.color1_[2] = pML->GetLineColorRGB().first[2];
@@ -428,9 +438,20 @@ void GaussianMapperLine::run()
                     line3D.color2_[1] = pML->GetLineColorRGB().second[1];
                     line3D.color2_[2] = pML->GetLineColorRGB().second[2];
                     scene_->cacheLine3D(pML->mnId, line3D);
-                    //在MapLine类中采样3D线段并存储到Point3D中。需要再写一下MapLine类的函数
+
+                    // 3. 执行采样 (Sample Points)
+                    // 建议将这些参数放入配置文件 readConfigFromFile 中
+                    float sample_step = 0.1f; 
+                    float view_angle_power = 2.0f;
+                    float sigma_line_pixel = 3.0f;
+                    int top_k = 3;
+                    // 这一步会填充 mapLine 内部的 buffer
+                    pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);
+                    
+                    // 在MapLine类中采样3D线段并存储到Point3D中。需要再写一下MapLine类的函数
                     const std::vector<Eigen::Vector3f> sampledPoints3D = pML->GetLineSampledPoints3D();
                     const std::vector<cv::Vec3b> sampledColors = pML->GetLineSampledPntsColors();
+                    // 4. 将采样点转为 Gaussian 初始点 (Point3D)
                     for (size_t j = 0; j < sampledPoints3D.size(); ++j)
                     {
                         Point3D point3D;
@@ -440,8 +461,15 @@ void GaussianMapperLine::run()
                         point3D.color_(0) = (float)(sampledColors[j][0]/255.0);
                         point3D.color_(1) = (float)(sampledColors[j][1]/255.0);
                         point3D.color_(2) = (float)(sampledColors[j][2]/255.0);
-                        //TO DO:这里需要区分点的ID，不能直接用线段的ID
+
+                        // 【核心修正】必须设置方向和采样步长等元数据
+                        point3D.line_dir_ = line_dir;       // 传入方向，用于初始化 Rotation
+                        point3D.sample_step_ = sample_step; // 传入步长，用于初始化 Scale_parallel
+                        // 如果 MapLine 能提供 ref_depth 或 ref_focal 更好，否则使用默认值
+                        // point3D.ref_depth_z_ = ...;
+                        
                         ///scene_->cachePoint3D(pML->mnId, point3D);
+                        scene_->cacheLineSampledPnts3D(pML->mnId, point3D);
                     }
                 }
                 
@@ -1142,6 +1170,85 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                 std::unique_lock<std::mutex> lock_render(mutex_render_);
                 gaussians_->increasePcd(points, colors, getIteration());
             }
+
+            // =========================================================================
+            // 3. [新增] Handle New Map Lines (New Logic for Line-Awareness)
+            // =========================================================================
+            // 假设 opr 有 associatedMapLines() 接口
+            auto& associated_lines = opr.associatedMapLines(); 
+            auto& map_lines = std::get<0>(associated_lines); // std::vector<MapLine*>
+
+            if (initial_mapped_ && !map_lines.empty()) {
+                std::vector<Point3D> new_line_sample_points;
+                new_line_sample_points.reserve(map_lines.size() * 10); // 预估容量
+
+                // 采样参数 (建议后续移入 readConfigFromFile)
+                float sample_step = 0.1f;
+                float view_angle_power = 2.0f;
+                float sigma_line_pixel = 3.0f;
+                int top_k = 3;
+
+                //接口有点问题，待解决
+                // for (auto* pML : map_lines) {
+                //     if (!pML || pML->isBad()) continue;
+                //     // A. 获取线段几何信息 & 计算方向
+                //     auto endpoints = pML->GetLineWorldPos();
+                //     Eigen::Vector3f p1(endpoints.first[0], endpoints.first[1], endpoints.first[2]);
+                //     Eigen::Vector3f p2(endpoints.second[0], endpoints.second[1], endpoints.second[2]);
+                //     Eigen::Vector3f line_vec = p2 - p1;
+                //     float len = line_vec.norm();
+                //     if (len < 1e-4) continue; // 忽略过短的线
+                //     Eigen::Vector3f line_dir = line_vec.normalized();
+                //     // B. 缓存 Line3D 对象到 Scene (用于调试/可视化)
+                //     // 如果 Scene 中已经有了，是否更新？通常 LocalBA 会优化线段位置，所以建议更新。
+                //     Line3D line3d_obj;
+                //     line3d_obj.p1_ = p1;
+                //     line3d_obj.p2_ = p2;
+                //     auto l_colors = pML->GetLineColorRGB();
+                //     line3d_obj.color1_ = Eigen::Vector3f(l_colors.first[0], l_colors.first[1], l_colors.first[2]);
+                //     line3d_obj.color2_ = Eigen::Vector3f(l_colors.second[0], l_colors.second[1], l_colors.second[2]);
+                //     scene_->cacheLine3D(pML->mnId, line3d_obj);
+                //     // C. 在新位置进行采样
+                //     // 注意：如果是老线段位置更新，旧的高斯球不会自动移动，
+                //     // 我们这里添加的是基于新位置的“新高斯球”。旧的会被后续 Pruning 机制干掉。
+                //     pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
+                //         sample_step, view_angle_power, sigma_line_pixel, top_k);                   
+                //     const std::vector<Eigen::Vector3f>& sampledPoints3D = pML->GetLineSampledPoints3D();
+                //     const std::vector<cv::Vec3b>& sampledColors = pML->GetLineSampledPntsColors();
+                //     // D. 构建 Point3D 对象
+                //     for (size_t j = 0; j < sampledPoints3D.size(); ++j) {
+                //         Point3D point3D;
+                //         point3D.xyz_ = sampledPoints3D[j];                        
+                //         // 归一化颜色
+                //         point3D.color_(0) = (float)(sampledColors[j][0] / 255.0f);
+                //         point3D.color_(1) = (float)(sampledColors[j][1] / 255.0f);
+                //         point3D.color_(2) = (float)(sampledColors[j][2] / 255.0f);
+                //         // 【关键】设置线特征属性
+                //         point3D.source_ = PointSourceType::LINE_SAMPLED;
+                //         point3D.line_dir_ = line_dir;       // 用于初始化各向异性旋转
+                //         point3D.sample_step_ = sample_step; // 用于初始化各向异性 Scaling                       
+                //         // 可选：设置参考深度等，如果没有可设为默认值
+                //         // point3D.ref_depth_z_ = ...; 
+                //         new_line_sample_points.push_back(point3D);
+                //         // 同时也缓存到 Scene 中，保持一致性
+                //         scene_->cacheLineSampledPnts3D(pML->mnId, point3D);
+                //     }
+                // }
+
+                // E. 将新生成的线高斯加入到 GPU 显存
+                if (!new_line_sample_points.empty()) {
+                    torch::NoGradGuard no_grad;
+                    std::unique_lock<std::mutex> lock_render(mutex_render_);
+                    
+                    // 调用针对 vector<Point3D> 的重载版本
+                    // 这个版本会正确读取 line_dir_ 并初始化各向异性属性
+                    gaussians_->increasePcd(new_line_sample_points, getIteration());
+                    
+                    // std::cout << "[Gaussian Mapper] Added " << new_line_sample_points.size() 
+                    //           << " new line-sampled gaussians." << std::endl;
+                }
+            }
+
         }
         break;
 

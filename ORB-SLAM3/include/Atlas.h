@@ -89,6 +89,14 @@ public:
         int length = nMPs * 3;
         std::get<0>(mvAssociatedMapPoints).reserve(length);
         std::get<1>(mvAssociatedMapPoints).reserve(length);
+
+        // MapLines 初始化
+        std::get<0>(mvAssociatedMapLines).reserve(length); // 端点
+        std::get<1>(mvAssociatedMapLines).reserve(length); // 颜色
+        // Sampled Points 初始化 (假设每个线采样10个点)
+        std::get<0>(mvAssociatedLineSampledPoints).reserve(length * 10); 
+        std::get<1>(mvAssociatedLineSampledPoints).reserve(length * 10);
+        std::get<2>(mvAssociatedLineSampledPoints).reserve(length * 10 / 3); // 存 line_dir
     }
 
     MappingOperation(const MappingOperation &opr)
@@ -111,7 +119,7 @@ public:
         std::vector<float> pixels;
         std::vector<float> pointsLocal;
         std::vector<float> keylinePixels; // added for keyline
-        std::vector<float> keylinePointsLocal; // added for keyline
+        std::vector<float> keylinePointsLocal; // added for keyline(important, 明天要改这部分的内容，它关于后续的内容，需要图像的线段和世界坐标系的线段对应，一起传输出去，放到mvAssociatedKeyFrames中)
         pKF->GetKeypointInfo(pixels, pointsLocal);
         pKF->GetKeyLineInfo(keylinePixels, keylinePointsLocal); // added for keyline
         mvAssociatedKeyFrames.emplace_back(
@@ -187,12 +195,50 @@ public:
         std::get<1>(mvAssociatedMapLines).emplace_back(color2.x());
         std::get<1>(mvAssociatedMapLines).emplace_back(color2.y());
         std::get<1>(mvAssociatedMapLines).emplace_back(color2.z());
-    }   
 
-    //void 
+        // 2. 存储采样点 (Sampled Points) - 用于 Gaussian 初始化
+        // 必须假设 pML 已经完成了采样计算
+        const auto& sampled_pts = pML->GetLineSampledPoints3D(); 
+        const auto& sampled_cols = pML->GetLineSampledPntsColors();
+
+        if(sampled_pts.empty() || sampled_cols.empty()) {
+            std::cerr << "Warning: MapLine has no sampled points or colors!" << std::endl;
+            return;
+        }
+
+        if(sampled_pts.size() != sampled_cols.size()) {
+            std::cerr << "Error: Sampled points and colors size mismatch!" << std::endl;
+            return;
+        }
+
+        // 计算线方向 (用于 Gaussian 旋转初始化)
+        Eigen::Vector3f dir = (pt2 - pt1).normalized();
+        for(size_t i=0; i<sampled_pts.size(); ++i) {
+            // Pos
+            std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].x());
+            std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].y());
+            std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].z());
+            // Color (归一化到 0-1 float)
+            std::get<1>(mvAssociatedLineSampledPoints).emplace_back(sampled_cols[i][0] / 255.0f);
+            std::get<1>(mvAssociatedLineSampledPoints).emplace_back(sampled_cols[i][1] / 255.0f);
+            std::get<1>(mvAssociatedLineSampledPoints).emplace_back(sampled_cols[i][2] / 255.0f);
+            // Direction (新增：为了初始化 Line Gaussian 的旋转)
+            std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.x());
+            std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.y());
+            std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.z());
+        }
+    }
+    
+    // Getter for Sampled Points (Pos, Color, Direction)
+    std::tuple<std::vector<float>, std::vector<float>, std::vector<float>>& associatedLineSampledPoints() { 
+        return mvAssociatedLineSampledPoints; 
+    }
+
+    // Getter for Map Points (Pos, Color)
     std::tuple<std::vector<float/*pos*/>, std::vector<float/*color*/>>&
     associatedMapPoints() { return mvAssociatedMapPoints; }
 
+    // Getter for Map Lines (Pos, Color)
     std::tuple<std::vector<float/*pos*/>, std::vector<float/*color*/>>&
     associatedMapLines() { return mvAssociatedMapLines; } // added for MapLine
 
@@ -209,8 +255,12 @@ protected:
     std::tuple<std::vector<float/*pos*/>,
                std::vector<float/*color*/>> mvAssociatedMapPoints;
     
+    // [Pos (x1,y1,z1, x2,y2,z2...), Color (r1,g1,b1, r2,g2,b2...)]
     std::tuple<std::vector<float/*pos*/>,
                std::vector<float/*color*/>> mvAssociatedMapLines; // added for MapLine
+    
+    // [Pos, Color, Direction] - 纯数据存储，解耦 MapLine 对象
+    std::tuple<std::vector<float>, std::vector<float>, std::vector<float>> mvAssociatedLineSampledPoints;
 
     std::vector<std::tuple<
         unsigned long/*Id*/,

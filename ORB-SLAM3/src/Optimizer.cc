@@ -4430,12 +4430,29 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         );
         // mark retrieved for reporting
         if (!pML->isRetrived()) 
-        { 
+        {
+            // =========================================================
+            // 【关键修改】: 在打包发送给 GS 之前，必须基于"新几何"重新采样！
+            // =========================================================
+            
+            // 参数建议放到类成员变量或配置中
+            float sample_step = 0.1f;  // 采样步长，比如 10cm
+            float view_weight = 2.0f; 
+            float sigma = 3.0f;
+            int top_k = 3;
+
+            // 这一步会清空 pML 内部旧的 sampled points，并生成基于 new_p1, new_p2 的新点
+            // 
+            pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
+                sample_step, view_weight, sigma, top_k);
+
+            // 3. 将采样后的数据打包进 MappingOperation
+            // (前提：MappingOperation::addMapLine 已经改为了读取 pML->GetLineSampledPoints3D())
+            opr.addMapLine(pML);
             pML->setRetrived(true); 
-            opr.addMapLine(pML); 
-            //在线段上采样顶点，如果线段是Combine两个线段的情况下，怎么处理(后续再处理)
+            // 在线段上采样顶点，如果线段是 Combine 两个线段的情况下，怎么处理(后续再处理)
         }
-    }   //end for each MapLine
+    }   // end for each MapLine
     // keep mapline; mark retrieved for reporting
     pMap->IncreaseChangeIndex();
     // --- 14. statistics output ---

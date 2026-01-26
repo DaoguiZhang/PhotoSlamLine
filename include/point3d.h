@@ -20,6 +20,8 @@
 
 #include <Eigen/Core>
 
+#include "line_3d.h"
+
 enum class PointSourceType {
     MAP_POINT = 0,
     LINE_SAMPLED = 1

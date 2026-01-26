@@ -29,8 +29,8 @@ inline Eigen::Vector3f GaussianModelLine::initLineSampleLogScale(
     float sample_step,
     float ref_depth_z,
     float ref_focal,
-    float k_t = 0.7f,      // along-line: 0.5~1.0
-    float k_n = 0.4f)      // normal:     0.3~0.6
+    float k_t,      // along-line: 0.5~1.0
+    float k_n)      // normal:     0.3~0.6
 {
     // 1) 沿线方向：由采样步长控制
     float scale_t = std::max(1e-6f, k_t * sample_step);
@@ -354,6 +354,9 @@ void GaussianModelLine::createFromPcd(
 
     GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
 
+    this->point_ids_ = torch::arange(0, num_points, 
+        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+
     //debug
     this->debug_hit_count_ =
         torch::zeros({this->getXYZ().size(0)},
@@ -373,130 +376,143 @@ void GaussianModelLine::increasePcd(
     const int N = static_cast<int>(new_points.size());
     if (N == 0) return;
 
-    // ------------------------------------------------------------------
-    // 1) pack xyz / color on CPU (safe for accessor)
-    // ------------------------------------------------------------------
+    // =================================================================================
+    // 1) 第一步：在 CPU 上一次性打包所有数据 (XYZ, Color, Direction, IsLine)
+    // =================================================================================
     torch::Tensor xyz_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
     torch::Tensor col_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    torch::Tensor dir_cpu = torch::zeros({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    torch::Tensor is_line_cpu = torch::zeros({N}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
 
     {
         auto xyz_acc = xyz_cpu.accessor<float, 2>();
         auto col_acc = col_cpu.accessor<float, 2>();
+        auto dir_acc = dir_cpu.accessor<float, 2>();
+        auto line_acc = is_line_cpu.accessor<bool, 1>();
+
         for (int i = 0; i < N; ++i) {
             const auto& p = new_points[i];
+            
+            // 基础属性
             xyz_acc[i][0] = p.xyz_.x();
             xyz_acc[i][1] = p.xyz_.y();
             xyz_acc[i][2] = p.xyz_.z();
             col_acc[i][0] = p.color_.x();
             col_acc[i][1] = p.color_.y();
             col_acc[i][2] = p.color_.z();
+            
+            // 线特征属性
+            if (p.source_ == PointSourceType::LINE_SAMPLED) {
+                Eigen::Vector3f d = p.line_dir_.normalized();
+                dir_acc[i][0] = d.x();
+                dir_acc[i][1] = d.y();
+                dir_acc[i][2] = d.z();
+                line_acc[i] = true;     //设置好是否为line point
+            } else {
+                // 普通点给个默认方向(1,0,0)，防止 NaN，但 is_line=false
+                dir_acc[i][0] = 1.0f; 
+                dir_acc[i][1] = 0.0f; 
+                dir_acc[i][2] = 0.0f;
+                line_acc[i] = false;
+            }
         }
     }
 
-    // Move to target device (CUDA/CPU)
+    // =================================================================================
+    // 2) 统一移动到 GPU
+    // =================================================================================
     torch::Tensor new_xyz   = xyz_cpu.to(device_type_, /*non_blocking=*/false).contiguous();
     torch::Tensor new_color = col_cpu.to(device_type_, /*non_blocking=*/false).contiguous();
+    // 【关键】直接使用上面生成的 tensor，不要重新定义！
+    torch::Tensor new_line_dir_w = dir_cpu.to(device_type_, /*non_blocking=*/false).contiguous();
+    torch::Tensor new_is_line    = is_line_cpu.to(device_type_, /*non_blocking=*/false).contiguous();
 
-    torch::Tensor new_is_line =
-        torch::zeros({new_xyz.size(0)},
-        torch::TensorOptions().dtype(torch::kBool).device(device_type_));
-    new_is_line.fill_(false);
-
-    // ------------------------------------------------------------------
-    // 2) SH features (same as createFromPcd)
-    // ------------------------------------------------------------------
+    // =================================================================================
+    // 3) 初始化 SH 特征 (GPU)
+    // =================================================================================
     torch::Tensor fused_color = sh_utils::RGB2SH(new_color);
     const int sh_dim = (max_sh_degree_ + 1) * (max_sh_degree_ + 1);
 
-    torch::Tensor features = torch::zeros(
-        {N, 3, sh_dim},
-        torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
+    torch::Tensor features = torch::zeros({N, 3, sh_dim}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
     features.index({torch::indexing::Slice(), torch::indexing::Slice(0, 3), 0}) = fused_color;
 
-    torch::Tensor new_features_dc =
-        features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, 1)})
-                .transpose(1, 2).contiguous();
-    torch::Tensor new_features_rest =
-        features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(1, sh_dim)})
-                .transpose(1, 2).contiguous();
+    torch::Tensor new_features_dc = features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, 1)}).transpose(1, 2).contiguous();
+    torch::Tensor new_features_rest = features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(1, sh_dim)}).transpose(1, 2).contiguous();
 
-    // ------------------------------------------------------------------
-    // 3) scale & rotation init (aligned with createFromPcd)
-    // ------------------------------------------------------------------
-    // rotation: identity quat
+    // =================================================================================
+    // 4) 初始化 Scale 和 Rotation (先在 GPU 做通用的，再去 CPU 修正线特征)
+    // =================================================================================
+    // 默认 Rotation: identity
     torch::Tensor new_rotation = torch::zeros({N, 4}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
     new_rotation.index({torch::indexing::Slice(), 0}) = 1.f;
 
-    // baseline scale: dist-based isotropic (log-space)
+    // 默认 Scale: dist-based isotropic
     torch::Tensor new_scaling;
     {
         torch::Tensor dist2 = torch::clamp_min(distCUDA2(new_xyz.clone()), 1e-7);
-        torch::Tensor s = torch::log(torch::sqrt(dist2)).unsqueeze(1).repeat({1, 3}); // [N,3] log-scale
+        torch::Tensor s = torch::log(torch::sqrt(dist2)).unsqueeze(1).repeat({1, 3}); 
         new_scaling = s.contiguous();
     }
 
-    // overwrite line-sampled on CPU (safe)
+    // -----------------------------------------------------------
+    // CPU 修正循环：针对 Line Sampled 点，计算特殊的 Scale 和 Rotation
+    // -----------------------------------------------------------
     torch::Tensor scaling_cpu  = new_scaling.to(torch::kCPU).contiguous();
     torch::Tensor rotation_cpu = new_rotation.to(torch::kCPU).contiguous();
-    torch::Tensor new_is_line_cpu = new_is_line.to(torch::kCPU).contiguous();
-
+    
+    // 【优化】不需要再把 is_line 拷回 CPU 了，因为我们有原始的 new_points 数组
+    // 我们可以直接通过 p.source_ 判断
     {
         auto s_acc = scaling_cpu.accessor<float, 2>();
         auto r_acc = rotation_cpu.accessor<float, 2>();
-        auto new_is_line_acc = new_is_line_cpu.accessor<bool, 1>();
 
         for (int i = 0; i < N; ++i) {
             const auto& p = new_points[i];
+            
+            // 仅修正线特征点
             if (p.source_ != PointSourceType::LINE_SAMPLED) continue;
 
+            // 1. 各向异性 Scale
             const float step = (p.sample_step_ > 0.f) ? p.sample_step_ : 0.05f;
-
-            // anisotropic log-scale (your function must output log-scale!)
             Eigen::Vector3f log_s = initLineSampleLogScale(step, p.ref_depth_z_, p.ref_focal_);
             s_acc[i][0] = log_s[0];
             s_acc[i][1] = log_s[1];
             s_acc[i][2] = log_s[2];
 
-            // rotation align local X -> line_dir
+            // 2. 对齐 Rotation
             Eigen::Vector4f q = initQuatAlignXToDir(p.line_dir_);
             r_acc[i][0] = q[0];
             r_acc[i][1] = q[1];
             r_acc[i][2] = q[2];
             r_acc[i][3] = q[3];
-
-            new_is_line_acc[i] = true;
+            
+            // 注意：不需要再设置 is_line_acc[i] = true，因为第一步已经设过了
         }
     }
 
-    this->point_ids_ = torch::arange(0, num_points, 
-        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
-
+    // 拷回 GPU
     new_scaling  = scaling_cpu.to(device_type_).contiguous();
     new_rotation = rotation_cpu.to(device_type_).contiguous();
 
-    // ------------------------------------------------------------------
-    // 4) opacity & existence
-    // ------------------------------------------------------------------
-    torch::Tensor new_opacity =
-        general_utils::inverse_sigmoid(
-            0.1f * torch::ones({N, 1},
-                torch::TensorOptions().dtype(torch::kFloat32).device(device_type_)));
+    // =================================================================================
+    // 5) 初始化 Opacity
+    // =================================================================================
+    torch::Tensor new_opacity = general_utils::inverse_sigmoid(0.1f * torch::ones({N, 1}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_)));
+    torch::Tensor new_exist_since_iter = torch::full({N}, iteration, torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
 
-    torch::Tensor new_exist_since_iter =
-        torch::full({N}, iteration,
-            torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
-
-    // ------------------------------------------------------------------
-    // 5) densification postfix (unchanged)
-    // ------------------------------------------------------------------
-    densificationPostfix(
+    // =================================================================================
+    // 6) 调用带 Line Awareness 的 Postfix
+    // =================================================================================
+    densificationPostfixWithLineAwareness(
         new_xyz,
         new_features_dc,
         new_features_rest,
         new_opacity,
         new_scaling,
         new_rotation,
-        new_exist_since_iter
+        new_exist_since_iter,
+        new_is_line,       // 这里传入的是第一步正确生成的 tensor
+        new_line_dir_w     // 这里传入的是第一步正确生成的 tensor
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
@@ -505,22 +521,23 @@ void GaussianModelLine::increasePcd(
 
 void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float> colors, const int iteration)
 {
-// auto time1 = std::chrono::steady_clock::now();
+    // auto time1 = std::chrono::steady_clock::now();
     assert(points.size() == colors.size());
     assert(points.size() % 3 == 0);
     auto num_new_points = static_cast<int>(points.size() / 3);
     if (num_new_points == 0)
         return;
 
+    // 1. 基础数据转换 (保持不变)
     torch::Tensor new_point_cloud = torch::from_blob(
         points.data(), {num_new_points, 3},
         torch::TensorOptions().dtype(torch::kFloat32)).to(device_type_);
-        // torch::zeros({num_new_points, 3}, xyz_.options());
+    
     torch::Tensor new_colors = torch::from_blob(
         colors.data(), {num_new_points, 3},
         torch::TensorOptions().dtype(torch::kFloat32)).to(device_type_);
-        // torch::zeros({num_new_points, 3}, xyz_.options());
 
+    // 2. 更新稀疏点云缓存 (保持不变)
     if (sparse_points_xyz_.size(0) == 0) {
         sparse_points_xyz_ = new_point_cloud;
         sparse_points_color_ = new_colors;
@@ -530,6 +547,7 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
         sparse_points_color_ = torch::cat({sparse_points_color_, new_colors}, /*dim=*/0);
     }
 
+    // 3. 计算 SH 特征 (保持不变)
     torch::Tensor new_fused_colors = sh_utils::RGB2SH(new_colors);
     auto temp = this->max_sh_degree_ + 1;
     torch::Tensor features = torch::zeros(
@@ -544,18 +562,18 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
          torch::indexing::Slice(3, features.size(1)),
          torch::indexing::Slice(1, features.size(2))}) = 0.0f;
 
-    // std::cout << "[Gaussian Model]Number of points increase : "
-    //           << num_new_points << std::endl;
-
+    // 4. 初始化几何属性 (Scale, Rot, Opacity)
     torch::Tensor dist2 = torch::clamp_min(
         distCUDA2(new_point_cloud.clone()), 0.0000001);
     torch::Tensor scales = torch::log(torch::sqrt(dist2));
     auto scales_ndimension = scales.ndimension();
     scales = scales.unsqueeze(scales_ndimension).repeat({1, 3});
+    
     torch::Tensor rots = torch::zeros(
         {new_point_cloud.size(0), 4},
          torch::TensorOptions().device(device_type_));
-    rots.index({torch::indexing::Slice(), 0}) = 1;
+    rots.index({torch::indexing::Slice(), 0}) = 1; // Identity quaternion
+    
     torch::Tensor opacities = general_utils::inverse_sigmoid(
         0.1f * torch::ones(
                    {new_point_cloud.size(0), 1},
@@ -566,6 +584,23 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
         iteration,
         torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
 
+    // =========================================================
+    // 【新增】为普通点创建默认的 Line 属性，以对齐维度
+    // =========================================================
+    
+    // 1. is_line 全为 false
+    torch::Tensor new_is_line = torch::zeros(
+        {num_new_points}, 
+        torch::TensorOptions().dtype(torch::kBool).device(device_type_));
+    
+    // 2. line_dir 给个默认值 (例如 X 轴 [1, 0, 0])，防止数值计算错误
+    // 虽然 is_line=false 时这个值理论上不会被用到，但保持非零是个好习惯
+    torch::Tensor new_line_dir_w = torch::zeros(
+        {num_new_points, 3}, 
+        torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
+    new_line_dir_w.index({torch::indexing::Slice(), 0}) = 1.0f; 
+
+    // 准备参数
     auto new_xyz = new_point_cloud;
     auto new_features_dc = features.index({torch::indexing::Slice(),
                                                     torch::indexing::Slice(),
@@ -581,25 +616,24 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
     auto new_scaling = scales;
     auto new_rotation = rots;
 
-// auto time2 = std::chrono::steady_clock::now();
-// auto time = std::chrono::duration_cast<std::chrono::milliseconds>(time2-time1).count();
-// std::cout << "increasePcd(umap) preparation time: " << time << " ms" <<std::endl;
-
-    densificationPostfix(
+    // =========================================================
+    // 【替换】调用结构感知的 Postfix
+    // =========================================================
+    densificationPostfixWithLineAwareness(
         new_xyz,
         new_features_dc,
         new_features_rest,
         new_opacities,
         new_scaling,
         new_rotation,
-        new_exist_since_iter
+        new_exist_since_iter,
+        new_is_line,       // 传入
+        new_line_dir_w     // 传入
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
-// auto time3 = std::chrono::steady_clock::now();
-// time = std::chrono::duration_cast<std::chrono::milliseconds>(time3-time2).count();
-// std::cout << "increasePcd(umap) postfix time: " << time << " ms" <<std::endl;
 }
+
 
 void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tensor& new_colors, const int iteration)
 {
@@ -608,6 +642,7 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
     if (num_new_points == 0)
         return;
 
+    // 1. 更新稀疏点云缓存 (保持不变)
     if (sparse_points_xyz_.size(0) == 0) {
         sparse_points_xyz_ = new_point_cloud;
         sparse_points_color_ = new_colors;
@@ -617,6 +652,7 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
         sparse_points_color_ = torch::cat({sparse_points_color_, new_colors}, /*dim=*/0);
     }
 
+    // 2. 计算 SH 特征 (保持不变)
     torch::Tensor new_fused_colors = sh_utils::RGB2SH(new_colors);
     auto temp = this->max_sh_degree_ + 1;
     torch::Tensor features = torch::zeros(
@@ -631,18 +667,18 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
          torch::indexing::Slice(3, features.size(1)),
          torch::indexing::Slice(1, features.size(2))}) = 0.0f;
 
-    // std::cout << "[Gaussian Model]Number of points increase : "
-    //           << num_new_points << std::endl;
-
+    // 3. 计算 Scale, Rotation, Opacity (保持不变)
     torch::Tensor dist2 = torch::clamp_min(
         distCUDA2(new_point_cloud.clone()), 0.0000001);
     torch::Tensor scales = torch::log(torch::sqrt(dist2));
     auto scales_ndimension = scales.ndimension();
     scales = scales.unsqueeze(scales_ndimension).repeat({1, 3});
+    
     torch::Tensor rots = torch::zeros(
         {new_point_cloud.size(0), 4},
          torch::TensorOptions().device(device_type_));
     rots.index({torch::indexing::Slice(), 0}) = 1;
+    
     torch::Tensor opacities = general_utils::inverse_sigmoid(
         0.1f * torch::ones(
                    {new_point_cloud.size(0), 1},
@@ -672,22 +708,45 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
 // auto time = std::chrono::duration_cast<std::chrono::milliseconds>(time2-time1).count();
 // std::cout << "increasePcd(tensor) preparation time: " << time << " ms" <<std::endl;
 
-    densificationPostfix(
+    // =================================================================================
+    // 【新增】创建默认的 line 属性张量
+    // 即使这些是普通点，也必须扩展这些张量以保持维度对齐 (N)
+    // =================================================================================
+    
+    // 1. is_line 全为 false (bool)
+    torch::Tensor new_is_line = torch::zeros(
+        {num_new_points}, 
+        torch::TensorOptions().dtype(torch::kBool).device(device_type_));
+    
+    // 2. line_dir_w 全为默认值 [1, 0, 0] (float32)
+    torch::Tensor new_line_dir_w = torch::zeros(
+        {num_new_points, 3}, 
+        torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
+    
+    // 赋予一个非零向量，避免归一化时除零
+    new_line_dir_w.index({torch::indexing::Slice(), 0}) = 1.0f; 
+
+    // =================================================================================
+    // 【替换】使用带 Line Awareness 的 Postfix
+    // =================================================================================
+    densificationPostfixWithLineAwareness(
         new_xyz,
         new_features_dc,
         new_features_rest,
         new_opacities,
         new_scaling,
         new_rotation,
-        new_exist_since_iter
+        new_exist_since_iter,
+        new_is_line,       // Add
+        new_line_dir_w     // Add
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
-
 // auto time3 = std::chrono::steady_clock::now();
 // time = std::chrono::duration_cast<std::chrono::milliseconds>(time3-time2).count();
 // std::cout << "increasePcd(tensor) postfix time: " << time << " ms" <<std::endl;
 }
+
 
 void GaussianModelLine::applyScaledTransformation(
     const float s,
