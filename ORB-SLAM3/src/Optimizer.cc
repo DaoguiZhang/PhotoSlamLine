@@ -4462,6 +4462,68 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     num_Lines = lLocalMapLines.size();
 }
 
+/*
+ * 现在的写法 if (!pML->isRetrived()) 会导致旧的线段永远不会被更新。（这个非常重要改进，后续测试一下）
+
+ 一旦一个线段在某次 LBA 中被发送给了 Gaussian Mapper（设置了 isRetrived(true)），即使后续的 LBA 把它优化得更准、更长，它也无法再次进入 if 内部，导致 Gaussian Mapper 永远拿不到它最新的几何信息。
+为什么不能简单删掉这个 if？
+如果你直接删掉 if (!pML->isRetrived())，让所有局部线段每次 LBA 都发送：
+    后果：LBA 运行频率很高（每秒几次），你会对同一条线段疯狂重复采样，导致 GaussianMapper 里的点数爆炸式增长，显存瞬间撑爆。
+解决方案：基于“几何变化”的条件更新
+
+我们需要一个机制：只有当线段发生显著变化（比如变长了、位置大改了）时，才再次发送，否则保持现状。
+ // ... Inside loop over lLocalMapLines ...
+    // 新增：记录上次发送给 GS 时的长度
+    float mLastSentLength = 0.0f;
+
+    pML->SetLineWorldPos(vP1->estimate().cast<float>(), vP2->estimate().cast<float>());
+    
+    // 计算当前新长度
+    float currentLen = (vP1->estimate() - vP2->estimate()).norm();
+
+    // 逻辑：
+    // 1. 如果从未发送过 (!isRetrived) -> 发送
+    // 2. 如果发送过，但长度变化超过一定阈值 (例如 10% 或 0.1m) -> 发送补充点
+    //    注意：如果是变短了，不需要发送（旧的高斯球会被 Prune 掉）
+    //    主要是处理变长（Merge 或 延伸）的情况
+    bool needUpdate = false;
+    
+    if (!pML->isRetrived()) {
+        needUpdate = true;
+    } 
+    else {
+        // 如果长度增加了 20% 或者 超过 0.2m，认为发生了显著变化（例如合并）
+        if (currentLen > pML->mLastSentLength * 1.2f || (currentLen - pML->mLastSentLength) > 0.2f) {
+            needUpdate = true;
+        }
+    }
+
+    if (needUpdate) 
+    { 
+        pML->setRetrived(true); 
+        pML->mLastSentLength = currentLen; // 更新记录
+
+        // =========================================================
+        // 采样并打包
+        // =========================================================
+        float sample_step = 0.1f;
+        float view_weight = 2.0f; 
+        float sigma = 3.0f;
+        int top_k = 3;
+
+        // 【关键】：这里会清空 pML 内部的 buffer 并重新采样
+        // 即使是旧线段，采样也是基于“最新”的端点进行的
+        pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
+            sample_step, view_weight, sigma, top_k);
+
+        // 打包发送
+        // 这里的 opr.addMapLine 会读取最新的采样点
+        // GS 线程收到后，会把这些点作为"新点"加入显存
+        // 旧位置的点因为不再被刷新，后续会被 densifyAndPrune 中的 Prune 逻辑干掉
+        opr.addMapLine(pML); 
+    }
+ */
+
 
 void Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian()
 {

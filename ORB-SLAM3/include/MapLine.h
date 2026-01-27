@@ -321,6 +321,8 @@ public:
     Eigen::Vector3f mPosMerge;
     Eigen::Vector3f mNormalVectorMerge;
 
+    // 新增：记录上次发送给 GS 时的长度
+    float mLastSentLength = 0.0f;   // 上次发送给 GS 时的长度
 
     // For inverse depth optimization
     double mLsInvDepth, mLeInvDepth;

@@ -70,10 +70,10 @@ struct UndistortParamsLine
 
 enum SystemSensorTypeLine
 {
-    INVALID = 0,
-    MONOCULAR = 1,
-    STEREO = 2,
-    RGBD = 3
+    INVALIDLINE = 0,
+    MONOCULARLINE = 1,
+    STEREOLINE = 2,
+    RGBDLINE = 3
 };
 
 struct VariableParametersLine

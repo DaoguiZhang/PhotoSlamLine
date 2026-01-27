@@ -84,13 +84,13 @@ GaussianMapperLine::GaussianMapperLine(
     case ORB_SLAM3::System::MONOCULAR:
     case ORB_SLAM3::System::IMU_MONOCULAR:
     {
-        this->sensor_type_ = MONOCULAR;
+        this->sensor_type_ = MONOCULARLINE;
     }
     break;
     case ORB_SLAM3::System::STEREO:
     case ORB_SLAM3::System::IMU_STEREO:
     {
-        this->sensor_type_ = STEREO;
+        this->sensor_type_ = STEREOLINE;
         this->stereo_baseline_length_ = pSLAM->getSettings()->b();
         this->stereo_cv_sgm_ = cv::cuda::createStereoSGM(
             this->stereo_min_disparity_,
@@ -102,7 +102,7 @@ GaussianMapperLine::GaussianMapperLine(
     case ORB_SLAM3::System::RGBD:
     case ORB_SLAM3::System::IMU_RGBD:
     {
-        this->sensor_type_ = RGBD;
+        this->sensor_type_ = RGBDLINE;
     }
     break;
     default:
@@ -173,7 +173,7 @@ GaussianMapperLine::GaussianMapperLine(
             );
 
             // Undistortion
-            if (this->sensor_type_ == MONOCULAR || this->sensor_type_ == RGBD)
+            if (this->sensor_type_ == MONOCULARLINE || this->sensor_type_ == RGBDLINE)
                 undistort_params.dist_coeff_.copyTo(camera.dist_coeff_);
 
             camera.initUndistortRectifyMapAndMask(K, SLAM_im_size, K_new, true);
@@ -200,7 +200,7 @@ GaussianMapperLine::GaussianMapperLine(
                 tensor_utils::cvMat2TorchTensor_Float32(
                     viewer_main_undistort_mask, device_type_);
 
-            if (this->sensor_type_ == STEREO) {
+            if (this->sensor_type_ == STEREOLINE) {
                 camera.stereo_bf_ = stereo_baseline_length_ * camera.params_[0];
                 if (this->stereo_Q_.cols != 4) {
                     this->stereo_Q_ = cv::Mat(4, 4, CV_32FC1);
@@ -490,13 +490,13 @@ void GaussianMapperLine::run()
 
                         // Image (left if STEREO)
                         cv::Mat imgRGB = pKF->imgLeftRGB;
-                        if (this->sensor_type_ == STEREO)
+                        if (this->sensor_type_ == STEREOLINE)
                             imgRGB_undistorted = imgRGB;
                         else
                             camera.undistortImage(imgRGB, imgRGB_undistorted);
                         // Auxiliary Image
                         cv::Mat imgAux = pKF->imgAuxiliary;
-                        if (this->sensor_type_ == RGBD)
+                        if (this->sensor_type_ == RGBDLINE)
                             camera.undistortImage(imgAux, imgAux_undistorted);
                         else
                             imgAux_undistorted = imgAux;
@@ -907,6 +907,29 @@ bool GaussianMapperLine::hasMetIncrementalMappingConditions()
     bool conditions_met = false;
     return conditions_met;
 }
+
+/*
+pointsLocal 确实几乎起不到什么作用;但是，在 Photo-SLAM 这个特定系统中，它有一个特定的用途，主要与 “几何加密策略 (Geometry Densification)” 有关，特别是在单目（Monocular）模式下。
+void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(std::shared_ptr<GaussianKeyframeLine> pkf)
+{
+    // ...
+    // 1. 将 pointsLocal 转为 Tensor
+    torch::Tensor kps_point_local_tensor = torch::from_blob(pkf->kps_point_local_.data(), ...);
+    
+    // 2. 检查哪些特征点有有效的 3D 坐标 (Z > 0)
+    // 也就是判断这个 2D 特征点是否已经被三角化了
+    torch::Tensor kps_has3D_tensor = torch::where(
+        kps_point_local_tensor.index({..., 2}) > 0.0f, true, false);
+
+    // 3. 调用单目几何加密算法
+    // 利用这些已知的“种子点” (pointsLocal)，去推测周围像素的深度，从而生成更多的高斯球
+    auto result = monocularPinholeInactiveGeoDensifyBySearchingNeighborhoodKeypoints(..., kps_point_local_tensor, ...);
+    
+    // ...
+}
+
+*/
+
 
 void GaussianMapperLine::combineMappingOperations()
 {
@@ -1432,15 +1455,15 @@ void GaussianMapperLine::handleNewKeyframe(
         Camera& camera = scene_->cameras_.at(std::get<1>(kf));
         pkf->setCameraParams(camera);
 
-        // Image (left if STEREO)
+        // Image (left if STEREOLINE)
         cv::Mat imgRGB = std::get<3>(kf);
-        if (this->sensor_type_ == STEREO)
+        if (this->sensor_type_ == STEREOLINE)
             imgRGB_undistorted = imgRGB;
         else
             camera.undistortImage(imgRGB, imgRGB_undistorted);
         // Auxiliary Image
         cv::Mat imgAux = std::get<5>(kf);
-        if (this->sensor_type_ == RGBD)
+        if (this->sensor_type_ == RGBDLINE)
             camera.undistortImage(imgAux, imgAux_undistorted);
         else
             imgAux_undistorted = imgAux;
@@ -1523,15 +1546,15 @@ void GaussianMapperLine::handleNewKeyframe_WithLine(
         Camera& camera = scene_->cameras_.at(std::get<1>(kf));
         pkf->setCameraParams(camera);
 
-        // Image (left if STEREO)
+        // Image (left if STEREOLINE)
         cv::Mat imgRGB = std::get<3>(kf);
-        if (this->sensor_type_ == STEREO)
+        if (this->sensor_type_ == STEREOLINE)
             imgRGB_undistorted = imgRGB;
         else
             camera.undistortImage(imgRGB, imgRGB_undistorted);
         // Auxiliary Image
         cv::Mat imgAux = std::get<5>(kf);
-        if (this->sensor_type_ == RGBD)
+        if (this->sensor_type_ == RGBDLINE)
             camera.undistortImage(imgAux, imgAux_undistorted);
         else
             imgAux_undistorted = imgAux;
@@ -1719,7 +1742,7 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
 
     switch (this->sensor_type_)
     {
-    case MONOCULAR:
+    case MONOCULARLINE:
     {
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_0_before_inactive_geo_densify"));
         assert(pkf->kps_pixel_.size() % 2 == 0);
@@ -1761,7 +1784,7 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }
     break;
-    case STEREO:
+    case STEREOLINE:
     {
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_0_before_inactive_geo_densify"));
         cv::cuda::GpuMat rgb_left_gpu, rgb_right_gpu;
@@ -1861,7 +1884,7 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }
     break;
-    case RGBD:
+    case RGBDLINE:
     {
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_0_before_inactive_geo_densify"));
         cv::cuda::GpuMat img_rgb_gpu, img_depth_gpu;
