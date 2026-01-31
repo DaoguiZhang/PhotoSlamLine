@@ -371,9 +371,12 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
 void GaussianMapperLine::run()
 {
     // First loop: Initial gaussian mapping
+    std::cerr << "[DEBUG] Thread: GaussianMapperLine thread started." << std::endl;
     while (!isStopped()) {
+        
         // Check conditions for initial mapping
         if (hasMetInitialMappingConditions()) {
+            std::cerr << "[DEBUG] Checkpoint 1: Initial conditions met. Starting data collection..." << std::endl;
             pSLAM_->getAtlas()->clearMappingOperation();
 
             // Get initial sparse map
@@ -472,7 +475,19 @@ void GaussianMapperLine::run()
                         scene_->cacheLineSampledPnts3D(pML->mnId, point3D);
                     }
                 }
-                
+
+                //debug by zdg
+                //std::cerr <<"===============================================================" << std::endl;
+                //std::cerr << "result_dir_: " << result_dir_ << std::endl;
+                //saveDebugMapToObj("debug_initial_map.obj", vpMPs, vpMPLs);
+                // ================= [DEBUG CALL] =================
+                // 此时 scene_->cached_point_cloud_ 已经填满了点和采样点
+                // scene_->cached_line3D_cloud_ 已经填满了线段
+                //scene_->saveDebugSceneToObj("debug_scene_init.obj");
+                // ================================================
+                //std::cerr <<"===============================================================" << std::endl;
+                //end debug
+
                 for (const auto& pKF : vpKFs){
                     std::shared_ptr<GaussianKeyframeLine> new_kf = std::make_shared<GaussianKeyframeLine>(pKF->mnId, getIteration());
                     new_kf->zfar_ = z_far_;
@@ -564,13 +579,32 @@ void GaussianMapperLine::run()
             }
 
             // Invoke training once
-            trainForOneIteration();
+            //trainForOneIteration();
+
+            std::cerr << "[DEBUG] Checkpoint 10: Setup done. Starting first training iteration..." << std::endl;
+
+            try {
+                // Invoke training once
+                trainForOneIteration();
+            } 
+            catch (const c10::Error& e) {
+                std::cerr << "Torch Error: " << e.msg() << std::endl;
+                // 可以在这里保存进度，或者做清理工作
+                return;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Standard Error: " << e.what() << std::endl;
+            }
+            catch (...) {
+                std::cerr << "Unknown Error occurred." << std::endl;
+            }
 
             // Finish initial mapping loop
             initial_mapped_ = true;
             break;
         }
         else if (pSLAM_->isShutDown()) {
+            std::cerr << "[DEBUG] SLAM Shutdown detected during wait." << std::endl;
             break;
         }
         else {
@@ -582,6 +616,7 @@ void GaussianMapperLine::run()
     // Second loop: Incremental gaussian mapping
     int SLAM_stop_iter = 0;
     while (!isStopped()) {
+        //std::cerr <<"============================start run GaussianMapperLine 3 ===================================" << std::endl;
         // Check conditions for incremental mapping
         if (hasMetIncrementalMappingConditions()) {
             combineMappingOperations_withLine();
@@ -590,7 +625,23 @@ void GaussianMapperLine::run()
         }
 
         // Invoke training once
-        trainForOneIteration();
+        //trainForOneIteration();
+
+        try {
+                //高斯优化代码 Invoke training once
+                trainForOneIteration();
+            } 
+            catch (const c10::Error& e) {
+                std::cerr << "Torch Error second loop: " << e.msg() << std::endl;
+                // 可以在这里保存进度，或者做清理工作
+                return;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Standard Error second loop: " << e.what() << std::endl;
+            }
+            catch (...) {
+                std::cerr << "Unknown Error occurred second loop." << std::endl;
+            }
 
         if (pSLAM_->isShutDown()) {
             SLAM_stop_iter = getIteration();
@@ -605,7 +656,25 @@ void GaussianMapperLine::run()
     int densify_interval = densifyInterval();
     int n_delay_iters = densify_interval * 0.8;
     while (getIteration() - SLAM_stop_iter <= n_delay_iters || getIteration() % densify_interval <= n_delay_iters || isKeepingTraining()) {
-        trainForOneIteration();
+
+        //trainForOneIteration();
+
+        try {
+                //高斯优化代码 Invoke training once
+                trainForOneIteration();
+            } 
+            catch (const c10::Error& e) {
+                std::cerr << "Torch Error third loop: " << e.msg() << std::endl;
+                // 可以在这里保存进度，或者做清理工作
+                return;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Standard Error third loop: " << e.what() << std::endl;
+            }
+            catch (...) {
+                std::cerr << "Unknown Error occurred third loop." << std::endl;
+            }
+
         densify_interval = densifyInterval();
         n_delay_iters = densify_interval * 0.8;
     }
@@ -619,7 +688,6 @@ void GaussianMapperLine::run()
 }
 
 // gaussian_mapper_line.cpp
-
 std::map<point3D_id_t, int> GaussianMapperLine::buildPntIdMap()
 {
     std::map<point3D_id_t, int> id_map;
@@ -779,6 +847,7 @@ void GaussianMapperLine::trainForOneIteration()
         background_,
         override_color_
     );
+    
     auto rendered_image = std::get<0>(render_pkg);
     auto viewspace_point_tensor = std::get<1>(render_pkg);
     auto visibility_filter = std::get<2>(render_pkg);
@@ -823,7 +892,13 @@ void GaussianMapperLine::trainForOneIteration()
             if ((getIteration() > opt_params_.densify_from_iter_) &&
                 (getIteration() % densifyInterval()== 0)) {
                 int size_threshold = (getIteration() > prune_big_point_after_iter_) ? 20 : 0;
-                gaussians_->densifyAndPrune(
+                //gaussians_->densifyAndPrune(
+                //    densifyGradThreshold(),
+                //    densify_min_opacity_,//0.005,//
+                //    scene_->cameras_extent_,
+                //    size_threshold
+                //);
+                gaussians_->densifyAndPruneWithLineAwareness(
                     densifyGradThreshold(),
                     densify_min_opacity_,//0.005,//
                     scene_->cameras_extent_,
@@ -1178,7 +1253,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     //TODO: Update the world points associated with this keyframe
                 }
                 else {
-                    handleNewKeyframe(kf);
+                    handleNewKeyframe_WithLine(kf);
                 }
             }
 
@@ -1355,7 +1430,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 // if (std::get<4>(kf)) renderAndRecordKeyframe(pkf, result_dir_, "_2_after_pose_correction");
                 }
                 else {
-                    handleNewKeyframe(kf);
+                    handleNewKeyframe_WithLine(kf);
                 }
             }
             if (record_loop_ply_)
@@ -2538,6 +2613,54 @@ void GaussianMapperLine::setVaribleParameters(const VariableParametersLine &para
     keep_training_ = params.keep_training;
     do_gaus_pyramid_training_ = params.do_gaus_pyramid_training;
     inactive_geo_densify_ = params.do_inactive_geo_densify;
+}
+
+void GaussianMapperLine::saveDebugMapToObj(
+    const std::filesystem::path& path,
+    const std::vector<ORB_SLAM3::MapPoint*>& vpMPs,
+    const std::vector<ORB_SLAM3::MapLine*>& vpMPLs)
+{
+    std::ofstream obj_file(path);
+    if (!obj_file.is_open()) {
+        std::cerr << "[Gaussian Mapper] ERROR: Cannot open " << path << " for writing debug obj." << std::endl;
+        return;
+    }
+
+    std::cout << "[Gaussian Mapper] DEBUG: Saving map to " << path << " ..." << std::endl;
+
+    int vertex_count = 1; // OBJ 索引从 1 开始
+
+    obj_file << "# Exported by Photo-SLAM-L Debugger\n";
+    obj_file << "# Red = MapPoints, Green = MapLines\n";
+
+    // 1. 写入 MapPoints (红色)
+    for (const auto& pMP : vpMPs) {
+        if (!pMP || pMP->isBad()) continue;
+        auto pos = pMP->GetWorldPos();
+        // v x y z r g b
+        obj_file << "v " << pos.x() << " " << pos.y() << " " << pos.z() << " 1.0 0.0 0.0\n";
+        obj_file << "p " << vertex_count++ << "\n";
+    }
+
+    // 2. 写入 MapLines (绿色)
+    for (const auto& pML : vpMPLs) {
+        if (!pML || pML->isBad()) continue;
+        auto endpoints = pML->GetLineWorldPos();
+
+        // 线段端点 1 (绿色)
+        obj_file << "v " << endpoints.first.x() << " " << endpoints.first.y() << " " << endpoints.first.z() << " 0.0 1.0 0.0\n";
+        int idx1 = vertex_count++;
+
+        // 线段端点 2 (绿色)
+        obj_file << "v " << endpoints.second.x() << " " << endpoints.second.y() << " " << endpoints.second.z() << " 0.0 1.0 0.0\n";
+        int idx2 = vertex_count++;
+
+        // 连线
+        obj_file << "l " << idx1 << " " << idx2 << "\n";
+    }
+
+    obj_file.close();
+    std::cout << "[Gaussian Mapper] DEBUG: Saved " << (vertex_count - 1) << " vertices total." << std::endl;
 }
 
 void GaussianMapperLine::loadPly(std::filesystem::path ply_path, std::filesystem::path camera_path)

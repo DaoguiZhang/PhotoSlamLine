@@ -244,6 +244,11 @@ protected:
     void saveModelParams(std::filesystem::path result_dir);
     void writeKeyframeUsedTimes(std::filesystem::path result_dir, std::string name_suffix = "");
 
+    void saveDebugMapToObj(const std::filesystem::path& path,
+                            const std::vector<ORB_SLAM3::MapPoint*>& vpMPs,
+                            const std::vector<ORB_SLAM3::MapLine*>& vpMPLs);
+    
+
 public:
     // Parameters
     std::filesystem::path config_file_path_;

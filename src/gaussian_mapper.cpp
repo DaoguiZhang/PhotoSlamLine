@@ -396,6 +396,9 @@ void GaussianMapper::run()
                     point3D.color_(2) = color(2);
                     scene_->cachePoint3D(pMP->mnId, point3D);
                 }
+
+                //std::cerr << "===============================================================1111111111===========================" << std::endl;
+
                 for (const auto& pKF : vpKFs){
                     std::shared_ptr<GaussianKeyframe> new_kf = std::make_shared<GaussianKeyframe>(pKF->mnId, getIteration());
                     new_kf->zfar_ = z_far_;

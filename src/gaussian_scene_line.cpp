@@ -189,3 +189,78 @@ GaussianSceneLine::getNerfppNorm()
 
     return std::make_tuple(translate, radius);
 }
+
+
+void GaussianSceneLine::saveDebugSceneToObj(const std::filesystem::path& filename)
+{
+    std::cout << "[GaussianScene] Saving debug OBJ to " << filename << std::endl;
+    
+    std::ofstream obj_file(filename);
+    if (!obj_file.is_open()) {
+        std::cerr << "[GaussianScene] Error: Cannot open file " << filename << std::endl;
+        return;
+    }
+
+    int vertex_count = 1; // OBJ 索引从 1 开始
+
+    obj_file << "# Debug Scene Export\n";
+    obj_file << "# Red   = Original SLAM MapPoints\n";
+    obj_file << "# Blue  = Line Sampled Points\n";
+    obj_file << "# Green = Original MapLines Skeleton\n";
+
+    // 1. 导出点云 (cached_point_cloud_)
+    // 这里包含了 "普通点" 和 "线采样点"
+    int num_slam_points = 0;
+    int num_line_samples = 0;
+
+    for (const auto& pair : cached_point_cloud_) {
+        const auto& p = pair.second;
+        
+        // 区分颜色
+        float r = 0.0f, g = 0.0f, b = 0.0f;
+        
+        if (p.source_ == PointSourceType::LINE_SAMPLED) {
+            // 蓝色：线采样点
+            r = 0.0f; g = 0.0f; b = 1.0f;
+            num_line_samples++;
+        } else {
+            // 红色：普通 SLAM 点
+            r = 1.0f; g = 0.0f; b = 0.0f;
+            num_slam_points++;
+        }
+
+        // 写入顶点: v x y z r g b
+        obj_file << "v " << p.xyz_(0) << " " << p.xyz_(1) << " " << p.xyz_(2) 
+                 << " " << r << " " << g << " " << b << "\n";
+        
+        // 写入点图元
+        obj_file << "p " << vertex_count++ << "\n";
+    }
+
+    // 2. 导出线段骨架 (cached_line3D_cloud_)
+    // 这有助于你验证采样点是否真的位于这些绿线上
+    int num_lines = 0;
+    for (const auto& pair : cached_line3D_cloud_) {
+        const auto& l = pair.second;
+
+        // 线段端点使用绿色
+        // Endpoint 1
+        obj_file << "v " << l.p1_(0) << " " << l.p1_(1) << " " << l.p1_(2) << " 0.0 1.0 0.0\n";
+        int idx1 = vertex_count++;
+
+        // Endpoint 2
+        obj_file << "v " << l.p2_(0) << " " << l.p2_(1) << " " << l.p2_(2) << " 0.0 1.0 0.0\n";
+        int idx2 = vertex_count++;
+
+        // 建立连线
+        obj_file << "l " << idx1 << " " << idx2 << "\n";
+        num_lines++;
+    }
+
+    obj_file.close();
+
+    std::cout << "[GaussianScene] Saved successfully.\n"
+              << "  - SLAM Points (Red): " << num_slam_points << "\n"
+              << "  - Line Samples (Blue): " << num_line_samples << "\n"
+              << "  - Line Segments (Green): " << num_lines << "\n";
+}

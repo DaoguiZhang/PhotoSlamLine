@@ -34,11 +34,14 @@
 
 #include "include/gaussian_mapper.h"
 #include "viewer/imgui_viewer.h"
+#include "viewer/imgui_viewer_line.h"
 
 void LoadImages(const std::filesystem::path &pathImageDir, std::vector<std::string> &vstrImageFilenamesRGB,
                 std::vector<std::string> &vstrImageFilenamesD);
 void saveTrackingTime(std::vector<float> &vTimesTrack, const std::string &strSavePath);
 void saveGpuPeakMemoryUsage(std::filesystem::path pathSave);
+
+#define USE_LINE_GAUSSIAN 1
 
 int main(int argc, char **argv)
 {
@@ -104,6 +107,24 @@ int main(int argc, char **argv)
             argv[1], argv[2], ORB_SLAM3::System::RGBD);
     float imageScale = pSLAM->GetImageScale();
 
+#if USE_LINE_GAUSSIAN
+    // Create GaussianMapper
+    //std::cerr << "============================ start Set GaussianMapperLine ====================================" << std::endl;
+    std::filesystem::path gaussian_cfg_path(argv[3]);
+    std::shared_ptr<GaussianMapperLine> pGausMapper =
+        std::make_shared<GaussianMapperLine>(
+            pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
+    std::thread training_thd(&GaussianMapperLine::run, pGausMapper.get());
+
+    // Create Gaussian Viewer
+    std::thread viewer_thd;
+    std::shared_ptr<ImGuiViewerLine> pViewer;
+    if (use_viewer)
+    {
+        pViewer = std::make_shared<ImGuiViewerLine>(pSLAM, pGausMapper);
+        viewer_thd = std::thread(&ImGuiViewerLine::run, pViewer.get());
+    }
+#else
     // Create GaussianMapper
     std::filesystem::path gaussian_cfg_path(argv[3]);
     std::shared_ptr<GaussianMapper> pGausMapper =
@@ -119,6 +140,8 @@ int main(int argc, char **argv)
         pViewer = std::make_shared<ImGuiViewer>(pSLAM, pGausMapper);
         viewer_thd = std::thread(&ImGuiViewer::run, pViewer.get());
     }
+#endif
+
 
     // Vector for tracking time statistics
     std::vector<float> vTimesTrack;

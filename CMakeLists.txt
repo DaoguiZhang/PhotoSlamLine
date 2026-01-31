@@ -190,6 +190,8 @@ add_library(gaussian_viewer SHARED
     viewer/drawer_utils.h
     viewer/imgui_viewer.cpp
     viewer/imgui_viewer.h
+    viewer/imgui_viewer_line.cpp
+    viewer/imgui_viewer_line.h
     viewer/map_drawer.cpp
     viewer/map_drawer.h)
 target_link_libraries(gaussian_viewer

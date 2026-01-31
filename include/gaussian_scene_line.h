@@ -81,6 +81,10 @@ public:
                std::map<std::size_t, std::shared_ptr<GaussianKeyframeLine>>>
         splitTrainAndTestKeyframes(const float test_ratio);
 
+    // 下面添加debug函数
+    void saveDebugSceneToObj(const std::filesystem::path& filename);
+    
+
 public:
     float cameras_extent_; ///< scene_info.nerf_normalization["radius"]
 

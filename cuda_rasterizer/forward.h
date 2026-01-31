@@ -18,6 +18,26 @@
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
 
+#define CUDA_CHECK_ZDG(call) \
+    do { \
+        cudaError_t error = call; \
+        if (error != cudaSuccess) { \
+            std::cerr << "CUDA Error: " << cudaGetErrorString(error) \
+                      << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+            exit(1); \
+        } \
+    } while (0)
+
+#define CUDA_CHECK_KERNEL_ZDG() \
+    do { \
+        cudaError_t error = cudaGetLastError(); \
+        if (error != cudaSuccess) { \
+            std::cerr << "CUDA Kernel Error: " << cudaGetErrorString(error) \
+                      << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+            exit(1); \
+        } \
+    } while (0)
+
 namespace FORWARD
 {
 	// Perform initial steps for each Gaussian prior to rasterization.

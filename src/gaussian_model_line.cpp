@@ -264,8 +264,11 @@ void GaussianModelLine::createFromPcd(
     
     // ---- init scales: 分两类 ----
     // 先给普通点按原始策略算一个 scales_dist（log-space）
-    torch::Tensor scales = torch::zeros({num_points, 3},
-        torch::TensorOptions().dtype(torch::kFloat));
+    //torch::Tensor scales = torch::zeros({num_points, 3},
+    //    torch::TensorOptions().dtype(torch::kFloat));
+    // 【修改后】必须指定 device(device_type_)
+    torch::Tensor scales = torch::zeros({num_points, 3}, 
+        torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
 
     {
         // distCUDA2 需要 CUDA tensor
