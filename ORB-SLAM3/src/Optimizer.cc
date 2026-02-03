@@ -3973,7 +3973,8 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     if (pMap->IsInertial())
        solver->setUserLambdaInit(100.0);
     optimizer.setAlgorithm(solver);
-    optimizer.setVerbose(false);
+    //optimizer.setVerbose(false);
+    optimizer.setVerbose(true);
     if (pbStopFlag) optimizer.setForceStopFlag(pbStopFlag);
     unsigned long maxKFid = 0;
     pCurrentMap->msOptKFs.clear();
@@ -4131,6 +4132,11 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
     mapLineVertexId.reserve(lLocalMapLines.size() * 2);
 
+    // 阈值设置：比如小于 0.1米 (10cm) 或者像素长度小于 20px
+    const double min_3d_length_sq = 0.1 * 0.1;
+    //const double min_2d_length_sq = 20.0 * 20.0;
+    const double min_pixel_len = 40.0;         // 2D 像素长度阈值 (用于降权)
+
     int numLineVertices = 0;
     for (MapLine* pML : lLocalMapLines)
     {
@@ -4142,6 +4148,10 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
 
         Eigen::Vector3d d = Xw2 - Xw1;
         if (!d.allFinite() || d.squaredNorm() < 1e-12) continue;
+
+        double len_sq = d.squaredNorm();
+        // [策略一] 判断是否是短线段
+        bool bIsShortLine = (len_sq < min_3d_length_sq);
 
         // endpoint 1
         auto* vP1 = new g2o::VertexSBAPointXYZ();
@@ -4159,6 +4169,20 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         vP2->setFixed(false);
         vP2->setMarginalized(true);
 
+        // // [关键修改] 设置 Fixed 属性
+        // if (bIsShortLine) 
+        // {
+        //     // 如果是短线段，直接锁死，不让优化器动它 (防止乱飞)
+        //     vP1->setFixed(true);
+        //     vP2->setFixed(true);
+        // }
+        // else 
+        // {
+        //     // 如果是正常线段，两个端点都允许移动 (你原来锁了vP1，会导致无法平移)
+        //     vP1->setFixed(false);
+        //     vP2->setFixed(false);
+        // }
+
         bool ok1 = optimizer.addVertex(vP1);
         bool ok2 = optimizer.addVertex(vP2);
 
@@ -4175,10 +4199,25 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     }
 
     // // --------- add Line Length Prior edges (ONCE per MapLine) ----------
-    const double lambdaL = 50.0;   // 1~5
-    const double lambdaD = 20.0;   // 0.5~2
-    const double lambdaM = 5.0;   // 0.05~0.5  (不要太大，防止锁死)
+    ///const double lambdaL = 50.0;   // 1~5
+    ///const double lambdaD = 20.0;   // 0.5~2
+    ///const double lambdaM = 5.0;   // 0.05~0.5  (不要太大，防止锁死)
 
+    // // --------- add Line Length Prior edges (ONCE per MapLine) ----------
+    // [修改] 大幅降低权重，让观测数据说话
+    //const double lambdaL = 0.5;   // 原 50.0 -> 改 0.5 (允许长度变化)
+    //const double lambdaD = 5.0;   // 原 20.0 -> 改 5.0 (允许方向微调)
+    //const double lambdaM = 0.01;  // 原 5.0  -> 改 0.01 (几乎移除中点约束，仅防飞逸)
+
+    // 默认的“松弛”权重 (用于长线段，允许优化)
+    const double lambdaL_Loose = 0.5;   
+    const double lambdaD_Loose = 5.0;   
+    const double lambdaM_Loose = 0.01;
+
+    // “强力”权重 (用于短线段，用于固定)
+    const double lambda_Hard = 1000.0;
+
+    
     for (MapLine* pML : lLocalMapLines)
     {
         if (!pML || pML->isBad()) continue;
@@ -4188,6 +4227,11 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
 
         int idP1 = it->second.first;
         int idP2 = it->second.second;
+
+        // ... 获取 id1, id2 ...
+        //auto endpoints = pML->GetLineWorldPos();
+        //Eigen::Vector3d d = endpoints.second.cast<double>() - endpoints.first.cast<double>();
+        //double len_sq = d.squaredNorm();
 
         auto* vP1 = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(idP1));
         auto* vP2 = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(idP2));
@@ -4205,9 +4249,25 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         Eigen::Vector3d d0_unit = d0 / L0;
         Eigen::Vector3d m0 = 0.5 * (P10 + P20);
 
+        // ========================================================
+        // [关键修改]: 动态权重分配 (Soft Fix Logic)
+        // ========================================================
+        double wL = lambdaL_Loose;
+        double wD = lambdaD_Loose;
+        double wM = lambdaM_Loose;
+
+        // 如果线段短于 10cm (0.1m)，则认为它极不稳定，施加超强约束
+        if (L0 < 0.1) 
+        {
+            wL = lambda_Hard; // 锁死长度
+            wD = lambda_Hard; // 锁死方向
+            wM = lambda_Hard; // 锁死位置 (核心)
+        }
+        // ========================================================
+
         // (A) length prior
         {
-            auto* eLen = new EdgeLineLengthPrior(L0, lambdaL);
+            auto* eLen = new EdgeLineLengthPrior(L0, wL);
             eLen->setVertex(0, vP1);
             eLen->setVertex(1, vP2);
             eLen->setInformation(Eigen::Matrix<double,1,1>::Identity());
@@ -4217,7 +4277,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
 
         // (B) direction prior
         {
-            auto* eDir = new EdgeLineDirectionPrior(d0_unit, lambdaD);
+            auto* eDir = new EdgeLineDirectionPrior(d0_unit, wD);
             eDir->setVertex(0, vP1);
             eDir->setVertex(1, vP2);
             eDir->setInformation(Eigen::Matrix3d::Identity());
@@ -4227,7 +4287,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
 
         // (C) midpoint prior
         {
-            auto* eMid = new EdgeLineMidpointPrior(m0, lambdaM);
+            auto* eMid = new EdgeLineMidpointPrior(m0, wM);
             eMid->setVertex(0, vP1);
             eMid->setVertex(1, vP2);
             eMid->setInformation(Eigen::Matrix3d::Identity());
@@ -4269,11 +4329,23 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
             const double b = nb / nrm;
             const double c = -(a*u1 + b*v1);
             Eigen::Vector3d line_abc(a,b,c);
+
+            // [策略二] 根据 2D 长度计算权重
+            double length_weight = 1.0;
+            if (nrm < min_pixel_len) {
+                // 线性下降后平方，例如 20px -> 0.5 -> weight 0.25
+                double ratio = nrm / min_pixel_len;
+                length_weight = ratio * ratio; 
+            }
+
             // invSigma2 guard
             int octave = kl.octave;
             if (octave < 0 || octave >= (int)pKFi->mvInvLevelSigma2.size()) octave = 0;
             const double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
             if (!std::isfinite(invSigma2) || invSigma2 <= 0.0) continue;
+
+            double final_info_val = invSigma2 * length_weight;
+
             auto* vPose = optimizer.vertex(pKFi->mnId);
             auto* vertex1 = optimizer.vertex(idP1);
             auto* vertex2 = optimizer.vertex(idP2);
@@ -4285,9 +4357,12 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
                 e1->setVertex(1, vPose);   // pose
                 e1->setMeasurement(line_abc);
                 e1->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
-                e1->setInformation(Eigen::Matrix<double,1,1>::Identity());
+                //const double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
+                // 应该应用到 Information 矩阵：
+                e1->setInformation(Eigen::Matrix<double,1,1>::Identity() * final_info_val);
                 auto* rk = new g2o::RobustKernelHuber;
-                rk->setDelta(std::sqrt(3.84)); // 1D chi2 95% ~= 3.84
+                //rk->setDelta(std::sqrt(3.84)); // 1D chi2 95% ~= 3.84
+                rk->setDelta(3.0); // 宽松一点的 Huber
                 e1->setRobustKernel(rk);
                 optimizer.addEdge(e1);
                 vpEdgesLineMono.push_back(e1);
@@ -4304,10 +4379,12 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
                 e2->setVertex(1, vPose);
                 e2->setMeasurement(line_abc);
                 e2->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
-                e2->setInformation(Eigen::Matrix<double,1,1>::Identity());
+                //const double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
+                e2->setInformation(Eigen::Matrix<double,1,1>::Identity() * final_info_val);
 
                 auto* rk = new g2o::RobustKernelHuber;
-                rk->setDelta(std::sqrt(3.84));
+                //rk->setDelta(std::sqrt(3.84));
+                rk->setDelta(3.0); // 宽松一点的 Huber
                 e2->setRobustKernel(rk);
 
                 optimizer.addEdge(e2);
@@ -4439,10 +4516,9 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
             float sample_step = 0.1f;  // 采样步长，比如 10cm
             float view_weight = 2.0f; 
             float sigma = 3.0f;
-            int top_k = 3;
+            int top_k = 2;
 
             // 这一步会清空 pML 内部旧的 sampled points，并生成基于 new_p1, new_p2 的新点
-            // 
             pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
                 sample_step, view_weight, sigma, top_k);
 
@@ -4461,6 +4537,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     num_edges = nEdges;
     num_Lines = lLocalMapLines.size();
 }
+
 
 /*
  * 现在的写法 if (!pML->isRetrived()) 会导致旧的线段永远不会被更新。（这个非常重要改进，后续测试一下）
@@ -4524,7 +4601,127 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     }
  */
 
+void Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian()
+{
+    using namespace g2o;
 
+    std::cout << "\n============================================\n";
+    std::cout << "Jacobian Check: EdgeSE3ProjectPointToLine2D \n";
+    std::cout << "  (Rotation cols 0-2, Translation cols 3-5)\n";
+    std::cout << "============================================\n";
+
+    constexpr double eps = 1e-6;
+
+    // 1. Setup Data
+    VertexSE3Expmap vPose;
+    // Use a non-identity pose to properly test rotation effects
+    SE3Quat T0(
+        Eigen::Quaterniond(Eigen::AngleAxisd(0.5, Eigen::Vector3d(1,0,0))), 
+        Eigen::Vector3d(0.1, -0.2, 0.3)
+    );
+    vPose.setEstimate(T0);
+
+    Eigen::Vector3d Xw(1.2, 0.5, 4.0);
+
+    const double fx = 500.0, fy = 500.0, cx = 320.0, cy = 240.0;
+
+    // Normalized Line (a, b, c)
+    double u1 = 100, v1 = 120, u2 = 420, v2 = 260;
+    double dx = u2 - u1, dy = v2 - v1;
+    double n = std::sqrt(dx*dx + dy*dy);
+    double a = dy / n, b = -dx / n, c = -(a*u1 + b*v1);
+
+    // Helpers
+    auto project = [&](const Eigen::Vector3d& Xc){
+        return Eigen::Vector2d(fx * Xc(0) / Xc(2) + cx, fy * Xc(1) / Xc(2) + cy);
+    };
+
+    auto compute_error = [&](const SE3Quat& T, const Eigen::Vector3d& P){
+        Eigen::Vector3d Xc = T.map(P);
+        Eigen::Vector2d uv = project(Xc);
+        return a * uv(0) + b * uv(1) + c;
+    };
+
+    // ============================================================
+    // 7. Analytic Jacobian
+    // ============================================================
+    Eigen::Matrix<double,1,3> Ji_ana;
+    Eigen::Matrix<double,1,6> Jj_ana;
+
+    {
+        Eigen::Vector3d Xc = T0.map(Xw);
+        Eigen::Matrix3d R = T0.rotation().toRotationMatrix();
+        double x = Xc(0), y = Xc(1), z = Xc(2);
+
+        // Projection Jacobian (1x3)
+        Eigen::Matrix<double,2,3> Jpi;
+        Jpi << fx/z, 0, -fx*x/(z*z), 0, fy/z, -fy*y/(z*z);
+        Eigen::RowVector2d ab(a,b);
+        Eigen::RowVector3d Jimg = ab * Jpi;
+
+        // Ji: w.r.t Point (1x3) = Jimg * R
+        Ji_ana = Jimg * R;
+
+        // Jj: w.r.t Pose (1x6)
+        // Order based on YOUR SE3Quat.h: [ Rotation (0-2) | Translation (3-5) ]
+        Eigen::Matrix<double,3,6> Jse3;
+        Jse3.setZero();
+
+        // Cols 0-2: Rotation -> -[Xc]^
+        Jse3(0,1) =  z; Jse3(0,2) = -y;
+        Jse3(1,0) = -z; Jse3(1,2) =  x;
+        Jse3(2,0) =  y; Jse3(2,1) = -x;
+
+        // Cols 3-5: Translation -> Identity
+        Jse3.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+
+        Jj_ana = Jimg * Jse3;
+    }
+
+    // ============================================================
+    // 8. Numerical Jacobian
+    // ============================================================
+    Eigen::Matrix<double,1,3> Ji_num;
+    Eigen::Matrix<double,1,6> Jj_num;
+
+    // ---- A. w.r.t Point ----
+    for (int k = 0; k < 3; ++k) {
+        Eigen::Vector3d dp = Eigen::Vector3d::Zero();
+        dp(k) = eps;
+        double rp = compute_error(T0, Xw + dp);
+        double rm = compute_error(T0, Xw - dp);
+        Ji_num(0,k) = (rp - rm) / (2*eps);
+    }
+
+    // ---- B. w.r.t Pose (Left Update) ----
+    for (int k = 0; k < 6; ++k) {
+        Eigen::Matrix<double,6,1> delta = Eigen::Matrix<double,6,1>::Zero();
+        delta(k) = eps;
+
+        VertexSE3Expmap vp; vp.setEstimate(T0); vp.oplus(delta.data());
+        double rp = compute_error(vp.estimate(), Xw);
+
+        delta(k) = -eps;
+        VertexSE3Expmap vm; vm.setEstimate(T0); vm.oplus(delta.data());
+        double rm = compute_error(vm.estimate(), Xw);
+
+        Jj_num(0,k) = (rp - rm) / (2*eps);
+    }
+
+    // ============================================================
+    // 9. Report
+    // ============================================================
+    std::cout << "Analytic Jj: " << Jj_ana << "\n";
+    std::cout << "Numeric  Jj: " << Jj_num << "\n";
+    std::cout << "Diff     Jj: " << (Jj_ana - Jj_num).norm() << "\n";
+
+    if ((Jj_ana - Jj_num).norm() < 1e-4)
+        std::cout << "[SUCCESS] Jacobian Verified!\n";
+    else
+        std::cout << "[FAILURE] Jacobian Mismatch!\n";
+}
+
+ #if 0
 void Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian()
 {
     using namespace g2o;
@@ -4701,6 +4898,8 @@ void Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian()
 
     std::cout << "====== Jacobian Check Done ======\n";
 }
+
+#endif
 
 void Optimizer::TestEdgeLineLengthPrior_Jacobian_SAFE()
 {

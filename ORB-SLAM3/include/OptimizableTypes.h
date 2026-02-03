@@ -2130,7 +2130,7 @@ public:
 
 
 // Edge: point (world) + pose -> distance to observed 2D line (a u + b v + c = 0)
-//前 3 维：旋转（李代数 so(3)，角轴，小角度，单位：rad）后 3 维：平移（单位：米）; VertexSE3Expmap 右扰动测试。后面其它方法，求导也要注意右扰动
+//前 3 维：旋转（李代数 so(3)，角轴，小角度，单位：rad）后 3 维：平移（单位：米）; VertexSE3Expmap 左扰动测试。后面其它方法，求导也要注意左扰动
 // 1 residual: point-to-line distance
 class EdgeSE3ProjectPointToLine2D
     : public g2o::BaseBinaryEdge<1, Eigen::Vector3d,
@@ -2196,7 +2196,7 @@ public:
         // dXc/dXw = R
         _jacobianOplusXi = Jimg * R; // 1x3
 
-        // dXc/dxi (right perturb) = [ -skew(Xc) | I ]
+        // dXc/dxi (left perturb) = [ -skew(Xc) | I ]
         Eigen::Matrix<double,3,6> Jse3;
         Jse3.setZero();
         Jse3(0,1)= z;   Jse3(0,2)=-y;

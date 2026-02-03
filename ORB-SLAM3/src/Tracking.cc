@@ -5887,7 +5887,7 @@ void Tracking::UpdateLocalPointsAndLine()
             }
         }
     }
-    std::cerr << "Local Map Points: " << count_pts << ", Local Map Lines: " << count_lines << std::endl;
+    std::cerr << "UpdateLocalPointsAndLine->Local Map Points: " << count_pts << ", Local Map Lines: " << count_lines << std::endl;
     //std::cerr << "Local Map Points size: " << mvpLocalMapPoints.size() << ", Local Map Lines size: " << mvpLocalMapLines.size() << std::endl;
 }
 

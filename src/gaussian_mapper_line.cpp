@@ -1318,7 +1318,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             }
 
             // 只有当有有效数据时才处理
-            if (initial_mapped_ && num_l_points > 4) {
+            if (initial_mapped_ && num_l_points > 0) {
                 // 安全检查
                 if (l_positions.size() != l_colors.size() || l_positions.size() != l_dirs.size()) {
                     std::cerr << "[GaussianMapper] Error: Line sampled data size mismatch! " 

@@ -445,11 +445,11 @@ void LocalMapping::RunWithLine()
                         //
                         
                         //测试通过（只优化位姿和点+线，它们同时优化，加正则项，这些正则项是约束，防止线段跑远等等）
-                        // std::cerr << "test jac " << std::endl;
-                        // Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian(); //debug, line(end points)(6x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
+                        std::cerr << "test jac " << std::endl;
+                        Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian(); //debug, line(end points)(6x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
                         // Optimizer::TestEdgeLineLengthPrior_Jacobian_SAFE(); //debug, 线段长度先验边的雅可比矩阵测试函数（数值测试通过）
                         // Optimizer::TestEdgeLineDirectionPrior_Jacobian_SAFE(); //debug, 线段方向先验边的雅可比矩阵测试函数（数值测试通过）
-                        // std::cerr << "end test jac " << std::endl;
+                        std::cerr << "end test jac " << std::endl;
                         
                         std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
                         Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
@@ -783,6 +783,88 @@ void LocalMapping::MapPointCulling()
 
 void LocalMapping::MapLineCulling()
 {
+    list<MapLine*>::iterator lit = mlpRecentAddedMapLines.begin();
+    const unsigned long int nCurrentKFid = mpCurrentKeyFrame->mnId;
+
+    // [修改建议 1] 降低观测阈值
+    // 线特征比点难跟踪，RGBD模式下设为 3 几乎是“必杀令”。建议改为 2。
+    int nThObs;
+    if(mbMonocular)
+        nThObs = 2;
+    else
+        nThObs = 2; // 原来是 3，改为 2，给线段一条生路！
+
+    const int cnThObs = nThObs;
+
+    // Debug 计数器
+    int nKilledByBad = 0;
+    int nKilledByRatio = 0;
+    int nKilledByObs = 0;
+    int nGraduated = 0;
+
+    while(lit != mlpRecentAddedMapLines.end())
+    {
+        MapLine* pML = *lit;
+        if(!pML) {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            continue;
+        }
+
+        // 1. 已经标为坏
+        if(pML->isBad())
+        {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nKilledByBad++;
+            continue;
+        }
+
+        // 2. 线段 “成功跟踪比例” 太差
+        // [修改建议 2] 0.25 对于线特征可能有点高，如果还不行，尝试降到 0.15
+        if(pML->GetFoundRatio() < 0.25f)
+        {
+            pML->SetBadFlag();
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nKilledByRatio++;
+            continue;
+        }
+
+        // 3. 关键帧间隔 >= 2 并且观测次数太少
+        // 这里的逻辑是：出生了 2 帧以上，如果还没有被 > cnThObs 个帧看到，就删掉。
+        if(((int)nCurrentKFid - (int)pML->mnFirstKFid) >= 2 &&
+            pML->Observations() <= cnThObs)
+        {
+            pML->SetBadFlag();
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nKilledByObs++;
+            continue;
+        }
+
+        // 4. 加入超过 3 帧，还没有足够观测，直接移除 (从检查列表中移除，不是从地图移除)
+        // 意味着它通过了考核，正式成为地图的永久居民
+        if(((int)nCurrentKFid - (int)pML->mnFirstKFid) >= 3)
+        {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nGraduated++;
+            continue;
+        }
+
+        // 5. 否则保留
+        lit++;
+    }
+
+    // [Debug 输出] 只有当有线段被操作时才打印，避免刷屏
+    if (nKilledByBad + nKilledByRatio + nKilledByObs + nGraduated > 0) {
+        std::cerr << "[MapLineCulling] KF" << nCurrentKFid 
+                  << " | Bad:" << nKilledByBad 
+                  << " | LowRatio:" << nKilledByRatio 
+                  << " | LowObs:" << nKilledByObs 
+                  << " | Graduated(Saved):" << nGraduated << std::endl;
+    }
+}
+
+#if 0
+void LocalMapping::MapLineCulling()
+{
     // 检查最近加入的 MapLines
     list<MapLine*>::iterator lit = mlpRecentAddedMapLines.begin();
     const unsigned long int nCurrentKFid = mpCurrentKeyFrame->mnId;
@@ -835,7 +917,7 @@ void LocalMapping::MapLineCulling()
         lit++;
     }
 }
-
+#endif
 
 void LocalMapping::CreateNewMapPoints()
 {
@@ -1198,11 +1280,12 @@ void LocalMapping::CreateNewMapLines()
     Sophus::SE3f Tcw1 = mpCurrentKeyFrame->GetPose();
     Eigen::Matrix<float,3,4> eigTcw1 = Tcw1.matrix3x4();
     Eigen::Matrix3f Rcw1 = eigTcw1.block<3,3>(0,0);
+    Eigen::Matrix3f Rwc1 = Rcw1.transpose(); // 需要用到 Rwc1 将方向转回世界系
     Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
     GeometricCamera* cam1_base = mpCurrentKeyFrame->mpCamera;
 
     // thresholds (tunable)
-    const float minLinePixels = 5.0f;            // reject too short lines
+    const float minLinePixels = 2.0f;            // reject too short lines 5.0f
     const float maxLenRatioHard = 1.5f;          // if > -> discard
     const float maxLenRatioSoft = 0.7f;          // if > -> penalize but may accept
     const float maxAngleDiff = 45.0f * M_PI / 180.0f;
@@ -1388,107 +1471,100 @@ void LocalMapping::CreateNewMapLines()
                     }
                 }
             } // end RGB-D
+
+            // -----------------------
+            // [CRITICAL FIX] 3) Mono path Fallback (Geometric Triangulation)
+            // -----------------------
+            // 即使是 RGB-D 模式，如果深度图在边缘处无效（常见情况），必须回退到几何三角化
+            // 否则会丢失大量结构线
             if (!created)
             {
-                // // -----------------------
-                // // 3) Mono path (no depth) - rigorous triangulation
-                // // -----------------------
-                // // Method A: endpoint plane intersection -> project rays onto intersection line
-                // // Compute backprojected rays (normalized) in camera coords
-                // Eigen::Vector3f xn1s = cam1_base->unprojectEig(p1s);
-                // Eigen::Vector3f xn1e = cam1_base->unprojectEig(p1e);
-                // Eigen::Vector3f xn2s = cam2_base->unprojectEig(p2s);
-                // Eigen::Vector3f xn2e = cam2_base->unprojectEig(p2e);
-                // xn1s.normalize(); xn1e.normalize(); xn2s.normalize(); xn2e.normalize();
-                // // Build two planes (each plane goes through camera center and 3D line)
-                // Eigen::Vector4f pi1 = GeometricTools::ComputeLinePlane(xn1s, xn1e, Ow1);
-                // Eigen::Vector4f pi2 = GeometricTools::ComputeLinePlane(xn2s, xn2e, Ow2);
-                // Eigen::Vector3f L0, d;
-                // if (GeometricTools::IntersectPlanes(pi1, pi2, L0, d))
+                // Method B fallback: midpoint triangulation (if A failed)
+                // [已激活] 这是一种简单且鲁棒的保底策略
+                if (!created)
+                {
+                    // 1. 计算图像中点
+                    cv::Point2f mid1((p1s.x + p1e.x) * 0.5f, (p1s.y + p1e.y) * 0.5f);
+                    cv::Point2f mid2((p2s.x + p2e.x) * 0.5f, (p2s.y + p2e.y) * 0.5f);
+                    
+                    // 2. 反投影为归一化射线
+                    Eigen::Vector3f xu1 = cam1_base->unprojectEig(mid1);
+                    Eigen::Vector3f xu2 = cam2_base->unprojectEig(mid2);
+                    xu1.normalize(); xu2.normalize();
+                    
+                    Eigen::Vector3f x3Dmid;
+                    // 3. 几何三角化中点
+                    if (GeometricTools::Triangulate(xu1, xu2, eigTcw1, eigTcw2, x3Dmid))
+                    {
+                        // 4. 确定 3D 线段方向和长度
+                        // [MODIFIED] 原来的注释代码 dir = (x3Dmid - Ow1) 是错误的（那是视线方向）。
+                        // 修正逻辑：计算图像上线段的方向，旋转到世界坐标系。
+                        Eigen::Vector3f rayS = cam1_base->unprojectEig(p1s);
+                        Eigen::Vector3f rayE = cam1_base->unprojectEig(p1e);
+                        // 在相机系下的近似方向
+                        Eigen::Vector3f dirCam = (rayE - rayS).normalized();
+                        // 转到世界系
+                        Eigen::Vector3f dirWorld = Rwc1 * dirCam; 
+                        dirWorld.normalize();
+
+                        // 长度估计：如果没有深度，长度很难精确。
+                        // 这里使用一个经验值或者 heuristic，例如 0.5米，或者根据视差估算。
+                        // 这里先沿用你代码里的 heuristic 0.5f (半长)，后续可由 BA 优化。
+                        float half_len = 0.5f; 
+                        
+                        S3D = x3Dmid - half_len * dirWorld;
+                        E3D = x3Dmid + half_len * dirWorld;
+
+                        // 5. 重投影检查
+                        if (CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1) &&
+                            CheckLineReprojection(pKF2, S3D, E3D, le2))
+                        {
+                            created = true;
+                            // std::cerr << "Debug: Created line via Mono-Midpoint!" << std::endl;
+                        }
+                    }
+                }
+
+                // if (!created)
                 // {
-                //     d.normalize();
-                //     Eigen::Vector3f Ss = GeometricTools::ProjectRayToLine(xn1s, Ow1, L0, d);
-                //     Eigen::Vector3f Es = GeometricTools::ProjectRayToLine(xn1e, Ow1, L0, d);
-                //     // depth checks (in current poses)
-                //     float z1s = Rcw1.row(2).dot(Ss) + eigTcw1(2,3);
-                //     float z1e = Rcw1.row(2).dot(Es) + eigTcw1(2,3);
-                //     float z2s = Rcw2.row(2).dot(Ss) + eigTcw2(2,3);
-                //     float z2e = Rcw2.row(2).dot(Es) + eigTcw2(2,3);
-                //     if (z1s > 0 && z1e > 0 && z2s > 0 && z2e > 0)
+                //     cv::Point2f mid1((p1s.x + p1e.x) * 0.5f, (p1s.y + p1e.y) * 0.5f);
+                //     cv::Point2f mid2((p2s.x + p2e.x) * 0.5f, (p2s.y + p2e.y) * 0.5f);
+                //     Eigen::Vector3f xu1 = cam1_base->unprojectEig(mid1);
+                //     Eigen::Vector3f xu2 = cam2_base->unprojectEig(mid2);
+                //     xu1.normalize(); xu2.normalize();
+                //     Eigen::Vector3f x3Dmid;
+                //     if (GeometricTools::Triangulate(xu1, xu2, eigTcw1, eigTcw2, x3Dmid))
                 //     {
-                //         // reprojection errors
-                //         if (CheckLineReprojection(mpCurrentKeyFrame, Ss, Es, le1) &&
-                //             CheckLineReprojection(pKF2, Ss, Es, le2))
+                //         // form a small 3D segment along the local line direction (heuristic)
+                //         Eigen::Vector3f dir = (x3Dmid - Ow1).normalized();
+                //         float half = 0.5f; // 0.5 m fallback, consider adaptive based on scene depth
+                //         S3D = x3Dmid - half * dir;
+                //         E3D = x3Dmid + half * dir;
+                //         if (CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1) &&
+                //             CheckLineReprojection(pKF2, S3D, E3D, le2))
                 //         {
-                //             // Additional ray residual check (optional)
-                //             // compute ray residual for endpoints (transform rays into common frame and compute nearest-point distance)
-                //             auto RayResidual = [&](const Eigen::Vector3f &dA, const Eigen::Vector3f &dB)->float
-                //             {
-                //                 Eigen::Vector3f w0 = (Tcw2 * Tcw1.inverse()).translation(); // approximate t21
-                //                 float a = dA.dot(dA);
-                //                 float b = dA.dot(dB);
-                //                 float c = dB.dot(dB);
-                //                 float d = dA.dot(w0);
-                //                 float e = dB.dot(w0);
-                //                 float denom = a*c - b*b;
-                //                 if (fabs(denom) < 1e-6f) return 1e6f;
-                //                 float s = (b*e - c*d) / denom;
-                //                 float t = (a*e - b*d) / denom;
-                //                 Eigen::Vector3f p1 = w0 + s * dA;
-                //                 Eigen::Vector3f p2 =       t * dB;
-                //                 return (p1 - p2).norm();
-                //             };
-                //             float r_s = RayResidual(Rcw1 * xn1s, Rcw2 * xn2s);
-                //             float r_e = RayResidual(Rcw1 * xn1e, Rcw2 * xn2e);
-                //             if (r_s + r_e < MAX_RAY_RES)
-                //             {
-                //                 S3D = Ss; E3D = Es;
-                //                 created = true;
-                //             }
+                //             created = true;
                 //         }
                 //     }
                 // }
 
-            //     // Method B fallback: midpoint triangulation (if A failed)
-            //     if (!created)
-            //     {
-            //         cv::Point2f mid1((p1s.x + p1e.x) * 0.5f, (p1s.y + p1e.y) * 0.5f);
-            //         cv::Point2f mid2((p2s.x + p2e.x) * 0.5f, (p2s.y + p2e.y) * 0.5f);
-            //         Eigen::Vector3f xu1 = cam1_base->unprojectEig(mid1);
-            //         Eigen::Vector3f xu2 = cam2_base->unprojectEig(mid2);
-            //         xu1.normalize(); xu2.normalize();
-            //         Eigen::Vector3f x3Dmid;
-            //         if (GeometricTools::Triangulate(xu1, xu2, eigTcw1, eigTcw2, x3Dmid))
-            //         {
-            //             // form a small 3D segment along the local line direction (heuristic)
-            //             Eigen::Vector3f dir = (x3Dmid - Ow1).normalized();
-            //             float half = 0.5f; // 0.5 m fallback, consider adaptive based on scene depth
-            //             S3D = x3Dmid - half * dir;
-            //             E3D = x3Dmid + half * dir;
-            //             if (CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1) &&
-            //                 CheckLineReprojection(pKF2, S3D, E3D, le2))
-            //             {
-            //                 created = true;
-            //             }
-            //         }
-            //     }
-            //     // Method C fallback: Plücker triangulation (if available)
-            //     if (!created)
-            //     {
-            //         Eigen::Vector3f L0_p, d_p;
-            //         if (GeometricTools::TriangulatePluckerLine(xn1s, xn1e, xn2s, xn2e, T1w, T2w, L0_p, d_p))
-            //         {
-            //             d_p.normalize();
-            //             Eigen::Vector3f Sp = GeometricTools::ProjectRayToLine(xn1s, Ow1, L0_p, d_p);
-            //             Eigen::Vector3f Ep = GeometricTools::ProjectRayToLine(xn1e, Ow1, L0_p, d_p);
-            //             if (CheckLineReprojection(mpCurrentKeyFrame, Sp, Ep, le1) &&
-            //                 CheckLineReprojection(pKF2, Sp, Ep, le2))
-            //             {
-            //                 S3D = Sp; E3D = Ep;
-            //                 created = true;
-            //             }
-            //         }
-            //     }
+                // // Method C fallback: Plücker triangulation (if available)
+                // if (!created)
+                // {
+                //     Eigen::Vector3f L0_p, d_p;
+                //     if (GeometricTools::TriangulatePlückerLine(xn1s, xn1e, xn2s, xn2e, T1w, T2w, L0_p, d_p))
+                //     {
+                //         d_p.normalize();
+                //         Eigen::Vector3f Sp = GeometricTools::ProjectRayToLine(xn1s, Ow1, L0_p, d_p);
+                //         Eigen::Vector3f Ep = GeometricTools::ProjectRayToLine(xn1e, Ow1, L0_p, d_p);
+                //         if (CheckLineReprojection(mpCurrentKeyFrame, Sp, Ep, le1) &&
+                //             CheckLineReprojection(pKF2, Sp, Ep, le2))
+                //         {
+                //             S3D = Sp; E3D = Ep;
+                //             created = true;
+                //         }
+                //     }
+                // }
             } // end Mono branch
 
             if (!created) continue;
@@ -1555,6 +1631,10 @@ void LocalMapping::CreateNewMapLines()
     // debug visualization
     int created_map_line_num = (int)mlpRecentAddedMapLines.size();
     std::cerr << " created_map_line_num: " << created_map_line_num << std::endl;
+    // if(created_map_line_num < 10)
+    // {
+    //     DebugRecentAddedMapLinesProjection();
+    // }
     //DebugRecentAddedMapLinesProjection();
 }
 
@@ -1949,8 +2029,20 @@ void LocalMapping::SearchInNeighborsWithLine()
             vpFuseLineCandidates.push_back(pML);
         }
     }
+
+    // 统计融合前的状态
+    int nMapLinesBefore = mpCurrentKeyFrame->GetMapLineMatches().size();
+
     // 融合候选 MapLine 到当前 KeyFrame
-    line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f); // th 可调整
+    int nFused = line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f); // th 可调整
+
+    // 统计融合后的状态
+    int nMapLinesAfter = mpCurrentKeyFrame->GetMapLineMatches().size();
+
+    std::cerr << "[LocalMapping Fuse] Candidates: " << vpFuseLineCandidates.size() 
+              << " | Fused: " << nFused 
+              << " | KF Lines: " << nMapLinesBefore << " -> " << nMapLinesAfter << std::endl;
+
     //to do next
     //if(mpCurrentKeyFrame->NLeft != -1)
     //    line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f, true);
