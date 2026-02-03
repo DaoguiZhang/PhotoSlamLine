@@ -217,6 +217,201 @@ void GaussianModelLine::createFromPcd(
 {
     this->spatial_lr_scale_ = spatial_lr_scale;
     int num_points = static_cast<int>(pcd.size());
+    
+    // 1. 初始化 GPU 张量
+    torch::Tensor fused_point_cloud = torch::zeros(
+        {num_points, 3},
+        torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+    torch::Tensor color = torch::zeros(
+        {num_points, 3},
+        torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+    is_line_ = torch::zeros(
+        {num_points},
+        torch::TensorOptions().dtype(torch::kBool).device(device_type_));
+    line_dir_w_ = torch::zeros(
+        {num_points, 3}, 
+        torch::TensorOptions().dtype(torch::kFloat).device(device_type_)); 
+
+    // 2. 填充基础数据 (XYZ, Color, IsLine) - CPU 辅助填充
+    auto is_line_cpu = is_line_.cpu(); // 创建 CPU 副本
+    auto line_acc = is_line_cpu.accessor<bool, 1>(); 
+    auto pcd_it = pcd.begin();
+    
+    // 注意：这里你是直接操作 GPU tensor 的 index，虽然慢但能跑
+    // 为了性能建议也像 is_line 那样用 CPU accessor，但目前保持原样不出错
+    for (int point_idx = 0; point_idx < num_points; ++point_idx) {
+        auto& point = (*pcd_it).second;
+        fused_point_cloud.index({point_idx, 0}) = point.xyz_(0);
+        fused_point_cloud.index({point_idx, 1}) = point.xyz_(1);
+        fused_point_cloud.index({point_idx, 2}) = point.xyz_(2);
+        color.index({point_idx, 0}) = point.color_(0);
+        color.index({point_idx, 1}) = point.color_(1);
+        color.index({point_idx, 2}) = point.color_(2);
+        line_acc[point_idx] = (point.source_ == PointSourceType::LINE_SAMPLED); 
+        ++pcd_it;
+    }
+
+    // 3. 计算 SH 特征
+    torch::Tensor fused_color = sh_utils::RGB2SH(color);
+    auto temp = this->max_sh_degree_ + 1;
+    torch::Tensor features = torch::zeros(
+        {fused_color.size(0), 3, temp * temp},
+        torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+    features.index({torch::indexing::Slice(), torch::indexing::Slice(0, 3), 0}) = fused_color;
+    features.index({torch::indexing::Slice(), torch::indexing::Slice(3, features.size(1)), torch::indexing::Slice(1, features.size(2))}) = 0.0f;
+
+    // 4. 初始化默认 Rotation (Identity) 和 Scale (Isotropic)
+    torch::Tensor rots = torch::zeros({fused_point_cloud.size(0), 4}, torch::TensorOptions().device(device_type_));
+    rots.index({torch::indexing::Slice(), 0}) = 1; // w=1
+    
+    torch::Tensor scales = torch::zeros({num_points, 3}, torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+
+    {
+        // 使用 KNN 计算普通点的初始大小
+        torch::Tensor point_cloud_copy = fused_point_cloud.clone();
+        torch::Tensor dist2 = torch::clamp_min(distCUDA2(point_cloud_copy), 0.0000001);
+        torch::Tensor scales_dist = torch::log(torch::sqrt(dist2));          
+        scales_dist = scales_dist.unsqueeze(1).repeat({1, 3});               
+        scales.copy_(scales_dist);
+    }
+
+    // 5. 针对线特征进行特殊初始化 (CPU 循环)
+    // 关键：创建 CPU 副本进行操作
+    torch::Tensor scales_cpu = scales.to(torch::kCPU).contiguous();
+    torch::Tensor rots_cpu   = rots.to(torch::kCPU).contiguous();
+    torch::Tensor line_dir_cpu = line_dir_w_.cpu().contiguous(); // 之前是全0
+
+    auto dir_acc = line_dir_cpu.accessor<float, 2>();
+    auto scales_acc = scales_cpu.accessor<float, 2>();
+    auto rots_acc   = rots_cpu.accessor<float, 2>();
+    
+    pcd_it = pcd.begin();
+    for (int i = 0; i < num_points; ++i) {
+        const Point3D& p = (*pcd_it).second;
+        
+        if (p.source_ == PointSourceType::MAP_POINT)
+        {
+            // 普通点：保持默认方向和 distCUDA2 计算的 scale/rotation
+            dir_acc[i][0] = 1.f; dir_acc[i][1] = 0.f; dir_acc[i][2] = 0.f;
+            // 不要 continue，因为 pcd_it 需要递增 (虽然在循环头里没递增，你是放在下面)
+            // 在你的原始代码中 pcd_it 是在循环体外递增的吗？
+            // 修正：你的原始代码 pcd_it 是 map iterator，这里应该每次循环都要由 iterator 拿到
+        }
+        else 
+        {
+            // 线特征点：覆盖 Scale 和 Rotation
+            Eigen::Vector3f d = p.line_dir_.normalized();
+            dir_acc[i][0] = d.x(); dir_acc[i][1] = d.y(); dir_acc[i][2] = d.z();
+
+            // --- Scale (各向异性) ---
+            const float step  = (p.sample_step_ > 0.f) ? p.sample_step_ : 0.05f; 
+            Eigen::Vector3f log_s = initLineSampleLogScale(step, p.ref_depth_z_, p.ref_focal_);
+            scales_acc[i][0] = log_s[0];
+            scales_acc[i][1] = log_s[1];
+            scales_acc[i][2] = log_s[2];
+
+            // --- Rotation (对齐方向) ---
+            Eigen::Vector4f q = initQuatAlignXToDir(p.line_dir_);
+            rots_acc[i][0] = q[0];
+            rots_acc[i][1] = q[1];
+            rots_acc[i][2] = q[2];
+            rots_acc[i][3] = q[3];
+        }
+        ++pcd_it; // 确保遍历 map
+    }
+
+    // =========================================================================
+    // 【关键修复】 将修改后的 CPU 数据写回 GPU！！！
+    // 如果没有这几行，你的线特征初始化就全是默认值（圆球+未对齐），导致优化失败
+    // =========================================================================
+    scales = scales_cpu.to(device_type_).contiguous();
+    rots   = rots_cpu.to(device_type_).contiguous();
+    line_dir_w_ = line_dir_cpu.to(device_type_).contiguous(); // 更新成员变量
+    this->is_line_ = is_line_cpu.to(device_type_).contiguous(); // 更新成员变量
+
+    // 6. 初始化 Opacity 和其他参数
+    torch::Tensor opacities = general_utils::inverse_sigmoid(
+        0.1f * torch::ones(
+                   {fused_point_cloud.size(0), 1},
+                   torch::TensorOptions().dtype(torch::kFloat).device(device_type_)));
+
+    this->exist_since_iter_ = torch::zeros(
+        {fused_point_cloud.size(0)},
+        torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
+
+    // 7. 赋值给可优化参数 (Requires Grad)
+    this->xyz_ = fused_point_cloud.requires_grad_();
+    this->features_dc_ = features.index({torch::indexing::Slice(),
+                                         torch::indexing::Slice(),
+                                         torch::indexing::Slice(0, 1)})
+                             .transpose(1, 2)
+                             .contiguous()
+                             .requires_grad_();
+    this->features_rest_ = features.index({torch::indexing::Slice(),
+                                           torch::indexing::Slice(),
+                                           torch::indexing::Slice(1, features.size(2))})
+                               .transpose(1, 2)
+                               .contiguous()
+                               .requires_grad_();
+                               
+    // 这里现在使用的是已经包含了线特征初始化的正确 Tensor
+    this->scaling_ = scales.requires_grad_();
+    this->rotation_ = rots.requires_grad_();
+    this->opacity_ = opacities.requires_grad_();
+
+    GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
+
+    this->point_ids_ = torch::arange(0, num_points, 
+        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+
+    // Debug Buffers
+    this->debug_hit_count_ =
+        torch::zeros({this->getXYZ().size(0)},
+                 torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
+    this->debug_alpha_accum_ =
+        torch::zeros({this->getXYZ().size(0)},
+                 torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+
+    this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
+    
+    // is_line_ 已经在上面更新过了，这里不需要再赋值
+    // ================= [DEBUG PROBE: 检查初始化质量] =================
+    if (this->is_line_.any().item<bool>()) {
+        std::cerr << "\n[DEBUG createFromPcd] Checking Line Initialization:" << std::endl;
+        
+        // 提取线高斯的 Scaling (Exp后才是真实大小) 和 Rotation
+        auto line_mask_idx = torch::nonzero(this->is_line_).squeeze();
+        auto s = torch::exp(this->scaling_.index({line_mask_idx})); 
+        auto r = this->rotation_.index({line_mask_idx});
+        
+        int num_check = std::min((int)s.size(0), 3);
+        for (int i = 0; i < num_check; ++i) {
+            float sx = s[i][0].item<float>(); // 沿线方向
+            float sy = s[i][1].item<float>(); // 法向
+            float sz = s[i][2].item<float>(); // 法向
+            
+            float qw = r[i][0].item<float>();
+            float qx = r[i][1].item<float>();
+            
+            std::cerr << "  Line " << i << ": Scale=[" 
+                      << sx << ", " << sy << ", " << sz << "] "
+                      << "Ratio=" << sx / std::max(sy, 1e-6f) 
+                      << " | Rot(w,x)=[" << qw << ", " << qx << "...]" << std::endl;
+        }
+        std::cerr << "  > If Ratio > 1.0 and Rot != [1,0,0,0], initialization is GOOD.\n" << std::endl;
+    } else {
+        std::cerr << "\n[DEBUG createFromPcd] No Line Points found in this batch.\n" << std::endl;
+    }
+    // =================================================================
+}
+
+#if 0
+void GaussianModelLine::createFromPcd(
+    std::map<point3D_id_t, Point3D> pcd,
+    const float spatial_lr_scale)
+{
+    this->spatial_lr_scale_ = spatial_lr_scale;
+    int num_points = static_cast<int>(pcd.size());
     torch::Tensor fused_point_cloud = torch::zeros(
         {num_points, 3},
         torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
@@ -257,7 +452,7 @@ void GaussianModelLine::createFromPcd(
          torch::indexing::Slice(3, features.size(1)),
          torch::indexing::Slice(1, features.size(2))}) = 0.0f;
 
-    // std::cout << "[Gaussian Model]Number of points at initialization : " << fused_point_cloud.size(0) << std::endl;
+    // std::cerr << "[Gaussian Model]Number of points at initialization : " << fused_point_cloud.size(0) << std::endl;
 
     torch::Tensor rots = torch::zeros({fused_point_cloud.size(0), 4}, torch::TensorOptions().device(device_type_));
     rots.index({torch::indexing::Slice(), 0}) = 1;
@@ -371,7 +566,105 @@ void GaussianModelLine::createFromPcd(
     this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
     this->is_line_ = is_line_cpu.to(device_type_);  //cp back to gpu
 }
+#endif
 
+void GaussianModelLine::increasePcd(
+    const std::vector<Point3D>& new_points,
+    const int iteration)
+{
+    const int N = static_cast<int>(new_points.size());
+    if (N == 0) return;
+
+    // 1. 准备 CPU 缓冲
+    torch::Tensor xyz_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    torch::Tensor col_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    torch::Tensor dir_cpu = torch::zeros({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    torch::Tensor is_line_cpu = torch::zeros({N}, torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+    
+    // 准备 Scale 和 Rotation 的 CPU 缓冲 (N,3) 和 (N,4)
+    torch::Tensor scale_cpu = torch::zeros({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    torch::Tensor rot_cpu   = torch::zeros({N, 4}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    // 默认 Rotation 为 Identity (w=1)
+    rot_cpu.index_put_({torch::indexing::Slice(), 0}, 1.0f);
+
+    {
+        auto xyz_acc = xyz_cpu.accessor<float, 2>();
+        auto col_acc = col_cpu.accessor<float, 2>();
+        auto dir_acc = dir_cpu.accessor<float, 2>();
+        auto line_acc = is_line_cpu.accessor<bool, 1>();
+        auto s_acc = scale_cpu.accessor<float, 2>();
+        auto r_acc = rot_cpu.accessor<float, 2>();
+
+        for (int i = 0; i < N; ++i) {
+            const auto& p = new_points[i];
+            
+            xyz_acc[i][0] = p.xyz_.x(); xyz_acc[i][1] = p.xyz_.y(); xyz_acc[i][2] = p.xyz_.z();
+            col_acc[i][0] = p.color_.x(); col_acc[i][1] = p.color_.y(); col_acc[i][2] = p.color_.z();
+            
+            bool is_line_pt = (p.source_ == PointSourceType::LINE_SAMPLED);
+            line_acc[i] = is_line_pt;
+
+            if (is_line_pt) {
+                // Line: Set Direction, Anisotropic Scale, Aligned Rotation
+                Eigen::Vector3f d = p.line_dir_.normalized();
+                dir_acc[i][0] = d.x(); dir_acc[i][1] = d.y(); dir_acc[i][2] = d.z();
+
+                const float step = (p.sample_step_ > 0.f) ? p.sample_step_ : 0.05f;
+                Eigen::Vector3f log_s = initLineSampleLogScale(step, p.ref_depth_z_, p.ref_focal_);
+                s_acc[i][0] = log_s[0]; s_acc[i][1] = log_s[1]; s_acc[i][2] = log_s[2];
+
+                Eigen::Vector4f q = initQuatAlignXToDir(p.line_dir_);
+                r_acc[i][0] = q[0]; r_acc[i][1] = q[1]; r_acc[i][2] = q[2]; r_acc[i][3] = q[3];
+            } else {
+                // Point: Default Direction, Placeholder Scale (will be calc by distCUDA2), Identity Rotation
+                dir_acc[i][0] = 1.0f;
+            }
+        }
+    }
+
+    // 2. 移动到 GPU
+    auto new_xyz = xyz_cpu.to(device_type_).contiguous();
+    auto new_color = col_cpu.to(device_type_).contiguous();
+    auto new_line_dir_w = dir_cpu.to(device_type_).contiguous();
+    auto new_is_line = is_line_cpu.to(device_type_).contiguous();
+    
+    auto new_rotation = rot_cpu.to(device_type_).contiguous();
+    auto new_scaling = scale_cpu.to(device_type_).contiguous();
+
+    // 3. 为普通点计算 Scale (覆盖掉上面的 0)
+    {
+        torch::Tensor dist2 = torch::clamp_min(distCUDA2(new_xyz.clone()), 1e-7);
+        torch::Tensor dist_scales = torch::log(torch::sqrt(dist2)).unsqueeze(1).repeat({1, 3});
+        
+        torch::Tensor is_point_mask = ~new_is_line;
+        if (is_point_mask.any().item<bool>()) {
+            new_scaling.index_put_({is_point_mask}, dist_scales.index({is_point_mask}));
+        }
+    }
+
+    // 4. Features & Opacity & Aux
+    torch::Tensor fused_color = sh_utils::RGB2SH(new_color);
+    const int sh_dim = (max_sh_degree_ + 1) * (max_sh_degree_ + 1);
+    torch::Tensor features = torch::zeros({N, 3, sh_dim}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_));
+    features.index_put_({torch::indexing::Slice(), torch::indexing::Slice(), 0}, fused_color);
+
+    auto new_features_dc = features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, 1)}).transpose(1, 2).contiguous();
+    auto new_features_rest = features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(1, sh_dim)}).transpose(1, 2).contiguous();
+
+    auto new_opacity = general_utils::inverse_sigmoid(0.1f * torch::ones({N, 1}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_)));
+    auto new_exist_since_iter = torch::full({N}, iteration, torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
+
+    // 5. Call Postfix (Safe Version)
+    densificationPostfixWithLineAwareness(
+        new_xyz, new_features_dc, new_features_rest, new_opacity, 
+        new_scaling, new_rotation, new_exist_since_iter, 
+        new_is_line, new_line_dir_w
+    );
+
+    c10::cuda::CUDACachingAllocator::emptyCache();
+}
+
+#if 0
 void GaussianModelLine::increasePcd(
     const std::vector<Point3D>& new_points,
     const int iteration)
@@ -520,7 +813,7 @@ void GaussianModelLine::increasePcd(
 
     c10::cuda::CUDACachingAllocator::emptyCache();
 }
-
+#endif
 
 void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float> colors, const int iteration)
 {
@@ -619,6 +912,23 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
     auto new_scaling = scales;
     auto new_rotation = rots;
 
+    // ================= [DEBUG PROBE: 检查 increasePcd 数据流] =================
+    std::cerr << "\n[DEBUG increasePcd(Vector)] Preparing to call Postfix. N_new=" << num_new_points << std::endl;
+    std::cerr << "  > new_xyz shape:      " << new_xyz.sizes() << std::endl;
+    std::cerr << "  > new_rotation shape: " << new_rotation.sizes() << " (Expect [N, 4])" << std::endl;
+    std::cerr << "  > new_scaling shape:  " << new_scaling.sizes() << " (Expect [N, 3])" << std::endl;
+    std::cerr << "  > new_features_dc:    " << new_features_dc.sizes() << std::endl;
+    
+    // 强制检查：如果 Rotation 维度不对，打印红色警告
+    if (new_rotation.dim() != 2 || new_rotation.size(1) != 4) {
+        std::cerr << "\033[1;31m[CRITICAL ALERT] new_rotation dimension is WRONG inside increasePcd!\033[0m" << std::endl;
+        // 尝试自动修复 (虽然之前的 torch::zeros 应该是对的，但以防万一)
+        if (new_rotation.numel() == num_new_points * 4) {
+             std::cerr << "[Auto-Fix] Reshaping rotation to [N, 4]..." << std::endl;
+             new_rotation = new_rotation.view({num_new_points, 4}).contiguous();
+        }
+    }
+
     // =========================================================
     // 【替换】调用结构感知的 Postfix
     // =========================================================
@@ -709,7 +1019,7 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
 
 // auto time2 = std::chrono::steady_clock::now();
 // auto time = std::chrono::duration_cast<std::chrono::milliseconds>(time2-time1).count();
-// std::cout << "increasePcd(tensor) preparation time: " << time << " ms" <<std::endl;
+// std::cerr << "increasePcd(tensor) preparation time: " << time << " ms" <<std::endl;
 
     // =================================================================================
     // 【新增】创建默认的 line 属性张量
@@ -747,7 +1057,7 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
     c10::cuda::CUDACachingAllocator::emptyCache();
 // auto time3 = std::chrono::steady_clock::now();
 // time = std::chrono::duration_cast<std::chrono::milliseconds>(time3-time2).count();
-// std::cout << "increasePcd(tensor) postfix time: " << time << " ms" <<std::endl;
+// std::cerr << "increasePcd(tensor) postfix time: " << time << " ms" <<std::endl;
 }
 
 
@@ -1110,6 +1420,7 @@ void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
         this->max_radii2D_.index({valid_points_mask});
 }
 
+#if 0
 void GaussianModelLine::densificationPostfixWithLineAwareness(
     torch::Tensor& new_xyz,
     torch::Tensor& new_features_dc,
@@ -1227,6 +1538,169 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     this->max_radii2D_ =
         torch::zeros({N}, torch::TensorOptions().device(device_type_));
 }
+#endif
+
+void GaussianModelLine::densificationPostfixWithLineAwareness(
+    torch::Tensor& new_xyz,
+    torch::Tensor& new_features_dc,
+    torch::Tensor& new_features_rest,
+    torch::Tensor& new_opacities,
+    torch::Tensor& new_scaling,
+    torch::Tensor& new_rotation,
+    torch::Tensor& new_exist_since_iter,
+    torch::Tensor& new_is_line,
+    torch::Tensor& new_line_dir_w)
+{
+    // ================= [DEBUG PROBE: 强制打印到错误流] =================
+    // 使用 std::cerr 而不是 std::cerr，防止崩溃时日志丢失
+    std::cerr << "\n[DEBUG FLOW] Entering Postfix. N=" << new_xyz.size(0) << std::endl;
+    std::cerr << "  > XYZ Shape: " << new_xyz.sizes() << std::endl;
+    std::cerr << "  > Rotation Shape: " << new_rotation.sizes() << " (Expect: [N, 4])" << std::endl;
+    std::cerr << "  > Scaling Shape:  " << new_scaling.sizes()  << " (Expect: [N, 3])" << std::endl;
+    // =========================================================
+    // [CRITICAL FIX] 维度强制校验与修复
+    // 解决 "Expected size 4 but got size N" 问题
+    // =========================================================
+    int64_t N = new_xyz.size(0); // 以 XYZ 的点数为基准
+
+    // 1. 修复 Rotation: 必须是 [N, 4]
+    // 报错 Expected size 4 but got 115 就是在这里被拦截修复
+    if (new_rotation.dim() == 1 && new_rotation.numel() == N * 4) {
+        new_rotation = new_rotation.view({N, 4});
+    }
+    else if (new_rotation.size(0) == 4 && new_rotation.size(1) == N) {
+        new_rotation = new_rotation.t().contiguous(); 
+    }
+    // 最后的防线
+    if (new_rotation.size(1) != 4) {
+        std::cerr << "[GaussianModel] CRITICAL ERROR: Rotation shape " << new_rotation.sizes() << " is wrong! Trying to reshape..." << std::endl;
+        new_rotation = new_rotation.view({N, 4}).contiguous();
+    }
+
+    // 2. 修复 Scaling: 必须是 [N, 3]
+    if (new_scaling.dim() == 1 && new_scaling.numel() == N * 3) {
+        new_scaling = new_scaling.view({N, 3});
+    }
+    else if (new_scaling.size(0) == 3 && new_scaling.size(1) == N) {
+        new_scaling = new_scaling.t().contiguous();
+    }
+    new_scaling = new_scaling.contiguous();
+
+    // =====================================================
+    // A. Optimizer-managed tensors (Adam needs to be extended)
+    // =====================================================
+    std::vector<torch::Tensor> optimizable_tensors(6);
+    std::vector<torch::Tensor> tensors_dict = {
+        new_xyz,
+        new_features_dc,
+        new_features_rest,
+        new_opacities,
+        new_scaling,
+        new_rotation
+    };
+
+    auto& param_groups = this->optimizer_->param_groups();
+    auto& state = this->optimizer_->state();
+
+    for (int group_idx = 0; group_idx < 6; ++group_idx) {
+        auto& group = param_groups[group_idx];
+        if (group.params().size() != 1) continue; 
+
+        auto& extension_tensor = tensors_dict[group_idx];
+        auto& param = group.params()[0];
+        auto key = param.unsafeGetTensorImpl();
+
+        if (state.find(key) != state.end()) {
+            // ---- extend Adam state ----
+            auto& stored_state = static_cast<torch::optim::AdamParamState&>(*state[key]);
+            auto new_state = std::make_unique<torch::optim::AdamParamState>();
+            
+            new_state->step(stored_state.step());
+            
+            // 拼接 Adam 状态 (Momentum)
+            new_state->exp_avg(
+                torch::cat({stored_state.exp_avg(), torch::zeros_like(extension_tensor)}, 0));
+            new_state->exp_avg_sq(
+                torch::cat({stored_state.exp_avg_sq(), torch::zeros_like(extension_tensor)}, 0));
+
+            state.erase(key);
+
+            // 【关键】拼接参数并开启梯度
+            // 注意：这里我们使用 extension_tensor，它已经被上面的修复逻辑校正了维度
+            param = torch::cat({param, extension_tensor}, 0).requires_grad_();
+            
+            key = param.unsafeGetTensorImpl();
+            state[key] = std::move(new_state);
+
+            // 更新 param_group 里的引用
+            group.params()[0] = param;
+            optimizable_tensors[group_idx] = param;
+        }
+        else {
+            // no state yet
+            param = torch::cat({param, extension_tensor}, 0).requires_grad_();
+            group.params()[0] = param;
+            optimizable_tensors[group_idx] = param;
+        }
+    }
+
+    // =====================================================
+    // B. 写回类成员变量 (必须做，否则下一次迭代找不到参数)
+    // =====================================================
+    this->xyz_           = optimizable_tensors[0];
+    this->features_dc_   = optimizable_tensors[1];
+    this->features_rest_ = optimizable_tensors[2];
+    this->opacity_       = optimizable_tensors[3];
+    this->scaling_       = optimizable_tensors[4];
+    // 【验证点 1】：赋值前检查 optimizer 返回的 rotation 形状
+    auto rot_from_opt = optimizable_tensors[5];
+    if (rot_from_opt.dim() != 2 || rot_from_opt.size(1) != 4) {
+        std::cerr << "\n[VERIFY FAIL] Optimizer produced BAD Rotation!" << std::endl;
+        std::cerr << "  > Shape: " << rot_from_opt.sizes() << std::endl;
+        // 尝试最后一次抢救，防止下一帧崩掉
+        // optimizable_tensors[5] = rot_from_opt.reshape({-1, 4}).contiguous();
+    }
+    this->rotation_      = optimizable_tensors[5];
+    // 【验证点 2】：赋值后检查成员变量状态
+    if (this->rotation_.dim() == 1) {
+        std::cerr << "\033[1;31m[FATAL CONFIRMED] this->rotation_ IS NOW 1D!\033[0m" << std::endl;
+        std::cerr << "  > Size: " << this->rotation_.sizes() << std::endl;
+        std::cerr << "  > This will crash the NEXT iteration." << std::endl;
+    } else {
+        // std::cerr << "[VERIFY OK] Postfix finished. Rotation shape: " << this->rotation_.sizes() << std::endl;
+    }
+
+
+    GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
+
+    // 更新辅助向量 (如果你的 optimizer step 依赖它)
+    this->Tensor_vec_xyz_ = {this->xyz_}; 
+    
+    // ---- 完善 point_ids_ 的维护 ----
+    int64_t max_id = 0;
+    if (this->point_ids_.size(0) > 0) {
+        max_id = this->point_ids_.max().item<int64_t>();
+    }
+    torch::Tensor new_ids = torch::arange(max_id + 1, max_id + 1 + N, 
+        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+    this->point_ids_ = torch::cat({this->point_ids_, new_ids}, 0);
+
+    // =====================================================
+    // C. Structure-only tensors (NO optimizer state)
+    // =====================================================
+    // 确保这些 tensor 也在正确的设备上
+    this->is_line_ = torch::cat({this->is_line_, new_is_line.to(device_type_)}, 0);
+    this->line_dir_w_ = torch::cat({this->line_dir_w_, new_line_dir_w.to(device_type_)}, 0);
+    this->exist_since_iter_ = torch::cat({this->exist_since_iter_, new_exist_since_iter.to(device_type_)}, 0);
+
+    // =====================================================
+    // D. Reset auxiliary buffers (size must match new total)
+    // =====================================================
+    int64_t TotalN = this->xyz_.size(0);
+    this->xyz_gradient_accum_ = torch::zeros({TotalN, 1}, torch::TensorOptions().device(device_type_));
+    this->denom_ = torch::zeros({TotalN, 1}, torch::TensorOptions().device(device_type_));
+    this->max_radii2D_ = torch::zeros({TotalN}, torch::TensorOptions().device(device_type_));
+}
 
 
 void GaussianModelLine::densificationPostfix(
@@ -1303,7 +1777,228 @@ void GaussianModelLine::densificationPostfix(
     this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
 }
 
+#if 0
+// 辅助函数：构建旋转矩阵 (直接复用你提供的逻辑或引用头文件)
+// 如果项目中已有 general_utils::build_rotation，则直接使用，无需重复定义
+// inline torch::Tensor build_rotation(torch::Tensor &r) { ... } 
 
+void GaussianModelLine::densifyAndSplitWithLineAwareness(
+    torch::Tensor& grads,
+    float grad_threshold,
+    float scene_extent,
+    int N)
+{
+    using namespace torch::indexing;
+
+    int n_init_points = this->getXYZ().size(0);
+    
+    // =========================================================================
+    // 1. 筛选 (Selection): 找出梯度大且 Scaling 大的点
+    // =========================================================================
+    auto padded_grad = torch::zeros({n_init_points}, torch::TensorOptions().device(device_type_));
+    padded_grad.slice(/*dim=*/0L, /*start=*/0, /*end=*/grads.size(0)).copy_(grads.squeeze());
+    
+    auto selected_mask = torch::where(padded_grad >= grad_threshold, true, false);
+    selected_mask = torch::logical_and(
+        selected_mask,
+        std::get<0>(torch::max(this->getScalingActivation(), /*dim=*/1)) > percentDense() * scene_extent
+    );
+
+    int64_t M = selected_mask.sum().item<int64_t>();
+    if (M == 0) return;
+
+    // =========================================================================
+    // 2. 数据准备 (Data Preparation)
+    // =========================================================================
+    // 提取被选中的数据
+    auto xyz_sel = this->getXYZ().index({selected_mask});
+    auto scale_sel = this->getScalingActivation().index({selected_mask});
+    auto rot_sel = this->rotation_.index({selected_mask});
+    
+    // [Safety] 强制确保 Rotation 维度正确 [M, 4]
+    if (rot_sel.dim() != 2 || rot_sel.size(1) != 4) {
+        rot_sel = rot_sel.reshape({-1, 4}).contiguous();
+    }
+    
+    // 提取线特征属性
+    auto is_line_sel = this->is_line_.index({selected_mask});
+    auto line_dir_sel = this->line_dir_w_.index({selected_mask});
+
+    // 计算旋转矩阵 R [M, 3, 3]
+    auto rots = general_utils::build_rotation(rot_sel);
+
+    // =========================================================================
+    // 3. 分类处理 (Branching): Point vs Line
+    // =========================================================================
+    // 通过 Scaling 形状辅助判断 (Line 通常长宽比很大)
+    auto sorted_scale = std::get<0>(scale_sel.sort(1, true)); // 降序
+    auto geom_is_line = sorted_scale.index({Slice(), 0}) / (sorted_scale.index({Slice(), 1}) + 1e-6) > 4.0f;
+    
+    // 最终分类掩码 (相对于 selected_mask 的子集)
+    auto mask_line_subset = torch::logical_and(is_line_sel, geom_is_line);
+    auto mask_point_subset = ~mask_line_subset;
+
+    // 容器
+    std::vector<torch::Tensor> list_xyz, list_scale, list_rot;
+    std::vector<torch::Tensor> list_is_line, list_line_dir;
+    // 辅助索引 (用于从原始 sel 数据中提取 Feature 等)
+    std::vector<torch::Tensor> list_indices_in_sel; 
+
+    auto opts = xyz_sel.options();
+
+    // -------------------------------------------------------------------------
+    // 分支 A: 普通点 (Points) - 原始逻辑 (3D 采样, 全局缩小)
+    // -------------------------------------------------------------------------
+    if (mask_point_subset.any().item<bool>()) {
+        auto xyz_p = xyz_sel.index({mask_point_subset});       // [Mp, 3]
+        auto scale_p = scale_sel.index({mask_point_subset});   // [Mp, 3]
+        auto rots_p = rots.index({mask_point_subset});         // [Mp, 3, 3]
+        auto rot_raw_p = rot_sel.index({mask_point_subset});   // [Mp, 4]
+
+        int64_t Mp = xyz_p.size(0);
+
+        // 3D 随机采样: 均值为0，标准差为 scale_p
+        // [Mp, N, 3] -> [Mp*N, 3]
+        auto stds = scale_p.repeat({N, 1}); 
+        auto means = torch::zeros({stds.size(0), 3}, opts);
+        auto samples = at::normal(means, stds); 
+
+        // 旋转并平移: P_new = P_old + R * sample
+        auto rots_repeated = rots_p.repeat({N, 1, 1}); // [Mp*N, 3, 3]
+        auto new_xyz_p = torch::bmm(rots_repeated, samples.unsqueeze(-1)).squeeze(-1) + xyz_p.repeat({N, 1});
+        
+        // Scaling: 所有轴都缩小
+        auto new_scale_p = torch::log(scale_p.repeat({N, 1}) / (0.8 * N));
+        
+        // Rotation: 简单复制
+        auto new_rot_p = rot_raw_p.repeat({N, 1}); // [Mp*N, 4]
+
+        // 存入列表
+        list_xyz.push_back(new_xyz_p);
+        list_scale.push_back(new_scale_p);
+        list_rot.push_back(new_rot_p);
+        
+        // 结构属性
+        list_is_line.push_back(torch::zeros({Mp * N}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(torch::zeros({Mp * N, 3}, opts)); // Dummy direction
+
+        // 记录索引，用于后续提取 Features/Opacity
+        list_indices_in_sel.push_back(torch::nonzero(mask_point_subset).squeeze(1).repeat({N}));
+    }
+
+    // -------------------------------------------------------------------------
+    // 分支 B: 线特征 (Lines) - 新逻辑 (1D 采样, 仅缩小长轴)
+    // -------------------------------------------------------------------------
+    if (mask_line_subset.any().item<bool>()) {
+        auto xyz_l = xyz_sel.index({mask_line_subset});       // [Ml, 3]
+        auto scale_l = scale_sel.index({mask_line_subset});   // [Ml, 3]
+        auto rots_l = rots.index({mask_line_subset});         // [Ml, 3, 3]
+        auto rot_raw_l = rot_sel.index({mask_line_subset});   // [Ml, 4]
+        auto dir_l = line_dir_sel.index({mask_line_subset});  // [Ml, 3]
+
+        int64_t Ml = xyz_l.size(0);
+        const int axis = 0; // 假设局部 X 轴是线方向 (Long axis)
+
+        // 1D 随机采样: 只在 X 轴 (长轴) 上采样
+        // 构造采样标准差: X轴用 scale_x, Y/Z轴设为 0
+        auto scale_repeated = scale_l.repeat({N, 1}); // [Ml*N, 3]
+        auto stds_1d = torch::zeros_like(scale_repeated);
+        stds_1d.index_put_({Slice(), axis}, scale_repeated.index({Slice(), axis})); // 只填充 X 列
+
+        auto means = torch::zeros({stds_1d.size(0), 3}, opts);
+        auto samples = at::normal(means, stds_1d); // 采样结果: [noise_x, 0, 0]
+
+        // 旋转并平移
+        auto rots_repeated = rots_l.repeat({N, 1, 1});
+        auto new_xyz_l = torch::bmm(rots_repeated, samples.unsqueeze(-1)).squeeze(-1) + xyz_l.repeat({N, 1});
+
+        // Scaling: 只缩小 X 轴 (长度变短)，Y/Z (粗细) 保持不变
+        // new_s_x = s_x / (0.8 * N)
+        // new_s_y = s_y
+        auto new_scale_act = scale_l.repeat({N, 1});
+        new_scale_act.index_put_({Slice(), axis}, new_scale_act.index({Slice(), axis}) / (0.8 * N));
+        auto new_scale_l = torch::log(new_scale_act);
+
+        // Rotation: 简单复制 (方向不变)
+        auto new_rot_l = rot_raw_l.repeat({N, 1});
+
+        // Line Dir: 复制
+        auto new_dir_l = dir_l.repeat({N, 1});
+        new_dir_l = new_dir_l / (new_dir_l.norm(2, 1, true) + 1e-6);
+
+        // 存入列表
+        list_xyz.push_back(new_xyz_l);
+        list_scale.push_back(new_scale_l);
+        list_rot.push_back(new_rot_l);
+        
+        list_is_line.push_back(torch::ones({Ml * N}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(new_dir_l);
+
+        list_indices_in_sel.push_back(torch::nonzero(mask_line_subset).squeeze(1).repeat({N}));
+    }
+
+    if (list_xyz.empty()) return;
+
+    // =========================================================================
+    // 4. 合并数据 (Concatenate)
+    // =========================================================================
+    auto new_xyz = torch::cat(list_xyz, 0);
+    auto new_scaling = torch::cat(list_scale, 0);
+    auto new_rotation = torch::cat(list_rot, 0);
+    auto new_is_line = torch::cat(list_is_line, 0);
+    auto new_line_dir_w = torch::cat(list_line_dir, 0);
+    
+    // 使用索引提取对应的 Features 和 Opacity (避免重复写逻辑)
+    auto combined_indices = torch::cat(list_indices_in_sel, 0); // [Total_New_N]
+    
+    // 从 selected_mask 的原始数据中提取，并复制 N 份
+    // 注意：features 等原始数据需要先用 selected_mask 筛选出 M 个，再用 combined_indices 提取
+    auto feat_dc_sel = this->features_dc_.index({selected_mask});
+    auto feat_rst_sel = this->features_rest_.index({selected_mask});
+    auto opac_sel = this->opacity_.index({selected_mask});
+    auto iter_sel = this->exist_since_iter_.index({selected_mask});
+
+    auto new_features_dc = feat_dc_sel.index({combined_indices});
+    auto new_features_rest = feat_rst_sel.index({combined_indices});
+    auto new_opacity = opac_sel.index({combined_indices});
+    auto new_exist_since_iter = iter_sel.index({combined_indices});
+
+    // ================= [DEBUG PROBE 2: Split 检查] =================
+    std::cerr << "[DEBUG FLOW] Inside densifyAndSplit. Prepared tensors:" << std::endl;
+    std::cerr << "  > new_rotation list size: " << list_rot.size() << std::endl;
+    if (!list_rot.empty()) {
+        std::cerr << "  > first tensor in rot list: " << list_rot[0].sizes() << std::endl;
+    }
+    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
+    // ============================================================
+
+    // =========================================================================
+    // 5. 调用 Postfix (加入优化器)
+    // =========================================================================
+    this->densificationPostfixWithLineAwareness(
+        new_xyz,
+        new_features_dc,
+        new_features_rest,
+        new_opacity,
+        new_scaling,
+        new_rotation,
+        new_exist_since_iter,
+        new_is_line,
+        new_line_dir_w
+    );
+
+    // =========================================================================
+    // 6. 删除旧点 (Prune)
+    // =========================================================================
+    auto prune_filter = torch::cat({
+        selected_mask, // 原始被选中的点被删除 (因为已经分裂成了新的)
+        torch::zeros({new_xyz.size(0)}, torch::TensorOptions().device(device_type_).dtype(torch::kBool))
+    });
+    this->prunePointsWithLineAwareness(prune_filter);
+}
+#endif
+
+#if 0
 void GaussianModelLine::densifyAndSplitWithLineAwareness(
     torch::Tensor& grads,
     float grad_threshold,
@@ -1491,6 +2186,15 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     auto new_is_line      = torch::cat(new_is_line_list, 0);
     auto new_line_dir_w   = torch::cat(new_line_dir_w_list, 0);
 
+    // ================= [DEBUG PROBE 2: Split 检查] =================
+    std::cerr << "[DEBUG FLOW] Inside densifyAndSplit. Prepared tensors:" << std::endl;
+    std::cerr << "  > new_rotation list size: " << new_rot_list.size() << std::endl;
+    if (!new_rot_list.empty()) {
+        std::cerr << "  > first tensor in rot list: " << new_rot_list[0].sizes() << std::endl;
+    }
+    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
+    // ============================================================
+
     // size checks (debug-friendly)
     TORCH_CHECK(new_xyz.size(0) == new_is_line.size(0), "new_xyz and new_is_line size mismatch");
     TORCH_CHECK(new_xyz.size(0) == new_line_dir_w.size(0), "new_xyz and new_line_dir_w size mismatch");
@@ -1519,6 +2223,219 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     this->prunePointsWithLineAwareness(prune_filter);
 }
 
+
+
+// 辅助函数：构建旋转矩阵 (直接复用你提供的逻辑或引用头文件)
+// 如果项目中已有 general_utils::build_rotation，则直接使用，无需重复定义
+// inline torch::Tensor build_rotation(torch::Tensor &r) { ... } 
+
+void GaussianModelLine::densifyAndSplitWithLineAwareness(
+    torch::Tensor& grads,
+    float grad_threshold,
+    float scene_extent,
+    int N)
+{
+    using namespace torch::indexing;
+
+    int n_init_points = this->getXYZ().size(0);
+    
+    // =========================================================================
+    // 1. 筛选 (Selection): 找出梯度大且 Scaling 大的点
+    // =========================================================================
+    auto padded_grad = torch::zeros({n_init_points}, torch::TensorOptions().device(device_type_));
+    padded_grad.slice(/*dim=*/0L, /*start=*/0, /*end=*/grads.size(0)).copy_(grads.squeeze());
+    
+    auto selected_mask = torch::where(padded_grad >= grad_threshold, true, false);
+    selected_mask = torch::logical_and(
+        selected_mask,
+        std::get<0>(torch::max(this->getScalingActivation(), /*dim=*/1)) > percentDense() * scene_extent
+    );
+
+    int64_t M = selected_mask.sum().item<int64_t>();
+    if (M == 0) return;
+
+    // =========================================================================
+    // 2. 数据准备 (Data Preparation)
+    // =========================================================================
+    // 提取被选中的数据
+    auto xyz_sel = this->getXYZ().index({selected_mask});
+    auto scale_sel = this->getScalingActivation().index({selected_mask});
+    auto rot_sel = this->rotation_.index({selected_mask});
+    
+    // [Safety] 强制确保 Rotation 维度正确 [M, 4]
+    if (rot_sel.dim() != 2 || rot_sel.size(1) != 4) {
+        rot_sel = rot_sel.reshape({-1, 4}).contiguous();
+    }
+    
+    // 提取线特征属性
+    auto is_line_sel = this->is_line_.index({selected_mask});
+    auto line_dir_sel = this->line_dir_w_.index({selected_mask});
+
+    // 计算旋转矩阵 R [M, 3, 3]
+    auto rots = general_utils::build_rotation(rot_sel);
+
+    // =========================================================================
+    // 3. 分类处理 (Branching): Point vs Line
+    // =========================================================================
+    // 通过 Scaling 形状辅助判断 (Line 通常长宽比很大)
+    auto sorted_scale = std::get<0>(scale_sel.sort(1, true)); // 降序
+    auto geom_is_line = sorted_scale.index({Slice(), 0}) / (sorted_scale.index({Slice(), 1}) + 1e-6) > 4.0f;
+    
+    // 最终分类掩码 (相对于 selected_mask 的子集)
+    auto mask_line_subset = torch::logical_and(is_line_sel, geom_is_line);
+    auto mask_point_subset = ~mask_line_subset;
+
+    // 容器
+    std::vector<torch::Tensor> list_xyz, list_scale, list_rot;
+    std::vector<torch::Tensor> list_is_line, list_line_dir;
+    // 辅助索引 (用于从原始 sel 数据中提取 Feature 等)
+    std::vector<torch::Tensor> list_indices_in_sel; 
+
+    auto opts = xyz_sel.options();
+
+    // -------------------------------------------------------------------------
+    // 分支 A: 普通点 (Points) - 原始逻辑 (3D 采样, 全局缩小)
+    // -------------------------------------------------------------------------
+    if (mask_point_subset.any().item<bool>()) {
+        auto xyz_p = xyz_sel.index({mask_point_subset});       // [Mp, 3]
+        auto scale_p = scale_sel.index({mask_point_subset});   // [Mp, 3]
+        auto rots_p = rots.index({mask_point_subset});         // [Mp, 3, 3]
+        auto rot_raw_p = rot_sel.index({mask_point_subset});   // [Mp, 4]
+
+        int64_t Mp = xyz_p.size(0);
+
+        // 3D 随机采样: 均值为0，标准差为 scale_p
+        // [Mp, N, 3] -> [Mp*N, 3]
+        auto stds = scale_p.repeat({N, 1}); 
+        auto means = torch::zeros({stds.size(0), 3}, opts);
+        auto samples = at::normal(means, stds); 
+
+        // 旋转并平移: P_new = P_old + R * sample
+        auto rots_repeated = rots_p.repeat({N, 1, 1}); // [Mp*N, 3, 3]
+        auto new_xyz_p = torch::bmm(rots_repeated, samples.unsqueeze(-1)).squeeze(-1) + xyz_p.repeat({N, 1});
+        
+        // Scaling: 所有轴都缩小
+        auto new_scale_p = torch::log(scale_p.repeat({N, 1}) / (0.8 * N));
+        
+        // Rotation: 简单复制
+        auto new_rot_p = rot_raw_p.repeat({N, 1}); // [Mp*N, 4]
+
+        // 存入列表
+        list_xyz.push_back(new_xyz_p);
+        list_scale.push_back(new_scale_p);
+        list_rot.push_back(new_rot_p);
+        
+        // 结构属性
+        list_is_line.push_back(torch::zeros({Mp * N}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(torch::zeros({Mp * N, 3}, opts)); // Dummy direction
+
+        // 记录索引，用于后续提取 Features/Opacity
+        list_indices_in_sel.push_back(torch::nonzero(mask_point_subset).squeeze(1).repeat({N}));
+    }
+
+    // -------------------------------------------------------------------------
+    // 分支 B: 线特征 (Lines) - 新逻辑 (1D 采样, 仅缩小长轴)
+    // -------------------------------------------------------------------------
+    if (mask_line_subset.any().item<bool>()) {
+        auto xyz_l = xyz_sel.index({mask_line_subset});       // [Ml, 3]
+        auto scale_l = scale_sel.index({mask_line_subset});   // [Ml, 3]
+        auto rots_l = rots.index({mask_line_subset});         // [Ml, 3, 3]
+        auto rot_raw_l = rot_sel.index({mask_line_subset});   // [Ml, 4]
+        auto dir_l = line_dir_sel.index({mask_line_subset});  // [Ml, 3]
+
+        int64_t Ml = xyz_l.size(0);
+        const int axis = 0; // 假设局部 X 轴是线方向 (Long axis)
+
+        // 1D 随机采样: 只在 X 轴 (长轴) 上采样
+        // 构造采样标准差: X轴用 scale_x, Y/Z轴设为 0
+        auto scale_repeated = scale_l.repeat({N, 1}); // [Ml*N, 3]
+        auto stds_1d = torch::zeros_like(scale_repeated);
+        stds_1d.index_put_({Slice(), axis}, scale_repeated.index({Slice(), axis})); // 只填充 X 列
+
+        auto means = torch::zeros({stds_1d.size(0), 3}, opts);
+        auto samples = at::normal(means, stds_1d); // 采样结果: [noise_x, 0, 0]
+
+        // 旋转并平移
+        auto rots_repeated = rots_l.repeat({N, 1, 1});
+        auto new_xyz_l = torch::bmm(rots_repeated, samples.unsqueeze(-1)).squeeze(-1) + xyz_l.repeat({N, 1});
+
+        // Scaling: 只缩小 X 轴 (长度变短)，Y/Z (粗细) 保持不变
+        // new_s_x = s_x / (0.8 * N)
+        // new_s_y = s_y
+        auto new_scale_act = scale_l.repeat({N, 1});
+        new_scale_act.index_put_({Slice(), axis}, new_scale_act.index({Slice(), axis}) / (0.8 * N));
+        auto new_scale_l = torch::log(new_scale_act);
+
+        // Rotation: 简单复制 (方向不变)
+        auto new_rot_l = rot_raw_l.repeat({N, 1});
+
+        // Line Dir: 复制
+        auto new_dir_l = dir_l.repeat({N, 1});
+        new_dir_l = new_dir_l / (new_dir_l.norm(2, 1, true) + 1e-6);
+
+        // 存入列表
+        list_xyz.push_back(new_xyz_l);
+        list_scale.push_back(new_scale_l);
+        list_rot.push_back(new_rot_l);
+        
+        list_is_line.push_back(torch::ones({Ml * N}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(new_dir_l);
+
+        list_indices_in_sel.push_back(torch::nonzero(mask_line_subset).squeeze(1).repeat({N}));
+    }
+
+    if (list_xyz.empty()) return;
+
+    // =========================================================================
+    // 4. 合并数据 (Concatenate)
+    // =========================================================================
+    auto new_xyz = torch::cat(list_xyz, 0);
+    auto new_scaling = torch::cat(list_scale, 0);
+    auto new_rotation = torch::cat(list_rot, 0);
+    auto new_is_line = torch::cat(list_is_line, 0);
+    auto new_line_dir_w = torch::cat(list_line_dir, 0);
+    
+    // 使用索引提取对应的 Features 和 Opacity (避免重复写逻辑)
+    auto combined_indices = torch::cat(list_indices_in_sel, 0); // [Total_New_N]
+    
+    // 从 selected_mask 的原始数据中提取，并复制 N 份
+    // 注意：features 等原始数据需要先用 selected_mask 筛选出 M 个，再用 combined_indices 提取
+    auto feat_dc_sel = this->features_dc_.index({selected_mask});
+    auto feat_rst_sel = this->features_rest_.index({selected_mask});
+    auto opac_sel = this->opacity_.index({selected_mask});
+    auto iter_sel = this->exist_since_iter_.index({selected_mask});
+
+    auto new_features_dc = feat_dc_sel.index({combined_indices});
+    auto new_features_rest = feat_rst_sel.index({combined_indices});
+    auto new_opacity = opac_sel.index({combined_indices});
+    auto new_exist_since_iter = iter_sel.index({combined_indices});
+
+    // =========================================================================
+    // 5. 调用 Postfix (加入优化器)
+    // =========================================================================
+    this->densificationPostfixWithLineAwareness(
+        new_xyz,
+        new_features_dc,
+        new_features_rest,
+        new_opacity,
+        new_scaling,
+        new_rotation,
+        new_exist_since_iter,
+        new_is_line,
+        new_line_dir_w
+    );
+
+    // =========================================================================
+    // 6. 删除旧点 (Prune)
+    // =========================================================================
+    auto prune_filter = torch::cat({
+        selected_mask, // 原始被选中的点被删除 (因为已经分裂成了新的)
+        torch::zeros({new_xyz.size(0)}, torch::TensorOptions().device(device_type_).dtype(torch::kBool))
+    });
+    this->prunePointsWithLineAwareness(prune_filter);
+}
+
+#endif
 
 void GaussianModelLine::densifyAndSplit(
     torch::Tensor& grads,
@@ -1567,6 +2484,561 @@ void GaussianModelLine::densifyAndSplit(
     this->prunePoints(prune_filter);
 }
 
+void GaussianModelLine::densifyAndSplitWithLineAwareness(
+    torch::Tensor& grads,
+    float grad_threshold,
+    float scene_extent,
+    int N)
+{
+    using namespace torch::indexing;
+
+    const int64_t n_init = this->getXYZ().size(0);
+    if (n_init == 0) return;
+
+    // =========================================================================
+    // [DEBUG 1] 检查函数入口时的 Rotation 状态
+    // =========================================================================
+    std::cerr << "\n[DEBUG SPLIT] Step 1: Entry" << std::endl;
+    std::cerr << "  > Global Rotation Shape: " << this->rotation_.sizes() << std::endl;
+    std::cerr << "  > Global Scaling Shape:  " << this->getScalingActivation().sizes() << std::endl;
+
+    // 如果这里 Rotation 的第1维是 3，说明在上一帧（Clone步骤）就被 Scaling 覆盖了
+    if (this->rotation_.dim() == 2 && this->rotation_.size(1) == 3) {
+        std::cerr << "\033[1;31m[FATAL] Rotation is 3D at entry! It was corrupted in previous step.\033[0m" << std::endl;
+    }
+
+    // =========================================================================
+    // 1. Selection
+    // =========================================================================
+    auto padded_grad = torch::zeros({n_init}, torch::TensorOptions().device(device_type_).dtype(grads.dtype()));
+    padded_grad.slice(0, 0, grads.size(0)).copy_(grads.squeeze());
+
+    auto selected_mask = padded_grad >= grad_threshold;
+    selected_mask = torch::logical_and(
+        selected_mask,
+        std::get<0>(torch::max(this->getScalingActivation(), 1)) > percentDense() * scene_extent
+    );
+
+    const int64_t M = selected_mask.sum().item<int64_t>();
+    std::cerr << "[DEBUG SPLIT] Step 2: Selection. Selected M = " << M << std::endl;
+    if (M == 0) return;
+
+    // =========================================================================
+    // 2. Data Preparation
+    // =========================================================================
+    auto xyz_sel = this->getXYZ().index({selected_mask});
+    auto scale_sel = this->getScalingActivation().index({selected_mask});
+    
+    // [Safety] 强制确保 Rotation 维度正确 [M, 4]
+    auto rot_sel = this->rotation_.index({selected_mask});
+
+    // =========================================================================
+    // [DEBUG 2] 检查提取出来的 rot_sel 形状
+    // =========================================================================
+    std::cerr << "[DEBUG SPLIT] Step 3: Indexing" << std::endl;
+    std::cerr << "  > rot_sel Shape: " << rot_sel.sizes() << " (Numel: " << rot_sel.numel() << ")" << std::endl;
+
+    if (rot_sel.dim() != 2 || rot_sel.size(1) != 4) {
+        std::cerr << "[Warning] Fixing rot_sel shape in Split: " << rot_sel.sizes() << std::endl;
+        rot_sel = rot_sel.reshape({-1, 4}).contiguous();
+    }
+
+    auto is_line_sel = this->is_line_.index({selected_mask});
+    auto line_dir_sel = this->line_dir_w_.index({selected_mask});
+
+    // 计算旋转矩阵 R [M, 3, 3]
+    //auto rots = general_utils::build_rotation(rot_sel);
+    auto rot_sel_clone = rot_sel.clone();
+    auto rots = general_utils::build_rotation(rot_sel_clone);
+
+    // =========================================================================
+    // 3. Classification (Point vs Line)
+    // =========================================================================
+    auto sorted_scale = std::get<0>(scale_sel.sort(1, true));
+    auto geom_is_line = sorted_scale.index({Slice(), 0}) / (sorted_scale.index({Slice(), 1}) + 1e-6) > 4.0f;
+    
+    auto mask_line_subset = torch::logical_and(is_line_sel, geom_is_line);
+    auto mask_point_subset = ~mask_line_subset;
+
+    // Containers
+    std::vector<torch::Tensor> list_xyz, list_scale, list_rot;
+    std::vector<torch::Tensor> list_is_line, list_line_dir;
+    std::vector<torch::Tensor> list_indices_in_sel; 
+
+    auto opts = xyz_sel.options();
+
+    // -------------------------------------------------------------------------
+    // Branch A: Point Split (3D Sampling)
+    // -------------------------------------------------------------------------
+    if (mask_point_subset.any().item<bool>()) {
+        auto xyz_p = xyz_sel.index({mask_point_subset});
+        auto scale_p = scale_sel.index({mask_point_subset});
+        auto rots_p = rots.index({mask_point_subset});
+        auto rot_p = rot_sel.index({mask_point_subset}); // [Mp, 4]
+
+        // [DEBUG]
+        std::cerr << "  > [Point Branch] rot_p before reshape: " << rot_p.sizes() << std::endl;
+
+        // 再次确保维度安全
+        if (rot_p.dim() == 1) rot_p = rot_p.reshape({-1, 4});
+
+        int64_t Mp = xyz_p.size(0);
+
+        // 3D 随机采样 [Mp*N, 3]
+        auto stds = scale_p.repeat({N, 1}); 
+        auto means = torch::zeros({stds.size(0), 3}, opts);
+        auto samples = at::normal(means, stds); 
+
+        // P_new = P_old + R * sample
+        auto new_xyz_p = torch::bmm(rots_p.repeat({N, 1, 1}), samples.unsqueeze(-1)).squeeze(-1) + xyz_p.repeat({N, 1});
+        auto new_scale_p = torch::log(scale_p.repeat({N, 1}) / (0.8 * N));
+        
+        // [关键修复]: Rotation 必须重复 N 次，和 XYZ 的数量对齐！
+        // 之前的 Bug 是因为这里漏了 .repeat({N, 1})
+        auto new_rot_p = rot_p.repeat({N, 1}); 
+
+        list_xyz.push_back(new_xyz_p);
+        list_scale.push_back(new_scale_p);
+        list_rot.push_back(new_rot_p);
+        
+        list_is_line.push_back(torch::zeros({Mp * N}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(torch::zeros({Mp * N, 3}, opts));
+        list_indices_in_sel.push_back(torch::nonzero(mask_point_subset).squeeze(1).repeat({N}));
+    }
+
+    // -------------------------------------------------------------------------
+    // Branch B: Line Split (1D Sampling along Axis)
+    // -------------------------------------------------------------------------
+    if (mask_line_subset.any().item<bool>()) {
+        auto xyz_l = xyz_sel.index({mask_line_subset});
+        auto scale_l = scale_sel.index({mask_line_subset});
+        auto rots_l = rots.index({mask_line_subset});
+        auto rot_l = rot_sel.index({mask_line_subset}); // [Ml, 4]
+        auto dir_l = line_dir_sel.index({mask_line_subset});
+
+        if (rot_l.dim() == 1) rot_l = rot_l.reshape({-1, 4});
+
+        int64_t Ml = xyz_l.size(0);
+        const int axis = 0; // 局部 X 轴是线方向
+
+        // 1D 随机采样
+        auto scale_repeated = scale_l.repeat({N, 1}); 
+        auto stds_1d = torch::zeros_like(scale_repeated);
+        stds_1d.index_put_({Slice(), axis}, scale_repeated.index({Slice(), axis})); 
+
+        auto means = torch::zeros({stds_1d.size(0), 3}, opts);
+        auto samples = at::normal(means, stds_1d); 
+
+        auto new_xyz_l = torch::bmm(rots_l.repeat({N, 1, 1}), samples.unsqueeze(-1)).squeeze(-1) + xyz_l.repeat({N, 1});
+        
+        // Scale 仅缩小长轴
+        auto new_scale_act = scale_l.repeat({N, 1});
+        new_scale_act.index_put_({Slice(), axis}, new_scale_act.index({Slice(), axis}) / (0.8 * N));
+        auto new_scale_l = torch::log(new_scale_act);
+
+        // [关键修复]: Rotation 必须重复 N 次！
+        auto new_rot_l = rot_l.repeat({N, 1});
+
+        auto new_dir_l = dir_l.repeat({N, 1});
+        new_dir_l = new_dir_l / (new_dir_l.norm(2, 1, true) + 1e-6);
+
+        list_xyz.push_back(new_xyz_l);
+        list_scale.push_back(new_scale_l);
+        list_rot.push_back(new_rot_l);
+        
+        list_is_line.push_back(torch::ones({Ml * N}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(new_dir_l);
+        list_indices_in_sel.push_back(torch::nonzero(mask_line_subset).squeeze(1).repeat({N}));
+    }
+
+    if (list_xyz.empty()) return;
+
+    // =========================================================================
+    // 4. Concatenation
+    // =========================================================================
+    auto new_xyz = torch::cat(list_xyz, 0);
+    auto new_scaling = torch::cat(list_scale, 0);
+    auto new_rotation = torch::cat(list_rot, 0); // 应该是 [TotalNew, 4]
+
+    // =========================================================================
+    // [DEBUG 3] 检查合并后的数据维度
+    // =========================================================================
+    std::cerr << "[DEBUG SPLIT] Step 4: Concatenation" << std::endl;
+    std::cerr << "  > new_xyz Shape:      " << new_xyz.sizes() << std::endl;
+    std::cerr << "  > new_scaling Shape:  " << new_scaling.sizes() << std::endl;
+    std::cerr << "  > new_rotation Shape: " << new_rotation.sizes() << std::endl;
+    
+    // ================= [DEBUG PROBE: 致命错误拦截] =================
+    // 检查 XYZ 行数和 Rotation 行数是否一致
+    if (new_xyz.size(0) != new_rotation.size(0)) {
+        std::cerr << "\033[1;31m[FATAL ERROR in Split] Mismatch detected!\033[0m" << std::endl;
+        std::cerr << "  > XYZ Rows: " << new_xyz.size(0) << std::endl;
+        std::cerr << "  > Rot Rows: " << new_rotation.size(0) << std::endl;
+        std::cerr << "  > N (Split Factor): " << N << std::endl;
+        // 强制返回，防止错误的维度导致 Postfix 崩溃
+        return; 
+    }
+
+    // 检查 Rotation 维度是否正确
+    if (new_rotation.dim() != 2 || new_rotation.size(1) != 4) {
+        std::cerr << "[Auto-Fix] Split generated bad rotation: " << new_rotation.sizes() << ". Fixing..." << std::endl;
+        new_rotation = new_rotation.reshape({-1, 4}).contiguous();
+    }
+    
+    // 你的 Debug Log
+    std::cerr << "[DEBUG FLOW] Inside densifyAndSplit. Prepared tensors:" << std::endl;
+    std::cerr << "  > new_rotation list size: " << list_rot.size() << std::endl;
+    if (!list_rot.empty()) {
+        std::cerr << "  > first tensor in rot list: " << list_rot[0].sizes() << std::endl;
+    }
+    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
+    // ============================================================
+
+    auto combined_indices = torch::cat(list_indices_in_sel, 0); 
+    
+    auto new_features_dc = this->features_dc_.index({selected_mask}).index({combined_indices});
+    auto new_features_rest = this->features_rest_.index({selected_mask}).index({combined_indices});
+    auto new_opacity = this->opacity_.index({selected_mask}).index({combined_indices});
+    auto new_exist_iter = this->exist_since_iter_.index({selected_mask}).index({combined_indices});
+    auto new_is_line = torch::cat(list_is_line, 0);
+    auto new_line_dir_w = torch::cat(list_line_dir, 0);
+
+    // =========================================================================
+    // 5. Postfix
+    // =========================================================================
+    this->densificationPostfixWithLineAwareness(
+        new_xyz, new_features_dc, new_features_rest, new_opacity,
+        new_scaling, new_rotation, new_exist_iter,
+        new_is_line, new_line_dir_w
+    );
+
+    // =========================================================================
+    // 6. Prune
+    // =========================================================================
+    auto prune_filter = torch::cat({
+        selected_mask, 
+        torch::zeros({new_xyz.size(0)}, torch::TensorOptions().device(device_type_).dtype(torch::kBool))
+    });
+    this->prunePointsWithLineAwareness(prune_filter);
+}
+
+void GaussianModelLine::densifyAndCloneWithLineAwareness(
+    torch::Tensor& grads,
+    float grad_threshold,
+    float scene_extent)
+{
+    using namespace torch::indexing;
+
+    // =========================================================================
+    // 1. Selection
+    // =========================================================================
+    auto grad_norm = torch::frobenius_norm(grads, /*dim=*/-1);
+    auto selected_mask = grad_norm >= grad_threshold;
+    selected_mask = torch::logical_and(
+        selected_mask,
+        std::get<0>(torch::max(this->getScalingActivation(), 1)) <= percentDense() * scene_extent
+    );
+
+    const int64_t M = selected_mask.sum().item<int64_t>();
+    if (M == 0) return;
+
+    // =========================================================================
+    // 2. Data Preparation
+    // =========================================================================
+    auto xyz_sel = this->getXYZ().index({selected_mask});
+    auto scale_sel = this->getScalingActivation().index({selected_mask});
+    
+    // [Safety] 强制确保 Rotation 维度正确 [M, 4]
+    auto rot_sel = this->rotation_.index({selected_mask});
+    if (rot_sel.dim() != 2 || rot_sel.size(1) != 4) {
+        rot_sel = rot_sel.reshape({-1, 4}).contiguous();
+    }
+
+    auto is_line_sel = this->is_line_.index({selected_mask});
+    auto line_dir_sel = this->line_dir_w_.index({selected_mask});
+    auto rot_sel_clone = rot_sel.clone();
+    auto rots = general_utils::build_rotation(rot_sel_clone);
+
+    // =========================================================================
+    // 3. Classification
+    // =========================================================================
+    auto sorted_scale = std::get<0>(scale_sel.sort(1, true));
+    auto geom_is_line = sorted_scale.index({Slice(), 0}) / (sorted_scale.index({Slice(), 1}) + 1e-6) > 4.0f;
+    auto mask_line_subset = torch::logical_and(is_line_sel, geom_is_line);
+    auto mask_point_subset = ~mask_line_subset;
+
+    // Containers
+    std::vector<torch::Tensor> list_xyz, list_scale, list_rot;
+    std::vector<torch::Tensor> list_is_line, list_line_dir;
+    std::vector<torch::Tensor> list_indices_in_sel; 
+    auto opts = xyz_sel.options();
+
+    // -------------------------------------------------------------------------
+    // Branch A: Point Clone
+    // -------------------------------------------------------------------------
+    if (mask_point_subset.any().item<bool>()) {
+        auto xyz_p = xyz_sel.index({mask_point_subset});
+        auto scale_p = scale_sel.index({mask_point_subset});
+        auto rot_p = rot_sel.index({mask_point_subset});
+        if (rot_p.dim() == 1) rot_p = rot_p.reshape({-1, 4});
+
+        list_xyz.push_back(xyz_p); 
+        list_scale.push_back(torch::log(scale_p)); 
+        list_rot.push_back(rot_p); // Clone 不需要 repeat，直接由 copy
+
+        int64_t Mp = xyz_p.size(0);
+        list_is_line.push_back(torch::zeros({Mp}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(torch::zeros({Mp, 3}, opts));
+        list_indices_in_sel.push_back(torch::nonzero(mask_point_subset).squeeze(1));
+    }
+
+    // -------------------------------------------------------------------------
+    // Branch B: Line Clone
+    // -------------------------------------------------------------------------
+    if (mask_line_subset.any().item<bool>()) {
+        auto xyz_l = xyz_sel.index({mask_line_subset});
+        auto scale_l = scale_sel.index({mask_line_subset});
+        auto rot_l = rot_sel.index({mask_line_subset});
+        if (rot_l.dim() == 1) rot_l = rot_l.reshape({-1, 4});
+        
+        auto rots_l = rots.index({mask_line_subset}); 
+        auto dir_l = line_dir_sel.index({mask_line_subset});
+
+        int64_t Ml = xyz_l.size(0);
+        const int axis = 0; 
+        auto sigma_par = scale_l.index({Slice(), axis}).unsqueeze(1) * 0.1f; 
+        auto eps = at::normal(torch::zeros({Ml, 1}, opts), sigma_par);
+        auto local_offset = torch::zeros({Ml, 3}, opts);
+        local_offset.index_put_({Slice(), axis}, eps.squeeze(1));
+
+        auto new_xyz_l = torch::bmm(rots_l, local_offset.unsqueeze(-1)).squeeze(-1) + xyz_l;
+
+        list_xyz.push_back(new_xyz_l);
+        list_scale.push_back(torch::log(scale_l)); 
+        list_rot.push_back(rot_l); // Clone 保持 Rotation 不变
+
+        list_is_line.push_back(torch::ones({Ml}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(dir_l);
+        list_indices_in_sel.push_back(torch::nonzero(mask_line_subset).squeeze(1));
+    }
+
+    if (list_xyz.empty()) return;
+
+    // =========================================================================
+    // 4. Concatenation
+    // =========================================================================
+    auto new_xyz = torch::cat(list_xyz, 0);
+    auto new_scaling = torch::cat(list_scale, 0);
+    auto new_rotation = torch::cat(list_rot, 0);
+    
+    // [CRITICAL DEBUG]
+    if (new_xyz.size(0) != new_rotation.size(0)) {
+        std::cerr << "\033[1;31m[FATAL ERROR in Clone] Mismatch detected!\033[0m" << std::endl;
+        std::cerr << "  > XYZ Rows: " << new_xyz.size(0) << std::endl;
+        std::cerr << "  > Rot Rows: " << new_rotation.size(0) << std::endl;
+        return; 
+    }
+
+    if (new_rotation.dim() != 2 || new_rotation.size(1) != 4) {
+        new_rotation = new_rotation.reshape({-1, 4}).contiguous();
+    }
+
+    auto combined_indices = torch::cat(list_indices_in_sel, 0);
+    auto new_features_dc = this->features_dc_.index({selected_mask}).index({combined_indices});
+    auto new_features_rest = this->features_rest_.index({selected_mask}).index({combined_indices});
+    auto new_opacity = this->opacity_.index({selected_mask}).index({combined_indices});
+    auto new_exist_iter = this->exist_since_iter_.index({selected_mask}).index({combined_indices});
+    auto new_is_line = torch::cat(list_is_line, 0);
+    auto new_line_dir_w = torch::cat(list_line_dir, 0);
+
+    // ================= [DEBUG PROBE 3] =================
+    std::cerr << "[DEBUG FLOW] Inside densifyAndClone. Prepared tensors:" << std::endl;
+    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
+    // ============================================================
+
+    // =========================================================================
+    // 5. Postfix
+    // =========================================================================
+    this->densificationPostfixWithLineAwareness(
+        new_xyz, new_features_dc, new_features_rest, new_opacity,
+        new_scaling, new_rotation, new_exist_iter,
+        new_is_line, new_line_dir_w
+    );
+}
+
+#if 0
+
+void GaussianModelLine::densifyAndCloneWithLineAwareness(
+    torch::Tensor& grads,
+    float grad_threshold,
+    float scene_extent)
+{
+    using namespace torch::indexing;
+
+    // =========================================================================
+    // 1. 筛选 (Selection): 找出梯度大且 Scaling 小的点 (需要加密)
+    // =========================================================================
+    auto grad_norm = torch::frobenius_norm(grads, /*dim=*/-1);
+    auto selected_mask = grad_norm >= grad_threshold;
+
+    // 与 Split 不同，Clone 针对的是小尺度的点
+    selected_mask = torch::logical_and(
+        selected_mask,
+        std::get<0>(torch::max(this->getScalingActivation(), 1)) <= percentDense() * scene_extent
+    );
+
+    const int64_t M = selected_mask.sum().item<int64_t>();
+    if (M == 0) return;
+
+    // =========================================================================
+    // 2. 数据准备 (Data Preparation)
+    // =========================================================================
+    auto xyz_sel = this->getXYZ().index({selected_mask});
+    auto scale_sel = this->getScalingActivation().index({selected_mask});
+    
+    // [Safety] 强制确保 Rotation 维度正确 [M, 4]
+    auto rot_sel = this->rotation_.index({selected_mask});
+    if (rot_sel.dim() != 2 || rot_sel.size(1) != 4) {
+        rot_sel = rot_sel.reshape({-1, 4}).contiguous();
+    }
+
+    auto is_line_sel = this->is_line_.index({selected_mask});
+    auto line_dir_sel = this->line_dir_w_.index({selected_mask});
+
+    // 计算旋转矩阵 R [M, 3, 3]
+    auto rots = general_utils::build_rotation(rot_sel);
+
+    // =========================================================================
+    // 3. 分类处理 (Branching): Point vs Line
+    // =========================================================================
+    // 同样使用长宽比辅助判断
+    auto sorted_scale = std::get<0>(scale_sel.sort(1, true));
+    auto geom_is_line = sorted_scale.index({Slice(), 0}) / (sorted_scale.index({Slice(), 1}) + 1e-6) > 4.0f;
+
+    auto mask_line_subset = torch::logical_and(is_line_sel, geom_is_line);
+    auto mask_point_subset = ~mask_line_subset;
+
+    // 容器
+    std::vector<torch::Tensor> list_xyz, list_scale, list_rot;
+    std::vector<torch::Tensor> list_is_line, list_line_dir;
+    // 辅助索引 (用于提取 Features/Opacity)
+    std::vector<torch::Tensor> list_indices_in_sel; 
+
+    auto opts = xyz_sel.options();
+
+    // -------------------------------------------------------------------------
+    // 分支 A: 普通点 Clone - 原地复制
+    // -------------------------------------------------------------------------
+    if (mask_point_subset.any().item<bool>()) {
+        auto xyz_p = xyz_sel.index({mask_point_subset});
+        auto scale_p = scale_sel.index({mask_point_subset});
+        auto rot_p = rot_sel.index({mask_point_subset});
+
+        // 简单直接复制，不改变位置（或者加极小的噪声防止数值重叠）
+        // Scale 和 Rotation 保持不变
+        list_xyz.push_back(xyz_p); 
+        list_scale.push_back(torch::log(scale_p)); // 注意：存的是 log scale
+        list_rot.push_back(rot_p);
+
+        // 结构属性
+        int64_t Mp = xyz_p.size(0);
+        list_is_line.push_back(torch::zeros({Mp}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(torch::zeros({Mp, 3}, opts));
+
+        list_indices_in_sel.push_back(torch::nonzero(mask_point_subset).squeeze(1));
+    }
+
+    // -------------------------------------------------------------------------
+    // 分支 B: 线特征 Clone - 沿线微扰
+    // -------------------------------------------------------------------------
+    if (mask_line_subset.any().item<bool>()) {
+        auto xyz_l = xyz_sel.index({mask_line_subset});
+        auto scale_l = scale_sel.index({mask_line_subset});
+        auto rot_l = rot_sel.index({mask_line_subset});
+        auto rots_l = rots.index({mask_line_subset}); // [Ml, 3, 3]
+        auto dir_l = line_dir_sel.index({mask_line_subset});
+
+        int64_t Ml = xyz_l.size(0);
+        const int axis = 0; // 局部 X 轴是线方向
+
+        // [策略] Clone 时，我们希望增加线的密度。
+        // 可以让新点沿着线的方向稍微偏移一点点（比如 10% 的长度），填补空隙。
+        // 偏移量：在 [-0.1*len, 0.1*len] 之间随机
+        auto sigma_par = scale_l.index({Slice(), axis}).unsqueeze(1) * 0.1f; 
+        auto eps = at::normal(torch::zeros({Ml, 1}, opts), sigma_par);
+        
+        // 构造局部偏移 [noise_x, 0, 0]
+        auto local_offset = torch::zeros({Ml, 3}, opts);
+        local_offset.index_put_({Slice(), axis}, eps.squeeze(1));
+
+        // 变换到世界坐标: P_new = P_old + R * local_offset
+        auto new_xyz_l = torch::bmm(rots_l, local_offset.unsqueeze(-1)).squeeze(-1) + xyz_l;
+
+        list_xyz.push_back(new_xyz_l);
+        list_scale.push_back(torch::log(scale_l)); // 保持 Scale 不变
+        list_rot.push_back(rot_l);                 // 保持 Rotation 不变 (方向一致)
+
+        list_is_line.push_back(torch::ones({Ml}, opts.dtype(torch::kBool)));
+        list_line_dir.push_back(dir_l);
+
+        list_indices_in_sel.push_back(torch::nonzero(mask_line_subset).squeeze(1));
+    }
+
+    if (list_xyz.empty()) return;
+
+    // =========================================================================
+    // 4. 合并数据 (Concatenate)
+    // =========================================================================
+    auto new_xyz = torch::cat(list_xyz, 0);
+    auto new_scaling = torch::cat(list_scale, 0);
+    auto new_rotation = torch::cat(list_rot, 0);
+    auto new_is_line = torch::cat(list_is_line, 0);
+    auto new_line_dir_w = torch::cat(list_line_dir, 0);
+
+    // 再次强制维度检查 (兜底)
+    if (new_rotation.dim() != 2 || new_rotation.size(1) != 4) {
+        new_rotation = new_rotation.reshape({-1, 4}).contiguous();
+    }
+
+    // 提取属性 (Features, Opacity)
+    auto combined_indices = torch::cat(list_indices_in_sel, 0);
+    
+    auto feat_dc_sel = this->features_dc_.index({selected_mask});
+    auto feat_rst_sel = this->features_rest_.index({selected_mask});
+    auto opac_sel = this->opacity_.index({selected_mask});
+    auto iter_sel = this->exist_since_iter_.index({selected_mask});
+
+    auto new_features_dc = feat_dc_sel.index({combined_indices});
+    auto new_features_rest = feat_rst_sel.index({combined_indices});
+    auto new_opacity = opac_sel.index({combined_indices});
+    auto new_exist_iter = iter_sel.index({combined_indices});
+
+    // ================= [DEBUG PROBE 3: Clone 检查] =================
+    std::cerr << "[DEBUG FLOW] Inside densifyAndClone. Prepared tensors:" << std::endl;
+    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
+    // ============================================================
+
+    // =========================================================================
+    // 5. Postfix (加入新点)
+    // =========================================================================
+    this->densificationPostfixWithLineAwareness(
+        new_xyz,
+        new_features_dc,
+        new_features_rest,
+        new_opacity,
+        new_scaling,
+        new_rotation,
+        new_exist_iter,
+        new_is_line,
+        new_line_dir_w
+    );
+    
+    // 注意：Clone 操作**不删除**旧点，所以没有 prunePoints 步骤。
+    // 我们是在增加密度，不是拆分。
+    
+    
+}
+
 
 void GaussianModelLine::densifyAndCloneWithLineAwareness(
     torch::Tensor& grads,
@@ -1595,7 +3067,13 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     // =========================================================
     auto xyz_sel       = this->xyz_.index({selected_mask});                     // (M,3)
     auto scale_act_sel = this->getScalingActivation().index({selected_mask});   // (M,3)
-    auto rot_sel       = this->rotation_.index({selected_mask});                // (M,*)
+    
+    // [CRITICAL FIX] 强制确保 Rotation 是 [M, 4]
+    auto rot_sel = this->rotation_.index({selected_mask});                
+    if (rot_sel.dim() != 2 || rot_sel.size(1) != 4) {
+        std::cerr << "[Warning] Fixing rot_sel shape in Clone Input: " << rot_sel.sizes() << std::endl;
+        rot_sel = rot_sel.reshape({-1, 4}).contiguous();
+    }
 
     // structure tensors (selected subset)
     auto is_line_sel    = this->is_line_.index({selected_mask});                // (M)
@@ -1611,8 +3089,7 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     const float line_ratio_thresh = 4.0f;
     auto geom_is_line = sigma0 / (sigma1 + 1e-6) > line_ratio_thresh;
 
-    // Final line mask: trust stored label AND geometry (recommended)
-    // If you prefer pure geometry: auto is_line = geom_is_line;
+    // Final line mask
     auto is_line  = torch::logical_and(is_line_sel, geom_is_line);
     auto is_point = ~is_line;
 
@@ -1643,7 +3120,12 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
 
         xyz_list.push_back(xyz_p);
         scale_list.push_back(this->scaling_.index({selected_mask}).index({is_point}));
-        rot_list.push_back(rot_sel.index({is_point}));
+        
+        // [Safety Check] 确保 rot_p 是 [Mp, 4]
+        auto rot_p = rot_sel.index({is_point});
+        if (rot_p.dim() != 2) rot_p = rot_p.reshape({-1, 4});
+        rot_list.push_back(rot_p);
+
         feat_dc_list.push_back(this->features_dc_.index({selected_mask}).index({is_point}));
         feat_rest_list.push_back(this->features_rest_.index({selected_mask}).index({is_point}));
         opacity_list.push_back(this->opacity_.index({selected_mask}).index({is_point}));
@@ -1660,9 +3142,6 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
 
     // =========================================================
     // 6. LINE-aware clone
-    //    - same scale / rotation
-    //    - tiny perturbation along line direction (local x-axis)
-    //    - keep line_dir_w unchanged
     // =========================================================
     if (is_line.any().item<bool>())
     {
@@ -1670,8 +3149,11 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
 
         auto xyz_l   = xyz_sel.index({is_line});
         auto scale_l = scale_act_sel.index({is_line});
+        
+        // [Safety Check] 确保 rot_l 是 [Ml, 4]
         auto rot_l   = rot_sel.index({is_line});
-
+        if (rot_l.dim() != 2) rot_l = rot_l.reshape({-1, 4});
+        
         auto dir_l_w = line_dir_w_sel.index({is_line}); // (Ml,3)
 
         const int64_t Ml = xyz_l.size(0);
@@ -1718,7 +3200,15 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
 
     auto new_xyz          = torch::cat(xyz_list, 0);
     auto new_scaling      = torch::cat(scale_list, 0);
-    auto new_rotation     = torch::cat(rot_list, 0);
+    auto new_rotation     = torch::cat(rot_list, 0); // Should be [N, 4]
+    
+    // [CRITICAL FIX] 再次强制检查 new_rotation 维度
+    // 防止 torch::cat 之后形状依然不对 (例如 list 里都是 1D tensor)
+    if (new_rotation.dim() != 2 || new_rotation.size(1) != 4) {
+         std::cerr << "[Auto-Fix] Clone generated bad rotation: " << new_rotation.sizes() << ". Fixing..." << std::endl;
+         new_rotation = new_rotation.reshape({-1, 4}).contiguous();
+    }
+
     auto new_features_dc  = torch::cat(feat_dc_list, 0);
     auto new_features_rst = torch::cat(feat_rest_list, 0);
     auto new_opacity      = torch::cat(opacity_list, 0);
@@ -1726,6 +3216,11 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
 
     auto new_is_line      = torch::cat(new_is_line_list, 0);
     auto new_line_dir_w   = torch::cat(new_line_dir_w_list, 0);
+
+    // ================= [DEBUG PROBE 3: Clone 检查] =================
+    std::cerr << "[DEBUG FLOW] Inside densifyAndClone. Prepared tensors:" << std::endl;
+    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
+    // ============================================================
 
     TORCH_CHECK(new_xyz.size(0) == new_is_line.size(0), "new_xyz and new_is_line size mismatch");
     TORCH_CHECK(new_xyz.size(0) == new_line_dir_w.size(0), "new_xyz and new_line_dir_w size mismatch");
@@ -1744,6 +3239,7 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     );
 }
 
+#endif
 
 void GaussianModelLine::densifyAndClone(
     torch::Tensor& grads,
@@ -1817,10 +3313,15 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // =========================================================
     // 2. Structure-aware densification
     // =========================================================
+    // 1. Clone
+    std::cerr << "[DEBUG] Before Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
     this->densifyAndCloneWithLineAwareness(grads, max_grad, extent);
+    std::cerr << "[DEBUG] After Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
 
     const int split_N = 2; // recommended
+    std::cerr << "[DEBUG] Before Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
     this->densifyAndSplitWithLineAwareness(grads, max_grad, extent, split_N);
+    std::cerr << "[DEBUG] After Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
 
     // =========================================================
     // 3. Base pruning criteria (opacity-driven)
@@ -2174,19 +3675,19 @@ void GaussianModelLine::loadPly(std::filesystem::path ply_path)
     tinyply::PlyFile ply_file;
     ply_file.parse_header(instream_binary);
 
-    std::cout << "\t[ply_header] Type: " << (ply_file.is_binary_file() ? "binary" : "ascii") << std::endl;
+    std::cerr << "\t[ply_header] Type: " << (ply_file.is_binary_file() ? "binary" : "ascii") << std::endl;
     for (const auto & c : ply_file.get_comments())
-        std::cout << "\t[ply_header] Comment: " << c << std::endl;
+        std::cerr << "\t[ply_header] Comment: " << c << std::endl;
     for (const auto & c : ply_file.get_info())
-        std::cout << "\t[ply_header] Info: " << c << std::endl;
+        std::cerr << "\t[ply_header] Info: " << c << std::endl;
 
     for (const auto &e : ply_file.get_elements()) {
-        std::cout << "\t[ply_header] element: " << e.name << " (" << e.size << ")" << std::endl;
+        std::cerr << "\t[ply_header] element: " << e.name << " (" << e.size << ")" << std::endl;
         for (const auto &p : e.properties) {
-            std::cout << "\t[ply_header] \tproperty: " << p.name << " (type=" << tinyply::PropertyTable[p.propertyType].str << ")";
+            std::cerr << "\t[ply_header] \tproperty: " << p.name << " (type=" << tinyply::PropertyTable[p.propertyType].str << ")";
             if (p.isList)
-                std::cout << " (list_type=" << tinyply::PropertyTable[p.listType].str << ")";
-            std::cout << std::endl;
+                std::cerr << " (list_type=" << tinyply::PropertyTable[p.listType].str << ")";
+            std::cerr << std::endl;
         }
     }
 
@@ -2218,12 +3719,12 @@ void GaussianModelLine::loadPly(std::filesystem::path ply_path)
 
     ply_file.read(instream_binary);
 
-    if (xyz)     std::cout << "\tRead " << xyz->count     << " total xyz "     << std::endl;
-    if (f_dc)    std::cout << "\tRead " << f_dc->count    << " total f_dc "    << std::endl;
-    if (f_rest)  std::cout << "\tRead " << f_rest->count  << " total f_rest "  << std::endl;
-    if (opacity) std::cout << "\tRead " << opacity->count << " total opacity " << std::endl;
-    if (scales)  std::cout << "\tRead " << scales->count  << " total scales "  << std::endl;
-    if (rot)     std::cout << "\tRead " << rot->count     << " total rot "     << std::endl;
+    if (xyz)     std::cerr << "\tRead " << xyz->count     << " total xyz "     << std::endl;
+    if (f_dc)    std::cerr << "\tRead " << f_dc->count    << " total f_dc "    << std::endl;
+    if (f_rest)  std::cerr << "\tRead " << f_rest->count  << " total f_rest "  << std::endl;
+    if (opacity) std::cerr << "\tRead " << opacity->count << " total opacity " << std::endl;
+    if (scales)  std::cerr << "\tRead " << scales->count  << " total scales "  << std::endl;
+    if (rot)     std::cerr << "\tRead " << rot->count     << " total rot "     << std::endl;
 
     // Data to std::vector
     const int num_points = xyz->count;

@@ -43,12 +43,12 @@ GaussianMapperLine::GaussianMapperLine(
 
     // Device
     if (device_type == torch::kCUDA && torch::cuda::is_available()) {
-        std::cout << "[Gaussian Mapper]CUDA available! Training on GPU." << std::endl;
+        std::cerr << "[Gaussian Mapper]CUDA available! Training on GPU." << std::endl;
         device_type_ = torch::kCUDA;
         model_params_.data_device_ = "cuda";
     }
     else {
-        std::cout << "[Gaussian Mapper]Training on CPU." << std::endl;
+        std::cerr << "[Gaussian Mapper]Training on CPU." << std::endl;
         device_type_ = torch::kCPU;
         model_params_.data_device_ = "cpu";
     }
@@ -237,7 +237,7 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
        exit(-1);
     }
 
-    std::cout << "[Gaussian Mapper]Reading parameters from " << cfg_path << std::endl;
+    std::cerr << "[Gaussian Mapper]Reading parameters from " << cfg_path << std::endl;
     std::unique_lock<std::mutex> lock(mutex_settings_);
 
     // Model parameters
@@ -869,6 +869,32 @@ void GaussianMapperLine::trainForOneIteration()
 
     loss.backward();
 
+    // 【诊断代码】
+    if (getIteration() % 10 == 0) {
+        // 1. 检查 xyz 是否开启了梯度需求
+        bool req = gaussians_->getXYZ().requires_grad();
+    
+        // 2. 检查梯度是否计算出来了 (grad norm)
+        float grad_norm = 0.0f;
+        if (gaussians_->getXYZ().grad().defined()) {
+            grad_norm = gaussians_->getXYZ().grad().norm().item<float>();
+        }
+
+        // 3. 检查参数指针是否一致
+        // 获取优化器里存的参数指针
+        auto opt_param = gaussians_->optimizer_->param_groups()[0].params()[0]; 
+        // 获取模型里存的参数指针
+        auto model_param = gaussians_->getXYZ();
+        // 比较内存地址 (data_ptr)
+        bool ptr_match = (opt_param.data_ptr() == model_param.data_ptr());
+
+        std::cerr << "[DEBUG Grad] Iter:" << getIteration() 
+              << " | ReqGrad: " << req 
+              << " | GradNorm: " << grad_norm 
+              << " | PtrMatch: " << (ptr_match ? "YES" : "NO!!!") << std::endl;
+    }
+
+
     torch::cuda::synchronize();
 
     {
@@ -1017,7 +1043,7 @@ void GaussianMapperLine::combineMappingOperations()
         {
         case ORB_SLAM3::MappingOperation::OprType::LocalMappingBA:
         {
-            // std::cout << "[Gaussian Mapper]Local BA Detected."
+            // std::cerr << "[Gaussian Mapper]Local BA Detected."
             //           << std::endl;
 
             // Get new keyframes
@@ -1064,7 +1090,7 @@ void GaussianMapperLine::combineMappingOperations()
 
         case ORB_SLAM3::MappingOperation::OprType::LoopClosingBA:
         {
-            std::cout << "[Gaussian Mapper]Loop Closure Detected."
+            std::cerr << "[Gaussian Mapper]Loop Closure Detected."
                       << std::endl;
 
             // Get the loop keyframe scale modification factor
@@ -1109,7 +1135,7 @@ void GaussianMapperLine::combineMappingOperations()
                         bool large_trans = !diff_pose.translation().isMuchSmallerThan(
                             1.0, large_trans_th_);
                         if (large_rot || large_trans) {
-                            std::cout << "[Gaussian Mapper]Large loop correction detected, transforming visible points of kf "
+                            std::cerr << "[Gaussian Mapper]Large loop correction detected, transforming visible points of kf "
                                     << kfid << std::endl;
                             diff_pose.translation() -= inv_pose.translation(); // t = (R_new * t_old + t_new) - t_new
                             diff_pose.translation() *= loop_kf_scale;          // t = s * (R_new * t_old)
@@ -1132,7 +1158,7 @@ void GaussianMapperLine::combineMappingOperations()
                             // Give loop keyframes times of use
                             increaseKeyframeTimesOfUse(pkf, loop_closure_increased_times_of_use_);
 // renderAndRecordKeyframe(pkf, result_dir_, "_1_after_loop_transforming_points");
-// std::cout<<num_transformed<<std::endl;
+// std::cerr<<num_transformed<<std::endl;
                         }
 // }
                     pkf->setPose(
@@ -1168,7 +1194,7 @@ void GaussianMapperLine::combineMappingOperations()
 
         case ORB_SLAM3::MappingOperation::OprType::ScaleRefinement:
         {
-            std::cout << "[Gaussian Mapper]Scale refinement Detected. Transforming all kfs and points..."
+            std::cerr << "[Gaussian Mapper]Scale refinement Detected. Transforming all kfs and points..."
                       << std::endl;
 
             float s = opr.mfScale;
@@ -1225,7 +1251,287 @@ void GaussianMapperLine::combineMappingOperations_withLine()
         {
         case ORB_SLAM3::MappingOperation::OprType::LocalMappingBA:
         {
-            // std::cout << "[Gaussian Mapper]Local BA Detected."
+            // =========================================================
+            // 1. Handle Keyframes (Update Pose or Add New)
+            // =========================================================
+            auto& associated_kfs = opr.associatedKeyFrames();
+
+            for (auto& kf : associated_kfs) {
+                auto kfid = std::get<0>(kf);
+                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
+                
+                if (pkf) {
+                    // Update existing keyframe pose
+                    auto& pose = std::get<2>(kf);
+                    pkf->setPose(
+                        pose.unit_quaternion().cast<double>(),
+                        pose.translation().cast<double>());
+                    pkf->computeTransformTensors();
+
+                    // Increase usage count for optimization window
+                    increaseKeyframeTimesOfUse(pkf, local_BA_increased_times_of_use_);
+                }
+                else {
+                    // Create new keyframe
+                    handleNewKeyframe_WithLine(kf);
+                }
+            }
+
+            // =========================================================
+            // 2. Handle New Map Points (Standard Point Cloud)
+            // =========================================================
+            auto& associated_points = opr.associatedMapPoints();
+            auto& points = std::get<0>(associated_points);
+            auto& colors = std::get<1>(associated_points);
+
+            if (initial_mapped_ && points.size() >= 30) {
+                torch::NoGradGuard no_grad;
+                std::unique_lock<std::mutex> lock_render(mutex_render_);
+                // 这里的 increasePcd 会把 is_line 设为 false
+                gaussians_->increasePcd(points, colors, getIteration());
+            }
+
+            // =========================================================
+            // 3. Handle New Map Lines (Line-Aware Gaussian Seeding)
+            // =========================================================
+            // 从 Operation 中提取纯数据 (Pos, Color, Direction)
+            // 这些数据是在 LocalMapping 线程中通过 pML->SamplePoints... 提前计算好的
+            auto& line_sampled_data = opr.associatedLineSampledPoints();
+            const std::vector<float>& l_positions = std::get<0>(line_sampled_data);
+            const std::vector<float>& l_colors    = std::get<1>(line_sampled_data);
+            const std::vector<float>& l_dirs      = std::get<2>(line_sampled_data);
+
+            size_t num_l_points = l_positions.size() / 3;
+
+            // [DEBUG PROBE: Check Source Data]
+            if (!l_positions.empty()) {
+                std::cerr << "[DEBUG Mapper] Received Line Sampled Points from SLAM:" << std::endl;
+                std::cerr << "  > Pos Size: " << l_positions.size() << " (N=" << num_l_points << ")" << std::endl;
+                std::cerr << "  > Dir Size: " << l_dirs.size() << std::endl;
+                
+                if (l_positions.size() % 3 != 0) {
+                     std::cerr << "\033[1;31m[CRITICAL] Position vector size is NOT multiple of 3!\033[0m" << std::endl;
+                }
+                if (l_dirs.size() != l_positions.size()) {
+                     std::cerr << "\033[1;31m[CRITICAL] Direction vector size mismatch!\033[0m" << std::endl;
+                }
+            }
+
+            // 只有当有有效数据时才处理
+            if (initial_mapped_ && num_l_points > 4) {
+                // 安全检查
+                if (l_positions.size() != l_colors.size() || l_positions.size() != l_dirs.size()) {
+                    std::cerr << "[GaussianMapper] Error: Line sampled data size mismatch! " 
+                              << "Pos: " << l_positions.size() 
+                              << ", Col: " << l_colors.size() 
+                              << ", Dir: " << l_dirs.size() << std::endl;
+                } 
+                else {
+                    std::vector<Point3D> new_line_sample_points;
+                    new_line_sample_points.reserve(num_l_points);
+
+                    for (size_t i = 0; i < num_l_points; ++i) {
+                        Point3D p;
+                        // Position
+                        p.xyz_(0) = l_positions[i * 3 + 0];
+                        p.xyz_(1) = l_positions[i * 3 + 1];
+                        p.xyz_(2) = l_positions[i * 3 + 2];
+                        
+                        // Color (Assume 0-1 normalized in Atlas, or re-normalize if needed)
+                        // 注意：如果 Atlas 里存的是 0-1 float，直接赋值；如果是 0-255，需除以 255.0
+                        // 根据 Atlas.h 代码：l_colors 已经是 /255.0f 后的 float，所以直接赋值
+                        p.color_(0) = l_colors[i * 3 + 0];
+                        p.color_(1) = l_colors[i * 3 + 1];
+                        p.color_(2) = l_colors[i * 3 + 2];
+
+                        // Line Attributes
+                        p.source_ = PointSourceType::LINE_SAMPLED;
+                        p.line_dir_(0) = l_dirs[i * 3 + 0];
+                        p.line_dir_(1) = l_dirs[i * 3 + 1];
+                        p.line_dir_(2) = l_dirs[i * 3 + 2];
+                        
+                        // Sample Step (可以使用默认值，或者如果在 Atlas 中存了也可以读取)
+                        p.sample_step_ = 0.1f; // 需与 LocalMapping 中的采样步长一致
+
+                        new_line_sample_points.push_back(p);
+                        
+                        // (可选) 如果你想在 Scene 中也缓存这些点用于 Debug/SavePly
+                        // scene_->cacheLineSampledPnts3D(0 /*dummy_line_id*/, p);
+                    }
+
+                    // Push to GPU
+                    if (!new_line_sample_points.empty()) {
+                        torch::NoGradGuard no_grad;
+                        std::unique_lock<std::mutex> lock_render(mutex_render_);
+                        
+                        // 调用重载版本的 increasePcd，它会处理 line_dir 和 anisotropic scale
+                        gaussians_->increasePcd(new_line_sample_points, getIteration());
+                        
+                        std::cerr << "[GaussianMapper] Added " << new_line_sample_points.size() 
+                                   << " line-sampled gaussians." << std::endl;
+                    }
+                }
+            }
+        }
+        break;
+
+        case ORB_SLAM3::MappingOperation::OprType::LoopClosingBA:
+        {
+            std::cerr << "[Gaussian Mapper]Loop Closure Detected." << std::endl;
+
+            float loop_kf_scale = opr.mfScale;
+            auto& associated_kfs = opr.associatedKeyFrames();
+
+            // Mark points to avoid double transform
+            torch::Tensor point_not_transformed_flags = torch::full(
+                    {gaussians_->xyz_.size(0)}, true,
+                    torch::TensorOptions().device(device_type_).dtype(torch::kBool));
+
+            if (record_loop_ply_)
+                savePly(result_dir_ / (std::to_string(getIteration()) + "_0_before_loop_correction"));
+            
+            int num_transformed = 0;
+
+            for (auto& kf : associated_kfs) {
+                auto kfid = std::get<0>(kf);
+                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
+                
+                // Resize mask if new points added
+                int64_t num_new_points = gaussians_->xyz_.size(0) - point_not_transformed_flags.size(0);
+                if (num_new_points > 0)
+                    point_not_transformed_flags = torch::cat({
+                        point_not_transformed_flags,
+                        torch::full({num_new_points}, true, point_not_transformed_flags.options())},
+                        0);
+
+                if (pkf) {
+                    auto& pose = std::get<2>(kf);
+                    
+                    // Logic to detect large loop drift and correct geometry
+                    Sophus::SE3f original_pose = pkf->getPosef();
+                    Sophus::SE3f inv_pose = pose.inverse();
+                    Sophus::SE3f diff_pose = inv_pose * original_pose;
+                    
+                    bool large_rot = !diff_pose.rotationMatrix().isApprox(Eigen::Matrix3f::Identity(), large_rot_th_);
+                    bool large_trans = !diff_pose.translation().isMuchSmallerThan(1.0, large_trans_th_);
+                    
+                    if (large_rot || large_trans) {
+                        std::cerr << "[Gaussian Mapper] Large loop correction for KF " << kfid << std::endl;
+                        
+                        // Calculate transformation matrix M: P_new = M * P_old
+                        // Logic derived from: T_new_inv * P_new = T_old_inv * P_old (relative pose const)
+                        diff_pose.translation() -= inv_pose.translation();
+                        diff_pose.translation() *= loop_kf_scale;
+                        diff_pose.translation() += inv_pose.translation();
+                        
+                        torch::Tensor diff_pose_tensor = tensor_utils::EigenMatrix2TorchTensor(
+                                    diff_pose.matrix(), device_type_).transpose(0, 1);
+                        {
+                            std::unique_lock<std::mutex> lock_render(mutex_render_);
+                            // Apply correction to Gaussian centroids
+                            // Note: For Line Gaussians, rotation should also be updated ideally, 
+                            // but since they are attached to xyz, simple rigid transform of xyz is a good approx.
+                            // Ideally we should rotate the quaternion too.
+                            gaussians_->scaledTransformVisiblePointsOfKeyframe(
+                                point_not_transformed_flags,
+                                diff_pose_tensor,
+                                pkf->world_view_transform_,
+                                pkf->full_proj_transform_,
+                                pkf->creation_iter_,
+                                stableNumIterExistence(),
+                                num_transformed,
+                                loop_kf_scale);
+                        }
+                        increaseKeyframeTimesOfUse(pkf, loop_closure_increased_times_of_use_);
+                    }
+                    
+                    // Update KF pose
+                    pkf->setPose(
+                        pose.unit_quaternion().cast<double>(),
+                        pose.translation().cast<double>());
+                    pkf->computeTransformTensors();
+                }
+                else {
+                    handleNewKeyframe_WithLine(kf);
+                }
+            }
+
+            if (record_loop_ply_)
+                savePly(result_dir_ / (std::to_string(getIteration()) + "_1_after_loop_correction"));
+
+            // Add new map points after loop closure
+            auto& associated_points = opr.associatedMapPoints();
+            auto& points = std::get<0>(associated_points);
+            auto& colors = std::get<1>(associated_points);
+
+            if (initial_mapped_ && points.size() >= 30) {
+                torch::NoGradGuard no_grad;
+                std::unique_lock<std::mutex> lock_render(mutex_render_);
+                gaussians_->increasePcd(points, colors, getIteration());
+            }
+            
+            // Loop Closure 时是否处理新的 Line Samples？
+            // 通常 Loop Closure 后的 MappingOperation 不会携带大量新的 MapLines 采样，
+            // 除非你在 LoopClosing 线程里也加了采样逻辑。
+            // 可以在这里加上类似 LocalMappingBA 的 Line 处理逻辑，如果需要的话。
+
+            loop_closure_iteration_ = true;
+        }
+        break;
+
+        case ORB_SLAM3::MappingOperation::OprType::ScaleRefinement:
+        {
+            std::cerr << "[Gaussian Mapper] Scale refinement Detected." << std::endl;
+            float s = opr.mfScale;
+            Sophus::SE3f& T = opr.mT;
+            
+            if (initial_mapped_) {
+                {
+                    std::unique_lock<std::mutex> lock_render(mutex_render_);
+                    // Applies Sim3 transform to all Gaussians (Pos + Scale)
+                    gaussians_->applyScaledTransformation(s, T);
+                }
+                scene_->applyScaledTransformation(s, T);
+            }
+            else {
+                // Legacy path (should not happen if system initialized correctly)
+                for (auto& pt : scene_->cached_point_cloud_) {
+                    auto& pt_xyz = pt.second.xyz_;
+                    pt_xyz *= s;
+                    pt_xyz = T.cast<double>() * pt_xyz;
+                }
+                for (auto& kfit : scene_->keyframes()) {
+                    std::shared_ptr<GaussianKeyframeLine> pkf = kfit.second;
+                    Sophus::SE3f Twc = pkf->getPosef().inverse();
+                    Twc.translation() *= s;
+                    Sophus::SE3f Tyc = T * Twc;
+                    Sophus::SE3f Tcy = Tyc.inverse();
+                    pkf->setPose(Tcy.unit_quaternion().cast<double>(), Tcy.translation().cast<double>());
+                    pkf->computeTransformTensors();
+                }
+            }
+        }
+        break;
+
+        default:
+            throw std::runtime_error("MappingOperation type not supported!");
+        }
+    }
+}
+
+#if 0
+void GaussianMapperLine::combineMappingOperations_withLine()
+{
+    // Get Mapping Operations
+    while (pSLAM_->getAtlas()->hasMappingOperation()) {
+        ORB_SLAM3::MappingOperation opr =
+            pSLAM_->getAtlas()->getAndPopMappingOperation();
+
+        switch (opr.meOperationType)
+        {
+        case ORB_SLAM3::MappingOperation::OprType::LocalMappingBA:
+        {
+            // std::cerr << "[Gaussian Mapper]Local BA Detected."
             //           << std::endl;
 
             // Get new keyframes
@@ -1275,6 +1581,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             // 假设 opr 有 associatedMapLines() 接口
             auto& associated_lines = opr.associatedMapLines(); 
             auto& map_lines = std::get<0>(associated_lines); // std::vector<MapLine*>
+            //auto& map_lines_colors = std::get<1>(associated_lines); // std::vector<std::pair<cv::Vec3b, cv::Vec3b>>
+            auto& map_sampled_pnts = opr.associatedLineSampledPoints(); // std::vector<Point3D> 
 
             if (initial_mapped_ && !map_lines.empty()) {
                 std::vector<Point3D> new_line_sample_points;
@@ -1285,6 +1593,9 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                 float view_angle_power = 2.0f;
                 float sigma_line_pixel = 3.0f;
                 int top_k = 3;
+                
+                // A. 直接使用 ORB-SLAM3 传递过来的线采样点
+                
 
                 //接口有点问题，待解决
                 // for (auto* pML : map_lines) {
@@ -1342,7 +1653,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     // 这个版本会正确读取 line_dir_ 并初始化各向异性属性
                     gaussians_->increasePcd(new_line_sample_points, getIteration());
                     
-                    // std::cout << "[Gaussian Mapper] Added " << new_line_sample_points.size() 
+                    // std::cerr << "[Gaussian Mapper] Added " << new_line_sample_points.size() 
                     //           << " new line-sampled gaussians." << std::endl;
                 }
             }
@@ -1352,7 +1663,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
         case ORB_SLAM3::MappingOperation::OprType::LoopClosingBA:
         {
-            std::cout << "[Gaussian Mapper]Loop Closure Detected."
+            std::cerr << "[Gaussian Mapper]Loop Closure Detected."
                       << std::endl;
 
             // Get the loop keyframe scale modification factor
@@ -1397,7 +1708,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         bool large_trans = !diff_pose.translation().isMuchSmallerThan(
                             1.0, large_trans_th_);
                         if (large_rot || large_trans) {
-                            std::cout << "[Gaussian Mapper]Large loop correction detected, transforming visible points of kf "
+                            std::cerr << "[Gaussian Mapper]Large loop correction detected, transforming visible points of kf "
                                     << kfid << std::endl;
                             diff_pose.translation() -= inv_pose.translation(); // t = (R_new * t_old + t_new) - t_new
                             diff_pose.translation() *= loop_kf_scale;          // t = s * (R_new * t_old)
@@ -1420,7 +1731,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                             // Give loop keyframes times of use
                             increaseKeyframeTimesOfUse(pkf, loop_closure_increased_times_of_use_);
 // renderAndRecordKeyframe(pkf, result_dir_, "_1_after_loop_transforming_points");
-// std::cout<<num_transformed<<std::endl;
+// std::cerr<<num_transformed<<std::endl;
                         }
 // }
                     pkf->setPose(
@@ -1456,7 +1767,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
         case ORB_SLAM3::MappingOperation::OprType::ScaleRefinement:
         {
-            std::cout << "[Gaussian Mapper]Scale refinement Detected. Transforming all kfs and points..."
+            std::cerr << "[Gaussian Mapper]Scale refinement Detected. Transforming all kfs and points..."
                       << std::endl;
 
             float s = opr.mfScale;
@@ -1501,7 +1812,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
         }
     }
 }
-
+#endif
 
 void GaussianMapperLine::handleNewKeyframe(
     std::tuple< unsigned long/*Id*/,
@@ -1753,7 +2064,7 @@ GaussianMapperLine::useOneRandomSlidingWindowKeyframe()
 
 // auto t2 = std::chrono::steady_clock::now();
 // auto t21 = std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count();
-// std::cout<<t21 <<" ns"<<std::endl;
+// std::cerr<<t21 <<" ns"<<std::endl;
     return viewpoint_cam;
 }
 
@@ -2053,7 +2364,7 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
 // auto end_timing = std::chrono::steady_clock::now();
 // auto completion_time = std::chrono::duration_cast<std::chrono::milliseconds>(
 //                 end_timing - start_timing).count();
-// std::cout << "[Gaussian Mapper]increasePcdByKeyframeInactiveGeoDensify() takes "
+// std::cerr << "[Gaussian Mapper]increasePcdByKeyframeInactiveGeoDensify() takes "
 //             << completion_time
 //             << " ms"
 //             << std::endl;
@@ -2626,7 +2937,7 @@ void GaussianMapperLine::saveDebugMapToObj(
         return;
     }
 
-    std::cout << "[Gaussian Mapper] DEBUG: Saving map to " << path << " ..." << std::endl;
+    std::cerr << "[Gaussian Mapper] DEBUG: Saving map to " << path << " ..." << std::endl;
 
     int vertex_count = 1; // OBJ 索引从 1 开始
 
@@ -2660,7 +2971,7 @@ void GaussianMapperLine::saveDebugMapToObj(
     }
 
     obj_file.close();
-    std::cout << "[Gaussian Mapper] DEBUG: Saved " << (vertex_count - 1) << " vertices total." << std::endl;
+    std::cerr << "[Gaussian Mapper] DEBUG: Saved " << (vertex_count - 1) << " vertices total." << std::endl;
 }
 
 void GaussianMapperLine::loadPly(std::filesystem::path ply_path, std::filesystem::path camera_path)
