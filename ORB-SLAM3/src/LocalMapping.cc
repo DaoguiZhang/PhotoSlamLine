@@ -28,6 +28,8 @@
 #include<mutex>
 #include<chrono>
 
+//#define DEBUG_LBA_VISUALIZATION
+
 namespace ORB_SLAM3
 {
 
@@ -445,11 +447,11 @@ void LocalMapping::RunWithLine()
                         //
                         
                         //测试通过（只优化位姿和点+线，它们同时优化，加正则项，这些正则项是约束，防止线段跑远等等）
-                        std::cerr << "test jac " << std::endl;
-                        Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian(); //debug, line(end points)(6x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
+                        //std::cerr << "test jac " << std::endl;
+                        //Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian(); //debug, line(end points)(6x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
                         // Optimizer::TestEdgeLineLengthPrior_Jacobian_SAFE(); //debug, 线段长度先验边的雅可比矩阵测试函数（数值测试通过）
                         // Optimizer::TestEdgeLineDirectionPrior_Jacobian_SAFE(); //debug, 线段方向先验边的雅可比矩阵测试函数（数值测试通过）
-                        std::cerr << "end test jac " << std::endl;
+                        //std::cerr << "end test jac " << std::endl;
                         
                         std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
                         Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
@@ -481,6 +483,52 @@ void LocalMapping::RunWithLine()
                         MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
                         std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_after.obj";
                         MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
+
+                        // ============================================
+    // [插入] 可视化 Debug
+    // ============================================
+    // 只有在调试模式下开启
+#ifdef DEBUG_LBA_VISUALIZATION 
+    //Get optimized lines
+    std::list<KeyFrame*> lLocalKeyFrames;
+    std::list<MapLine*> lLocalMapLines;
+
+    // --- 1. collect local keyframes (BFS) ---
+    // lLocalKeyFrames.push_back(mpCurrentKeyFrame);
+    // mpCurrentKeyFrame->mnBALocalForKF = mpCurrentKeyFrame->mnId;
+    // Map* pCurrentMap = mpCurrentKeyFrame->GetMap();
+
+    // const vector<KeyFrame*> vNeighKFs = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+    // for (KeyFrame* pKFi : vNeighKFs)
+    // {
+    //     if (!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+    //     {
+    //         pKFi->mnBALocalForKF = mpCurrentKeyFrame->mnId;
+    //         lLocalKeyFrames.push_back(pKFi);
+    //     }
+    // }
+
+    for(auto& kf : mpCurrentKeyFrame->GetMap()->GetAllKeyFrames())
+    {
+        if(kf->isBad())
+            continue;
+        lLocalKeyFrames.push_back(kf);
+    }
+    for(auto& kf : lLocalKeyFrames)
+    {
+        std::cerr <<"--------Local key frame id------------: " << kf->mnId << std::endl;
+    }
+
+    for(auto& ml : mpCurrentKeyFrame->GetMapLineMatches())
+    {
+        if (!ml) continue;
+        if(ml->isBad())
+            continue;
+        lLocalMapLines.push_back(ml);
+    }
+
+    DebugProjectOptimizedLines(lLocalKeyFrames, lLocalMapLines);
+#endif
                     }
 
                 }
@@ -2541,6 +2589,122 @@ void LocalMapping::DebugRecentAddedMapLinesProjection()
     }
 
     std::cout << "[DebugRecentAddedMapLinesProjection] Finished visualization." << std::endl;
+}
+
+
+
+// 需要传入参与优化的关键帧列表和地图线列表
+void LocalMapping::DebugProjectOptimizedLines(const list<KeyFrame*>& lKFs, const list<MapLine*>& lMapLines)
+{
+    std::cout << "\n[DebugProjectOptimizedLines] Visualizing LBA Result..." << std::endl;
+    std::cout << "  Red   = Measurement (2D LSD Feature)" << std::endl;
+    std::cout << "  Green = Optimized Projection (3D MapLine)" << std::endl;
+    std::cout << "  Blue  = Drift Vector (Endpoint Error)" << std::endl;
+
+    int kf_count = 0;
+    
+    // 1. 遍历每一个参与优化的关键帧 (以帧为单位显示，更直观)
+    for(KeyFrame* pKF : lKFs)
+    {
+        if(!pKF || pKF->isBad()) continue;
+
+        // 准备画布：转为彩色以便画线
+        cv::Mat img_show;
+        if(pKF->imgLeftRGB.empty()) {
+             // 如果存的是灰度图，转BGR
+             // 注意：根据你的版本，可能是 GetImage(0) 或 mImg
+            cv::Mat img_gray = pKF->imgAuxiliary;   //to check next...
+            cv::cvtColor(img_gray, img_show, cv::COLOR_GRAY2BGR);
+        } else {
+            img_show = pKF->imgLeftRGB.clone();
+            if(img_show.channels()==1) cv::cvtColor(img_show, img_show, cv::COLOR_GRAY2BGR);
+        }
+
+        int lines_drawn = 0;
+        
+        // 获取该帧的相机参数
+        const float fx = pKF->fx;
+        const float fy = pKF->fy;
+        const float cx = pKF->cx;
+        const float cy = pKF->cy;
+        Sophus::SE3f Tcw = pKF->GetPose(); // 优化后的位姿
+
+        // 2. 遍历所有参与优化的线，看它是否在当前帧有观测
+        for(MapLine* pML : lMapLines)
+        {
+            if(!pML || pML->isBad()) continue;
+
+            // 检查该 MapLine 是否被当前 KeyFrame 观测到
+            if(!pML->IsInKeyFrame(pKF)) 
+                continue;
+
+            // 获取观测信息 (为了拿到原始的 2D LSD 线段)
+            const auto& observations = pML->GetLineObservations();
+            auto it = observations.find(pKF);
+            if(it == observations.end()) continue;
+
+            // 获取原始测量值 (Observed)
+            int idx_line = std::get<0>(it->second);
+            const cv::line_descriptor::KeyLine& kl = pKF->mvKeyLines[idx_line];
+            cv::Point2f pt_obs_1(kl.startPointX, kl.startPointY);
+            cv::Point2f pt_obs_2(kl.endPointX, kl.endPointY);
+
+            // 获取优化后的 3D 位置 (Optimized)
+            auto endpoints_3d = pML->GetLineWorldPos();
+            Eigen::Vector3f P1_w = endpoints_3d.first;
+            Eigen::Vector3f P2_w = endpoints_3d.second;
+
+            // 投影到当前帧
+            Eigen::Vector3f P1_c = Tcw * P1_w;
+            Eigen::Vector3f P2_c = Tcw * P2_w;
+
+            // 深度检查
+            if(P1_c.z() <= 0.1 || P2_c.z() <= 0.1) continue; // 在相机后面
+
+            float u1 = fx * P1_c.x() / P1_c.z() + cx;
+            float v1 = fy * P1_c.y() / P1_c.z() + cy;
+            float u2 = fx * P2_c.x() / P2_c.z() + cx;
+            float v2 = fy * P2_c.y() / P2_c.z() + cy;
+            
+            cv::Point2f pt_proj_1(u1, v1);
+            cv::Point2f pt_proj_2(u2, v2);
+
+            // --- 绘制 ---
+            
+            // A. 画原始观测 (红色，稍粗)
+            cv::line(img_show, pt_obs_1, pt_obs_2, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+            
+            // B. 画优化后投影 (绿色，细)
+            cv::line(img_show, pt_proj_1, pt_proj_2, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+
+            // C. 画误差连线 (蓝色，连接端点) - 关键！看它是滑移了还是偏离了
+            cv::line(img_show, pt_obs_1, pt_proj_1, cv::Scalar(255, 0, 0), 1);
+            cv::line(img_show, pt_obs_2, pt_proj_2, cv::Scalar(255, 0, 0), 1);
+
+            // D. 标记 ID (可选，定位特定线段)
+            // cv::putText(img_show, std::to_string(pML->mnId), (pt_proj_1+pt_proj_2)/2, 
+            //             cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255,255,0), 1);
+
+            lines_drawn++;
+        }
+
+        // 3. 显示当前帧的结果
+        if(lines_drawn > 0)
+        {
+            std::string win_name = "LBA Check KF:" + std::to_string(pKF->mnId);
+            cv::imshow(win_name, img_show);
+            
+            std::cout << "Showing KF " << pKF->mnId << " with " << lines_drawn << " optimized lines." << std::endl;
+            std::cout << "Press [Space] for next KF, [ESC] to stop." << std::endl;
+            
+            int key = cv::waitKey(0);
+            if(key == 27) break; // ESC
+            
+            // 防止窗口堆积，可以手动 destroy
+            cv::destroyWindow(win_name); 
+        }
+        kf_count++;
+    }
 }
 
 

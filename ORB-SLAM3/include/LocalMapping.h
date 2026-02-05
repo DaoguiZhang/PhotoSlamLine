@@ -27,6 +27,7 @@
 #include "KeyFrameDatabase.h"
 #include "Settings.h"
 #include "MapLine.h"
+//#include <opencv2/opencv.hpp>
 
 #include <mutex>
 
@@ -152,6 +153,7 @@ protected:
     void DebugRecentAddedMapLines();
     void DebugCurrentFrameMapLinesProjection(const std::vector<MapLine*>& current_keyframe_maplines);
     void DebugRecentAddedMapLinesProjection();
+    void DebugProjectOptimizedLines(const std::list<KeyFrame*>& lKFs, const std::list<MapLine*>& lMapLines);
     //--------------------end debug functions----------------------//
 
     bool CheckLineReprojection(KeyFrame* pKF, const Eigen::Vector3f &X3Ds, const Eigen::Vector3f &X3De, const cv::line_descriptor::KeyLine &kline);

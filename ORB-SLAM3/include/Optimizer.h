@@ -90,6 +90,7 @@ public:
     static g2o::SE3Quat se3Plus_ZDG(const g2o::SE3Quat& T, const Eigen::Matrix<double,6,1>& dx);
     void static TestEdgeSE3ProjectXYZOnlyPose();
     void static TestEdgeSE3ProjectLine_PoseAndPoints();
+    void static TestEdgeSE3ProjectLineXYZOnlyPose_PointToLineOld();
     void static TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine();
     static Eigen::Matrix<double,6,1> NormalizePluckerLine(const Eigen::Matrix<double,6,1>& L);
     static Eigen::Matrix<double, 2, 6> ComputeNumericalJacobianPose(

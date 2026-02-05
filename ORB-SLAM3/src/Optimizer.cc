@@ -2746,7 +2746,7 @@ void Optimizer::TestEdgeSE3ProjectLine_PoseAndPoints()
 }
 
 
-void Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine()
+void Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLineOld()
 {
     using namespace g2o;
 
@@ -2860,6 +2860,96 @@ void Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine()
               << (J_ana - J_num).cwiseAbs().maxCoeff()
               << "\n";
     std::cout << "------ end test ------\n";
+}
+
+void Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine()
+{
+    std::cout << "\n==============================================" << std::endl;
+    std::cout << " TEST START: Safe Math Verification (No Crash) " << std::endl;
+    std::cout << "==============================================" << std::endl;
+
+    // 1. 准备数据
+    double fx = 1000.0, fy = 1000.0, cx = 500.0, cy = 500.0;
+    
+    Eigen::Matrix3d R;
+    R = Eigen::AngleAxisd(0.1, Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(0.2, Eigen::Vector3d::UnitY());
+    Eigen::Vector3d t(0.5, -0.2, 3.0); 
+    g2o::SE3Quat pose_quat(R, t);
+    g2o::VertexSE3Expmap* vSE3 = new g2o::VertexSE3Expmap();
+    vSE3->setEstimate(pose_quat);
+
+    Eigen::Vector3d Xw1(1.0, 1.0, 0.0);
+    Eigen::Vector3d Xw2(2.0, 0.5, 0.5);
+
+    auto* edge = new EdgeSE3ProjectLineXYZOnlyPose_PointToLine();
+    edge->resize(1); // 必须分配
+    edge->setVertex(0, vSE3);
+    edge->SetCameraIntrinsics(fx, fy, cx, cy);
+    edge->SetXw(Xw1, Xw2);
+    edge->SetObservedLineByEndpoints(600, 550, 700, 450); // 计算 a, b, c
+
+    // ---------------------------------------------------------
+    // 2. 计算解析雅可比 (手动调用核心函数，避开崩溃变量)
+    // ---------------------------------------------------------
+    
+    // A. 准备中间变量
+    Eigen::Vector3d Xc1 = vSE3->estimate().map(Xw1);
+    Eigen::Vector3d Xc2 = vSE3->estimate().map(Xw2);
+    double a = edge->getA(); // 需在类中添加 getter 或者把 a 设为 public
+    double b = edge->getB();
+    Eigen::RowVector2d ab(a, b);
+
+    // B. 调用你的推导函数 (假设改为 public 了)
+    Eigen::Matrix<double,2,6> Jp1 = edge->projectJacobian(Xc1);
+    Eigen::Matrix<double,2,6> Jp2 = edge->projectJacobian(Xc2);
+
+    // C. 组装最终雅可比 (存到我们自己的安全变量里)
+    Eigen::Matrix<double, 2, 6> J_analytic;
+    J_analytic.row(0) = ab * Jp1;
+    J_analytic.row(1) = ab * Jp2;
+
+    // ---------------------------------------------------------
+    // 3. 计算数值雅可比 (标准流程)
+    // ---------------------------------------------------------
+    Eigen::Matrix<double, 2, 6> J_numeric;
+    const double eps = 1e-6; 
+    g2o::SE3Quat T_backup = vSE3->estimate();
+
+    for (int i = 0; i < 6; ++i) {
+        Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
+        delta(i) = eps;
+        
+        // 左扰动 +eps
+        vSE3->setEstimate(g2o::SE3Quat::exp(delta) * T_backup);
+        edge->computeError();
+        Eigen::Vector2d e_plus = edge->error();
+
+        // 左扰动 -eps
+        delta(i) = -eps;
+        vSE3->setEstimate(g2o::SE3Quat::exp(delta) * T_backup);
+        edge->computeError();
+        Eigen::Vector2d e_minus = edge->error();
+
+        J_numeric.col(i) = (e_plus - e_minus) / (2.0 * eps);
+    }
+    vSE3->setEstimate(T_backup); // 恢复
+
+    // ---------------------------------------------------------
+    // 4. 对比结果
+    // ---------------------------------------------------------
+    std::cout.precision(6);
+    std::cout << std::scientific; 
+    std::cout << "Analytic (Safe):\n" << J_analytic << "\n\n";
+    std::cout << "Numeric:\n" << J_numeric << "\n\n";
+
+    double max_err = (J_analytic - J_numeric).cwiseAbs().maxCoeff();
+    std::cout << "Max Error: " << max_err << std::endl;
+
+    if (max_err < 1e-5) std::cout << "\n[SUCCESS] Math is correct!" << std::endl;
+    else std::cout << "\n[FAIL] Check formulas." << std::endl;
+
+    delete edge;
+    delete vSE3;
 }
 
 
@@ -4202,7 +4292,6 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     ///const double lambdaL = 50.0;   // 1~5
     ///const double lambdaD = 20.0;   // 0.5~2
     ///const double lambdaM = 5.0;   // 0.05~0.5  (不要太大，防止锁死)
-
     // // --------- add Line Length Prior edges (ONCE per MapLine) ----------
     // [修改] 大幅降低权重，让观测数据说话
     //const double lambdaL = 0.5;   // 原 50.0 -> 改 0.5 (允许长度变化)
@@ -4212,7 +4301,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     // 默认的“松弛”权重 (用于长线段，允许优化)
     const double lambdaL_Loose = 0.5;   
     const double lambdaD_Loose = 5.0;   
-    const double lambdaM_Loose = 0.01;
+    const double lambdaM_Loose = 0.5;
 
     // “强力”权重 (用于短线段，用于固定)
     const double lambda_Hard = 1000.0;
@@ -4249,21 +4338,59 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         Eigen::Vector3d d0_unit = d0 / L0;
         Eigen::Vector3d m0 = 0.5 * (P10 + P20);
 
-        // ========================================================
-        // [关键修改]: 动态权重分配 (Soft Fix Logic)
-        // ========================================================
         double wL = lambdaL_Loose;
         double wD = lambdaD_Loose;
         double wM = lambdaM_Loose;
 
-        // 如果线段短于 10cm (0.1m)，则认为它极不稳定，施加超强约束
+        // Tier 1: "Trash" / Noise (Length < 0.1m)
+        // Behavior: LOCK IT DOWN. It's too small to be useful for optimizing pose, 
+        // just keep it for visualization or map density.
         if (L0 < 0.1) 
         {
-            wL = lambda_Hard; // 锁死长度
-            wD = lambda_Hard; // 锁死方向
-            wM = lambda_Hard; // 锁死位置 (核心)
+            wL = lambda_Hard; 
+            wD = lambda_Hard; 
+            wM = lambda_Hard; 
         }
-        // ========================================================
+        // Tier 2: "The Danger Zone" (0.1m <= Length < 0.5m) <--- YOUR PROBLEM AREA
+        // Behavior: These are the lines on the wall. They are likely unstable.
+        // We trust their Direction (mostly), but we DO NOT trust their Depth/Position sliding.
+        // We need to constrain them heavily to their initial guess to prevent sliding.
+        else if (L0 < 0.5) 
+        {
+            wL = 2.0;    // Prevent length changing too much
+            wD = 20.0;   // Strong direction constraint (keep parallel)
+            wM = 10.0;   // Strong midpoint constraint (STOP SLIDING!)
+        }
+        // Tier 3: "Stable Features" (Length >= 0.5m)
+        // Behavior: Long lines (floor edges, door frames). 
+        // We trust the image observation more. Let them adjust to minimize reprojection error.
+        else 
+        {
+            wL = lambdaL_Loose;    // Allow length to breathe
+            wD = lambdaD_Loose;    // Direction is usually stable due to length
+            wM = lambdaM_Loose;    // Weak midpoint constraint (allow slight sliding to fit data)
+        }
+
+        // // ========================================================
+        // // [关键修改]: 动态权重分配 (Soft Fix Logic)
+        // // ========================================================
+        // double wL = lambdaL_Loose;
+        // double wD = lambdaD_Loose;
+        // double wM = lambdaM_Loose;
+        // // 如果线段短于 10cm (0.1m)，则认为它极不稳定，施加超强约束
+        // if (L0 < 0.1) 
+        // {
+        //     wL = lambda_Hard; // 锁死长度
+        //     wD = lambda_Hard; // 锁死方向
+        //     wM = lambda_Hard; // 锁死位置 (核心)
+        // }
+        // if(L0 < 0.2 && L0 > 0.1)
+        // {
+        //     //wL = lambda_Hard;
+        //     wD = lambdaD_Loose * 3;
+        //     //wM = lambda_Hard;
+        // }
+        // // ========================================================
 
         // (A) length prior
         {
@@ -4511,7 +4638,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
             // =========================================================
             // 【关键修改】: 在打包发送给 GS 之前，必须基于"新几何"重新采样！
             // =========================================================
-            
+            std::cerr << "Modify MapLine: " << pML->mnId << std::endl;
             // 参数建议放到类成员变量或配置中
             float sample_step = 0.1f;  // 采样步长，比如 10cm
             float view_weight = 2.0f; 

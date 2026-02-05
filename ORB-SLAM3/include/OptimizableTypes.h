@@ -590,7 +590,7 @@ public:
 };
 
 // Point-to-line error formulation, 通过数值测试，可以直接用于相机优化
-///前 3 维：旋转（李代数 so(3)，角轴，小角度，单位：rad）后 3 维：平移（单位：米）VertexSE3Expmap 右扰动求导的雅可比 这些非常重要！！！
+///前 3 维：旋转（李代数 so(3)，角轴，小角度，单位：rad）后 3 维：平移（单位：米）VertexSE3Expmap 左扰动求导的雅可比 这些非常重要！！！
 class EdgeSE3ProjectLineXYZOnlyPose_PointToLine
     : public g2o::BaseUnaryEdge<2, Eigen::Matrix<double,2,1>, g2o::VertexSE3Expmap>
 {
@@ -675,8 +675,24 @@ public:
     // ---------------- Jacobian ----------------
     void linearizeOplus() override
     {
+        //std::cerr << "[DEBUG] Step 1: Check _vertices size..." << std::endl;
+        //if (_vertices.size() == 0) {
+        //    std::cerr << "[FATAL] _vertices size is 0! resize(1) failed or wasn't called!" << std::endl;
+        //    exit(-1); // 强制退出
+        //}
+
+        //std::cerr << "[DEBUG] Step 2: Access Vertex pointer..." << std::endl;
         const auto* vSE3 =
             static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        
+        //std::cerr << "[DEBUG] Step 3: Access Vertex Estimate (Memory Read)..." << std::endl;
+
+        //if (!vSE3) {
+        //    std::cerr << "[FATAL] Vertex pointer is nullptr!" << std::endl;
+        //    exit(-1);
+        //}
+
+        //std::cerr << "[DEBUG] Step 4: Map points..." << std::endl;
 
         Eigen::Vector3d Xc1 = vSE3->estimate().map(Xw1);
         Eigen::Vector3d Xc2 = vSE3->estimate().map(Xw2);
@@ -685,6 +701,8 @@ public:
             _jacobianOplusXi.setZero();
             return;
         }
+
+        //std::cerr << "[DEBUG] Step 5: Compute internal Jacobians..." << std::endl;
 
         Eigen::Matrix<double,2,6> Jp1 = projectJacobian(Xc1);
         Eigen::Matrix<double,2,6> Jp2 = projectJacobian(Xc2);
@@ -698,12 +716,22 @@ public:
 
          //_jacobianOplusXi.setZero();  // 清空 Jacobian
         //std::cerr << "11" <<std::endl;
+        // std::cerr << "[DEBUG] Step 6: Write to _jacobianOplusXi (Memory Write/Align1)..." << std::endl;
+        // // 安全的新写法:
+        // Eigen::Matrix<double, 1, 6> row0 = ab * Jp1;
+        // Eigen::Matrix<double, 1, 6> row1 = ab * Jp2;
+        // for (int k = 0; k < 6; ++k) {
+        //     _jacobianOplusXi(0, k) = row0(k);
+        //     _jacobianOplusXi(1, k) = row1(k);
+        // }
+
         _jacobianOplusXi.row(0) = ab * Jp1;
         _jacobianOplusXi.row(1) = ab * Jp2;
         
         //std::cerr<< "Jacobian OplusXi: \n" << _jacobianOplusXi << std::endl;
         //mJacobianPose.row(0) = ab * Jp1;
         //mJacobianPose.row(1) = ab * Jp2;
+        //std::cerr << "[DEBUG] Success leave linearizeOplus" << std::endl;
     }
 
 public:
@@ -738,6 +766,18 @@ public:
         dXc_dxi.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
 
         return Jpi * dXc_dxi;
+    }
+
+    double getA() const {
+        return a;
+    }
+
+    double getB() const {
+        return b;
+    }
+
+    double getC() const {
+        return c;
     }
 
     const Eigen::Matrix<double,2,6>& JPose() const {

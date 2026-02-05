@@ -97,6 +97,8 @@ public:
         std::get<0>(mvAssociatedLineSampledPoints).reserve(length * 10); 
         std::get<1>(mvAssociatedLineSampledPoints).reserve(length * 10);
         std::get<2>(mvAssociatedLineSampledPoints).reserve(length * 10 / 3); // 存 line_dir
+        // [新增] MapLines ID 初始化
+        mvAssociatedMapLineIds.reserve(length); // 估算一下，或者由 reserveMapLines 处理
     }
 
     MappingOperation(const MappingOperation &opr)
@@ -161,6 +163,8 @@ public:
         int length = nMLs * 6;
         std::get<0>(mvAssociatedMapLines).reserve(length);
         std::get<1>(mvAssociatedMapLines).reserve(length);
+        // [新增]
+        mvAssociatedMapLineIds.reserve(nMLs);
     }
 
     void addMapPoint(MapPoint* pMP)
@@ -176,6 +180,81 @@ public:
         std::get<1>(mvAssociatedMapPoints).emplace_back(color.z());
     }
 
+    void addMapLine(MapLine* pML) 
+    {
+        if(!pML || pML->isBad()) return;
+
+        std::unique_lock<std::mutex> lock(mMutexMapLines);
+
+        // [新增 1] 去重检查：如果这次打包已经包含这个线段，直接跳过
+        if (msInsertedLineIds.count(pML->mnId)) {
+            return; 
+        }
+        msInsertedLineIds.insert(pML->mnId);
+
+        // [新增 2] 存储 ID
+        mvAssociatedMapLineIds.push_back(pML->mnId);
+
+        // --- 以下是原有的几何存储逻辑 ---
+        auto pt1 = pML->GetLineWorldPos().first;
+        auto pt2 = pML->GetLineWorldPos().second;
+        
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt1.x());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt1.y());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt1.z());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt2.x());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt2.y());
+        std::get<0>(mvAssociatedMapLines).emplace_back(pt2.z());
+        
+        auto color1 = pML->GetLineColorRGB().first;
+        std::get<1>(mvAssociatedMapLines).emplace_back(color1.x());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color1.y());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color1.z());
+        auto color2 = pML->GetLineColorRGB().second;
+        std::get<1>(mvAssociatedMapLines).emplace_back(color2.x());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color2.y());
+        std::get<1>(mvAssociatedMapLines).emplace_back(color2.z());
+
+        // --- Sampled Points 处理 ---
+        // 这里的逻辑你是对的：直接取 MapLine 里计算好的点
+        const auto& sampled_pts = pML->GetLineSampledPoints3D(); 
+        const auto& sampled_cols = pML->GetLineSampledPntsColors();
+
+        // 简单的安全检查
+        if(sampled_pts.empty()) return; 
+
+        // 计算方向 (用于 Gaussian 旋转)
+        Eigen::Vector3f dir = (pt2 - pt1).normalized();
+        
+        // 如果 dir 出现 NaN (例如点重合)，做个保护
+        if (!std::isfinite(dir.x())) dir = Eigen::Vector3f::UnitX();
+
+        for(size_t i=0; i<sampled_pts.size(); ++i) {
+            // Pos
+            std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].x());
+            std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].y());
+            std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].z());
+            
+            // Color (保护数组越界，以防万一)
+            if (i < sampled_cols.size()) {
+                std::get<1>(mvAssociatedLineSampledPoints).emplace_back(sampled_cols[i][0] / 255.0f);
+                std::get<1>(mvAssociatedLineSampledPoints).emplace_back(sampled_cols[i][1] / 255.0f);
+                std::get<1>(mvAssociatedLineSampledPoints).emplace_back(sampled_cols[i][2] / 255.0f);
+            } else {
+                // Fallback color
+                std::get<1>(mvAssociatedLineSampledPoints).emplace_back(1.0f);
+                std::get<1>(mvAssociatedLineSampledPoints).emplace_back(1.0f);
+                std::get<1>(mvAssociatedLineSampledPoints).emplace_back(1.0f);
+            }
+
+            // Direction
+            std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.x());
+            std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.y());
+            std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.z());
+        }
+    }
+
+    #if 0
     void addMapLine(MapLine* pML) // added for MapLine
     {
         std::unique_lock<std::mutex> lock(mMutexMapLines);
@@ -228,7 +307,8 @@ public:
             std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.z());
         }
     }
-    
+    #endif
+
     // Getter for Sampled Points (Pos, Color, Direction)
     std::tuple<std::vector<float>, std::vector<float>, std::vector<float>>& associatedLineSampledPoints() { 
         return mvAssociatedLineSampledPoints; 
@@ -242,6 +322,11 @@ public:
     std::tuple<std::vector<float/*pos*/>, std::vector<float/*color*/>>&
     associatedMapLines() { return mvAssociatedMapLines; } // added for MapLine
 
+    // [新增] 获取 MapLine IDs
+    std::vector<unsigned long>& associatedMapLineIds() {
+        return mvAssociatedMapLineIds;
+    }
+
 public:
     // Type
     OprType meOperationType;
@@ -254,6 +339,12 @@ protected:
     // Data
     std::tuple<std::vector<float/*pos*/>,
                std::vector<float/*color*/>> mvAssociatedMapPoints;
+
+    // [新增] 用于存储 MapLine ID，以便接收端知道是更新哪个线段
+    std::vector<unsigned long> mvAssociatedMapLineIds; 
+
+    // [新增] 内部辅助变量，防止同一个 MappingOperation 里重复添加同一个线段
+    std::unordered_set<unsigned long> msInsertedLineIds;
     
     // [Pos (x1,y1,z1, x2,y2,z2...), Color (r1,g1,b1, r2,g2,b2...)]
     std::tuple<std::vector<float/*pos*/>,
