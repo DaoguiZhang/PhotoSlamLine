@@ -355,11 +355,20 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["Optimization.densify_until_iter"].operator int();
     opt_params_.densify_grad_threshold_ =
         settings_file["Optimization.densify_grad_threshold"].operator float();
+    //Line Weight Setting
+    opt_params_.weight_line_coherence_ =
+        settings_file["Optimization.weight_line_coherence"].operator float();
+    opt_params_.weight_line_shape_ori_ =
+        settings_file["Optimization.weight_line_shape_ori"].operator float();
+    opt_params_.weight_line_shape_ecc_ =
+        settings_file["Optimization.weight_line_shape_ecc"].operator float();
 
     prune_big_point_after_iter_ =
         settings_file["Optimization.prune_big_point_after_iter"].operator int();
     densify_min_opacity_ =
         settings_file["Optimization.densify_min_opacity"].operator float();
+
+    
 
     // Viewer Parameters
     rendered_image_viewer_scale_ =
@@ -862,13 +871,44 @@ void GaussianMapperLine::trainForOneIteration()
     auto loss = (1.0 - lambda_dssim) * Ll1
                 + lambda_dssim * (1.0 - loss_utils::ssim(masked_image, gt_image, device_type_));
     
-    //added by zdg(同一个线段上的高斯中心（XYZ）应该落在该线段的轴线上)对于属于同一条线的点 Pi​，已知其线方向单位向量为 d，线段上的一点（例如质心）为 Pcenter​
-    torch::Tensor loss_line = gaussians_->computeLineCoherenceLoss(0.1f); // 权重 0.1
-    auto loss_line_shape = gaussians_->computeLineShapeConstraint(0.05f, 0.1f); // 形状约束
-    loss = loss + loss_line + loss_line_shape;  //modified by zdg
+    ////added by zdg(同一个线段上的高斯中心（XYZ）应该落在该线段的轴线上)对于属于同一条线的点 Pi​，已知其线方向单位向量为 d，线段上的一点（例如质心）为 Pcenter​
+    //torch::Tensor loss_line = gaussians_->computeLineCoherenceLoss(0.1f); // 权重 0.1
+    //auto loss_line_shape = gaussians_->computeLineShapeConstraint(0.05f, 0.1f); // 形状约束
+    //loss = loss + loss_line + loss_line_shape;  //modified by zdg
+
+    // ==============================================================================
+    // 🌟 核心改进：引入结构正则化 L_str (Equation 9 in your paper) 及其消融开关
+    // ==============================================================================
+    // 从配置文件中读取权重，而不是硬编码 0.1f 或 0.05f
+    // 如果权重为 0，则代表正在做 "关闭 L_str" 的消融实验 (Ablation Study)
+    float w_ori = opt_params_.weight_line_coherence_; // 论文中的 omega_1
+    float w_shape_ecc = opt_params_.weight_line_shape_ecc_;     // 论文中的 omega_2   ///lambda_ecc
+    float w_shape_ori = opt_params_.weight_line_shape_ori_;   // 论文中的 omega_3   ///lambda_shape
+
+    if (w_ori > 0.0f || w_shape_ecc > 0.0f) {
+        torch::Tensor loss_str = torch::zeros({1}, torch::dtype(torch::kFloat32).device(device_type_));
+        
+        // 方向一致性损失 L_ori
+        if (w_ori > 0.0f) {
+            // 建议：将权重乘法移到函数外部，让函数只返回纯粹的 Loss 标量，更符合 PyTorch 规范
+            loss_str = loss_str +  gaussians_->computeLineCoherenceLoss(w_ori); 
+        }
+        // 形状各向异性约束 L_ecc
+        if (w_shape_ecc > 0.0f && w_shape_ori > 0.0f) {
+            loss_str = loss_str + gaussians_->computeLineShapeConstraint(w_shape_ecc, w_shape_ori);
+        }
+        
+        loss = loss + loss_str;
+    }
+
 
     loss.backward();
 
+    // ==============================================================================
+    // 🌟 性能改进：DEBUG 代码必须用宏或 Flag 包裹，否则严重拖慢帧率
+    // ==============================================================================
+    
+#ifdef DEBUG_LINE_GRADIENTS
     // 【诊断代码】
     if (getIteration() % 10 == 0) {
         // 1. 检查 xyz 是否开启了梯度需求
@@ -893,8 +933,9 @@ void GaussianMapperLine::trainForOneIteration()
               << " | GradNorm: " << grad_norm 
               << " | PtrMatch: " << (ptr_match ? "YES" : "NO!!!") << std::endl;
     }
+#endif
 
-
+    // 这一步同步是为了确保 backward 彻底完成，但如果在追求极致实时性时可考虑移除
     torch::cuda::synchronize();
 
     {

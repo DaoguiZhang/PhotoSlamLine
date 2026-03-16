@@ -94,4 +94,8 @@ public:
     int densify_from_iter_;
     int densify_until_iter_;
     float densify_grad_threshold_;
+    //added by zdg()
+    float weight_line_coherence_=0.0;
+    float weight_line_shape_ori_=0.0;
+    float weight_line_shape_ecc_=0.0;
 };

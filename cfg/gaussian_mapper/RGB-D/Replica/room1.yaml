@@ -73,6 +73,11 @@ Optimization.densify_from_iter: 600
 Optimization.densify_until_iter: 15000
 Optimization.densify_grad_threshold: 0.001
 
+#Line Weight Setting
+Optimization.weight_line_coherence: 0.01
+Optimization.weight_line_shape_ecc: 0.005
+Optimization.weight_line_shape_ori: 0.01
+
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters
 #--------------------------------------------------------------------------------------------
