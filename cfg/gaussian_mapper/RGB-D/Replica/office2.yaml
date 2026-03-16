@@ -24,7 +24,7 @@ RGBD.max_depth: 40.0
 Mapper.inactive_geo_densify: 1  # 0:false, 1 or other integer:true
 Mapper.depth_cache: 10
 Mapper.min_num_initial_map_kfs: 10
-Mapper.new_keyframe_times_of_use: 8
+Mapper.new_keyframe_times_of_use: 20 #8
 Mapper.local_BA_increased_times_of_use: 0
 Mapper.loop_closure_increased_times_of_use_: 2
 Mapper.cull_keyframes: 0  # 0:false, 1 or other integer:true
@@ -34,7 +34,7 @@ Mapper.stable_num_iter_existence: 1
 
 GausPyramid.do: 1  # 0:false, 1 or other integer:true
 GausPyramid.num_sub_levels: 3
-GausPyramid.sub_level_times_of_use: 8
+GausPyramid.sub_level_times_of_use: 15 #8
 
 Pipeline.convert_SHs: 0  # 0:false, 1 or other integer:true
 Pipeline.compute_cov3D: 0  # 0:false, 1 or other integer:true
@@ -71,12 +71,12 @@ Optimization.prune_big_point_after_iter: 30000
 Optimization.densify_min_opacity: 0.02 #0.005
 Optimization.densify_from_iter: 600
 Optimization.densify_until_iter: 15000
-Optimization.densify_grad_threshold: 0.001
+Optimization.densify_grad_threshold: 0.0004 # 0.001
 
 #Line Weight Setting
-Optimization.weight_line_coherence: 0.01
-Optimization.weight_line_shape_ecc: 0.005
-Optimization.weight_line_shape_ori: 0.01
+Optimization.weight_line_coherence: 0.005
+Optimization.weight_line_shape_ecc: 0.002
+Optimization.weight_line_shape_ori: 0.005
 
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters

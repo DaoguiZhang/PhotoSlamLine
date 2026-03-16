@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 2 3 4
-for i in 0
+for i in 0 1 2 3 4
 do
 ../bin/replica_rgbd \
     ../ORB-SLAM3/Vocabulary/ORBvoc.txt \

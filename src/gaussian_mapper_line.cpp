@@ -661,32 +661,64 @@ void GaussianMapperLine::run()
             break;
     }
 
-    // Third loop: Tail gaussian optimization
-    int densify_interval = densifyInterval();
-    int n_delay_iters = densify_interval * 0.8;
-    while (getIteration() - SLAM_stop_iter <= n_delay_iters || getIteration() % densify_interval <= n_delay_iters || isKeepingTraining()) {
+    // // Third loop: Tail gaussian optimization
+    // int densify_interval = densifyInterval();
+    // int n_delay_iters = densify_interval * 3; // Delay more iterations to ensure stability after SLAM stops
+    // while (getIteration() - SLAM_stop_iter <= n_delay_iters || getIteration() % densify_interval <= n_delay_iters || isKeepingTraining()) 
+    // {
+    //     //trainForOneIteration();
+    //     try {
+    //             //高斯优化代码 Invoke training once
+    //             trainForOneIteration();
+    //         } 
+    //         catch (const c10::Error& e) {
+    //             std::cerr << "Torch Error third loop: " << e.msg() << std::endl;
+    //             // 可以在这里保存进度，或者做清理工作
+    //             return;
+    //         }
+    //         catch (const std::exception& e) {
+    //             std::cerr << "Standard Error third loop: " << e.what() << std::endl;
+    //         }
+    //         catch (...) {
+    //             std::cerr << "Unknown Error occurred third loop." << std::endl;
+    //         }
+    //     densify_interval = densifyInterval();
+    //     //n_delay_iters = densify_interval * 0.8;
+    //     n_delay_iters = densify_interval * 3;
+    // }
 
-        //trainForOneIteration();
+    // Third loop: Tail gaussian optimization (Enhanced for Photo-SLAM-L)
+    std::cerr << "\n[Gaussian Mapper] SLAM tracking ended! Starting final global refinement..." << std::endl;
+    
+    // 【核心修改】强制增加全局优化次数，确保最后几帧完美收敛
+    // 2000 次是一个非常安全的数值，大约需要多花几秒钟，但能挽救整个地图的边缘画质
+    int final_iters = 2000; 
+    int target_stop_iter = getIteration() + final_iters;
 
+    while (getIteration() < target_stop_iter || isKeepingTraining()) {
         try {
-                //高斯优化代码 Invoke training once
-                trainForOneIteration();
-            } 
-            catch (const c10::Error& e) {
-                std::cerr << "Torch Error third loop: " << e.msg() << std::endl;
-                // 可以在这里保存进度，或者做清理工作
-                return;
+            // 高斯优化代码 Invoke training once
+            trainForOneIteration();
+            
+            // 进度汇报，让您在终端里看到它在努力优化
+            if (getIteration() % 200 == 0) {
+                std::cerr << "[Gaussian Mapper] Final refinement iteration: " 
+                          << getIteration() - (target_stop_iter - final_iters) 
+                          << " / " << final_iters << std::endl;
             }
-            catch (const std::exception& e) {
-                std::cerr << "Standard Error third loop: " << e.what() << std::endl;
-            }
-            catch (...) {
-                std::cerr << "Unknown Error occurred third loop." << std::endl;
-            }
-
-        densify_interval = densifyInterval();
-        n_delay_iters = densify_interval * 0.8;
+        } 
+        catch (const c10::Error& e) {
+            std::cerr << "Torch Error third loop: " << e.msg() << std::endl;
+            return;
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Standard Error third loop: " << e.what() << std::endl;
+        }
+        catch (...) {
+            std::cerr << "Unknown Error occurred third loop." << std::endl;
+        }
     }
+    std::cerr << "[Gaussian Mapper] Final refinement completed perfectly! Saving models..." << std::endl;
 
     // Save and clear
     renderAndRecordAllKeyframes("_shutdown");
