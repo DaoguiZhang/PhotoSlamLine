@@ -385,7 +385,7 @@ void GaussianMapperLine::run()
         
         // Check conditions for initial mapping
         if (hasMetInitialMappingConditions()) {
-            std::cerr << "[DEBUG] Checkpoint 1: Initial conditions met. Starting data collection..." << std::endl;
+            //std::cerr << "[DEBUG] Checkpoint 1: Initial conditions met. Starting data collection..." << std::endl;
             pSLAM_->getAtlas()->clearMappingOperation();
 
             // Get initial sparse map
@@ -653,7 +653,16 @@ void GaussianMapperLine::run()
             }
 
         if (pSLAM_->isShutDown()) {
+
+            // 【修改点 1】循环清空所有积压的操作，确保最后一批 Line Gaussians 全部入场
+            while (pSLAM_->getAtlas()->hasMappingOperation()) {
+                combineMappingOperations_withLine();
+            }
             SLAM_stop_iter = getIteration();
+            //// SLAM虽然关了，但我们检查是否还有残留的操作没处理完， 防止优化完全
+            //if (!pSLAM_->getAtlas()->hasMappingOperation()) {
+            //    SLAM_ended_ = true;
+            //}
             SLAM_ended_ = true;
         }
 
@@ -688,11 +697,28 @@ void GaussianMapperLine::run()
     // }
 
     // Third loop: Tail gaussian optimization (Enhanced for Photo-SLAM-L)
-    std::cerr << "\n[Gaussian Mapper] SLAM tracking ended! Starting final global refinement..." << std::endl;
-    
+    //std::cerr << "\n[Gaussian Mapper] SLAM tracking ended! Starting final global refinement..." << std::endl;
+// added by zdg
+    // 当增量过程结束时，强制清空一次 SLAM 操作队列，确保最后的数据被加入
+    //combineMappingOperations_withLine();
+    // ====================================================================
+    // 🌟 核心操作：重置所有关键帧的使用次数
+    // ====================================================================
+    std::cerr << "[Gaussian Mapper] SLAM ended. Resetting remaining_times_of_use for global refinement..." << std::endl;
+    {
+        // 建议加上互斥锁，防止此时还有其他线程访问 keyframes (虽然此时 SLAM 已关)
+        // std::unique_lock<std::mutex> lock(mutex_keyframes_); 
+        for (auto& kfit : scene_->keyframes()) {
+            // 将所有帧的剩余使用次数设为一个很大的数（如 1000）
+            // 这样 useOneRandomSlidingWindowKeyframe() 就会像随机采样一样公平对待每一帧
+            kfit.second->remaining_times_of_use_ = 1000; 
+        }
+    }
+//end by zdg
+
     // 【核心修改】强制增加全局优化次数，确保最后几帧完美收敛
-    // 2000 次是一个非常安全的数值，大约需要多花几秒钟，但能挽救整个地图的边缘画质
-    int final_iters = 2000; 
+    // 5000 次是一个非常安全的数值，大约需要多花几秒钟，但能挽救整个地图的边缘画质
+    int final_iters = 5000; 
     int target_stop_iter = getIteration() + final_iters;
 
     while (getIteration() < target_stop_iter || isKeepingTraining()) {

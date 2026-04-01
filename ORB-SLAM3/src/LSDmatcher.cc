@@ -89,11 +89,11 @@ namespace ORB_SLAM3
 
     int LSDmatcher::DescriptorDistance(const cv::Mat& a, const cv::Mat& b)
     {
-    // 基础检查（两种版本都适用）
-    assert(a.cols == b.cols && a.rows == b.rows);
-    assert(a.type() == CV_8U && b.type() == CV_8U);
+        // 基础检查（两种版本都适用）
+        assert(a.cols == b.cols && a.rows == b.rows);
+        assert(a.type() == CV_8U && b.type() == CV_8U);
 
-    #ifdef USE_FAST_HAMMING
+#ifdef USE_FAST_HAMMING
         // -------------------------
         // 🔥 高速版本（手写 XOR）
         // -------------------------

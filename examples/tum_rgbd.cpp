@@ -185,7 +185,8 @@ int main(int argc, char **argv)
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
         // Pass the image to the SLAM system
-        pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        //pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        pSLAM->TrackRGBDWithLine(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
@@ -204,11 +205,24 @@ int main(int argc, char **argv)
             usleep((T - ttrack) * 1e6);
     }
 
+    std::cout << "Sequence processing finished. Waiting for backend to sync..." << std::endl;
+    
     // Stop all threads
     pSLAM->Shutdown();
-    training_thd.join();
-    if (use_viewer)
+
+    // 4. 等待训练线程结束
+    // 因为你在 GaussianMapperLine::run() 结尾加了 target_stop_iter 循环，
+    // 所以 training_thd.join() 会阻塞在这里，直到那 2000 次优化全部完成。
+    if (training_thd.joinable())
+        training_thd.join();
+    if (use_viewer && viewer_thd.joinable())
         viewer_thd.join();
+
+    std::cout << "All threads finished. Saving results..." << std::endl;
+
+    //training_thd.join();
+    //if (use_viewer)
+    //    viewer_thd.join();
 
     // GPU peak usage
     saveGpuPeakMemoryUsage(output_dir / "GpuPeakUsageMB.txt");

@@ -2453,7 +2453,6 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
                     cv::imwrite(namefile, imLeft);
                 }*/
 
-
                 if(pKF->bImu)
                 {
                     //cout << "-------Update inertial values" << endl;
@@ -2469,7 +2468,7 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
                 lpKFtoCheck.pop_front();
             }
 
-            //cout << "GBA: Correct MapPoints" << endl;
+            std::cout << "GBA: Correct MapPoints" << endl;
             // Correct MapPoints
             const vector<MapPoint*> vpMPs = pActiveMap->GetAllMapPoints();
 

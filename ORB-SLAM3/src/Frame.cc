@@ -326,6 +326,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
+    //std::cerr <<"This pipe 0 line 11111111111111111111111111111" << std::endl;
+
     // ORB extraction
 #ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
@@ -361,7 +363,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
 
     //store line features
     NL = static_cast<int> (mvKeyLines.size());
-    //std::cerr <<"NL: " << NL << std::endl;
+    //std::cerr <<"This pipe 0 line NL: " << NL << std::endl;
     UndistortKeyLines();
     ComputeLineStereoFromRGBD(imDepth);
     mvLineDepthOpti = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
@@ -539,6 +541,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
+    //std::cerr <<"This pipe 1 line 11111111111111111111111111111" << std::endl;
+
     // ORB extraction
 #ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
@@ -573,7 +577,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     mvbOutlier = vector<bool>(N,false);
      //store line features
     NL = static_cast<int> (mvKeyLines.size());
-    std::cerr << "NL: " << NL << std::endl;
+    //std::cerr << "This pipe 1 line NL: " << NL << std::endl;
     UndistortKeyLines();
     // Set no stereo information
     mvuLineRight.clear();

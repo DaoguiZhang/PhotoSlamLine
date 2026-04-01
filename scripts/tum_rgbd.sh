@@ -6,7 +6,7 @@ do
     ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
     ../cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg1_desk.yaml \
     ../cfg/gaussian_mapper/RGB-D/TUM/tum_rgbd.yaml \
-    /home/rapidlab/dataset/VSLAM/TUM/rgbd_dataset_freiburg1_desk \
+    /home/zdg/zdg/CPlusPlusProjects/Photo-SLAM/data/TUM/rgbd_dataset_freiburg1_desk \
     ../cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg1_desk.txt \
     ../results/tum_rgbd_$i/rgbd_dataset_freiburg1_desk \
     no_viewer
@@ -15,7 +15,7 @@ do
     ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
     ../cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg2_xyz.yaml \
     ../cfg/gaussian_mapper/RGB-D/TUM/tum_rgbd.yaml \
-    /home/rapidlab/dataset/VSLAM/TUM/rgbd_dataset_freiburg2_xyz \
+    /home/zdg/zdg/CPlusPlusProjects/Photo-SLAM/data/TUM/rgbd_dataset_freiburg2_xyz \
     ../cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg2_xyz.txt \
     ../results/tum_rgbd_$i/rgbd_dataset_freiburg2_xyz \
     no_viewer
@@ -24,7 +24,7 @@ do
     ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
     ../cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
     ../cfg/gaussian_mapper/RGB-D/TUM/tum_rgbd.yaml \
-    /home/rapidlab/dataset/VSLAM/TUM/rgbd_dataset_freiburg3_long_office_household \
+    /home/zdg/zdg/CPlusPlusProjects/Photo-SLAM/data/TUM/rgbd_dataset_freiburg3_long_office_household \
     ../cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg3_long_office_household.txt \
     ../results/tum_rgbd_$i/rgbd_dataset_freiburg3_long_office_household \
     no_viewer

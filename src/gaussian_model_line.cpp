@@ -913,11 +913,11 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
     auto new_rotation = rots;
 
     // ================= [DEBUG PROBE: 检查 increasePcd 数据流] =================
-    std::cerr << "\n[DEBUG increasePcd(Vector)] Preparing to call Postfix. N_new=" << num_new_points << std::endl;
-    std::cerr << "  > new_xyz shape:      " << new_xyz.sizes() << std::endl;
-    std::cerr << "  > new_rotation shape: " << new_rotation.sizes() << " (Expect [N, 4])" << std::endl;
-    std::cerr << "  > new_scaling shape:  " << new_scaling.sizes() << " (Expect [N, 3])" << std::endl;
-    std::cerr << "  > new_features_dc:    " << new_features_dc.sizes() << std::endl;
+    //std::cerr << "\n[DEBUG increasePcd(Vector)] Preparing to call Postfix. N_new=" << num_new_points << std::endl;
+    //std::cerr << "  > new_xyz shape:      " << new_xyz.sizes() << std::endl;
+    //std::cerr << "  > new_rotation shape: " << new_rotation.sizes() << " (Expect [N, 4])" << std::endl;
+    //std::cerr << "  > new_scaling shape:  " << new_scaling.sizes() << " (Expect [N, 3])" << std::endl;
+    //std::cerr << "  > new_features_dc:    " << new_features_dc.sizes() << std::endl;
     
     // 强制检查：如果 Rotation 维度不对，打印红色警告
     if (new_rotation.dim() != 2 || new_rotation.size(1) != 4) {
@@ -1553,10 +1553,10 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
 {
     // ================= [DEBUG PROBE: 强制打印到错误流] =================
     // 使用 std::cerr 而不是 std::cerr，防止崩溃时日志丢失
-    std::cerr << "\n[DEBUG FLOW] Entering Postfix. N=" << new_xyz.size(0) << std::endl;
-    std::cerr << "  > XYZ Shape: " << new_xyz.sizes() << std::endl;
-    std::cerr << "  > Rotation Shape: " << new_rotation.sizes() << " (Expect: [N, 4])" << std::endl;
-    std::cerr << "  > Scaling Shape:  " << new_scaling.sizes()  << " (Expect: [N, 3])" << std::endl;
+    //std::cerr << "\n[DEBUG FLOW] Entering Postfix. N=" << new_xyz.size(0) << std::endl;
+    //std::cerr << "  > XYZ Shape: " << new_xyz.sizes() << std::endl;
+    //std::cerr << "  > Rotation Shape: " << new_rotation.sizes() << " (Expect: [N, 4])" << std::endl;
+    //std::cerr << "  > Scaling Shape:  " << new_scaling.sizes()  << " (Expect: [N, 3])" << std::endl;
     // =========================================================
     // [CRITICAL FIX] 维度强制校验与修复
     // 解决 "Expected size 4 but got size N" 问题
@@ -2577,7 +2577,7 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
         auto rot_p = rot_sel.index({mask_point_subset}); // [Mp, 4]
 
         // [DEBUG]
-        std::cerr << "  > [Point Branch] rot_p before reshape: " << rot_p.sizes() << std::endl;
+        //std::cerr << "  > [Point Branch] rot_p before reshape: " << rot_p.sizes() << std::endl;
 
         // 再次确保维度安全
         if (rot_p.dim() == 1) rot_p = rot_p.reshape({-1, 4});
@@ -2663,10 +2663,10 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     // =========================================================================
     // [DEBUG 3] 检查合并后的数据维度
     // =========================================================================
-    std::cerr << "[DEBUG SPLIT] Step 4: Concatenation" << std::endl;
-    std::cerr << "  > new_xyz Shape:      " << new_xyz.sizes() << std::endl;
-    std::cerr << "  > new_scaling Shape:  " << new_scaling.sizes() << std::endl;
-    std::cerr << "  > new_rotation Shape: " << new_rotation.sizes() << std::endl;
+    //std::cerr << "[DEBUG SPLIT] Step 4: Concatenation" << std::endl;
+    //std::cerr << "  > new_xyz Shape:      " << new_xyz.sizes() << std::endl;
+    //std::cerr << "  > new_scaling Shape:  " << new_scaling.sizes() << std::endl;
+    //std::cerr << "  > new_rotation Shape: " << new_rotation.sizes() << std::endl;
     
     // ================= [DEBUG PROBE: 致命错误拦截] =================
     // 检查 XYZ 行数和 Rotation 行数是否一致
@@ -2686,7 +2686,7 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     }
     
     // 你的 Debug Log
-    std::cerr << "[DEBUG FLOW] Inside densifyAndSplit. Prepared tensors:" << std::endl;
+    //std::cerr << "[DEBUG FLOW] Inside densifyAndSplit. Prepared tensors:" << std::endl;
     std::cerr << "  > new_rotation list size: " << list_rot.size() << std::endl;
     if (!list_rot.empty()) {
         std::cerr << "  > first tensor in rot list: " << list_rot[0].sizes() << std::endl;
@@ -3314,14 +3314,14 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // 2. Structure-aware densification
     // =========================================================
     // 1. Clone
-    std::cerr << "[DEBUG] Before Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
+    //std::cerr << "[DEBUG] Before Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
     this->densifyAndCloneWithLineAwareness(grads, max_grad, extent);
-    std::cerr << "[DEBUG] After Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
+    //std::cerr << "[DEBUG] After Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
 
     const int split_N = 2; // recommended
-    std::cerr << "[DEBUG] Before Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
+    //std::cerr << "[DEBUG] Before Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
     this->densifyAndSplitWithLineAwareness(grads, max_grad, extent, split_N);
-    std::cerr << "[DEBUG] After Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
+    //std::cerr << "[DEBUG] After Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
 
     // =========================================================
     // 3. Base pruning criteria (opacity-driven)
