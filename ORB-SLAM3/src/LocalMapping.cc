@@ -364,11 +364,16 @@ void LocalMapping::RunWithLine()
                     //优化前的点云和线段导出来，现在测试第三keyframe的时候，就运行这一步
                     if(mpCurrentKeyFrame->mnId == 2)
                     {
+
                         std::string map_points_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_MapPoints_before.obj";
                         MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
                         std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_before.obj";
                         MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
                         std::string map_lines_points3d_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_points3d_before.obj";
+                        //获取mpCurrentKeyFrame->mnId == 0 的相机位姿
+                        std::string keyframe_camera_initial_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Camera_before.txt";
+                        std::vector<KeyFrame*> all_keyframes = mpAtlas->GetAllKeyFrames();
+                        MapExporter::ExportMapKeyFrameCameraPose(all_keyframes, keyframe_camera_initial_filename);
                         //用于测试在世界坐标系下的线段采样点的颜色。它为后续的gaussian splatting的优化提供好的初始值
                         // float sample_step = 0.05f;        // 世界坐标采样步长 (e.g. 0.05f)
                         // float view_angle_power = 2.0f;   // 视角权重指数 (e.g. 2.0)
@@ -483,6 +488,11 @@ void LocalMapping::RunWithLine()
                         MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
                         std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_after.obj";
                         MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
+
+                        //获取mpCurrentKeyFrame->mnId == 0 的相机位姿
+                        std::string keyframe_camera_initial_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Camera_after.txt";
+                        std::vector<KeyFrame*> all_keyframes = mpAtlas->GetAllKeyFrames();
+                        MapExporter::ExportMapKeyFrameCameraPose(all_keyframes, keyframe_camera_initial_filename);
 
                         // ============================================
     // [插入] 可视化 Debug

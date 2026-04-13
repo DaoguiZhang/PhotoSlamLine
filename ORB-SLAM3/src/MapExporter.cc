@@ -699,5 +699,30 @@ void MapExporter::ExportFullSceneOBJ(
     std::cout << "[ExportFullSceneOBJ] Export successful to " << filename << "\n";
 }
 
+void MapExporter::ExportMapKeyFrameCameraPose(
+        const std::vector<KeyFrame*> &keyframes,
+        const std::string &filename)
+{
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "[ExportMapKeyFrameCameraPose] Cannot open file: " << filename << std::endl;
+        return;
+    }
+
+    for (const auto &pKF : keyframes) {
+        if (!pKF) continue;
+
+        Eigen::Vector3f camPos = pKF->GetCameraCenter();
+        Eigen::Matrix3f camRot = pKF->GetRotation();
+
+        file << "KeyFrame ID: " << pKF->mnId << "\n";
+        file << "Camera Position: " << camPos.transpose() << "\n";
+        file << "Camera Rotation: \n" << camRot << "\n";
+    }
+
+    file.close();
+    std::cout << "[ExportMapKeyFrameCameraPose] Export successful to " << filename << "\n";
+}
+
 
 } // namespace ORB_SLAM3

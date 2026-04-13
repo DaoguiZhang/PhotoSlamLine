@@ -169,6 +169,12 @@ public:
         float axisLength = 0.2f,
         LineColorMode lineColorMode = LineColorMode::LENGTH);
     
+    //导出Map中所有的相机位姿
+    static void ExportMapKeyFrameCameraPose(
+        const std::vector<KeyFrame*> &keyframes,
+        const std::string &filename
+    );
+
 };
 
 } // namespace ORB_SLAM3

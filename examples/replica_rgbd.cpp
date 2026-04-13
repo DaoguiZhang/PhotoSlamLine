@@ -41,6 +41,8 @@ void LoadImages(const std::filesystem::path &pathImageDir, std::vector<std::stri
 void saveTrackingTime(std::vector<float> &vTimesTrack, const std::string &strSavePath);
 void saveGpuPeakMemoryUsage(std::filesystem::path pathSave);
 
+void saveTrackingImagePaths(const std::vector<std::string> &tracking_image_paths, const std::string &strSavePath);
+
 #define USE_LINE_GAUSSIAN 1
 
 int main(int argc, char **argv)
@@ -146,6 +148,7 @@ int main(int argc, char **argv)
     // Vector for tracking time statistics
     std::vector<float> vTimesTrack;
     vTimesTrack.resize(nImages);
+    std::vector<std::string> tracking_image_paths;
 
     std::cout << std::endl << "-------" << std::endl;
     std::cout << "Start processing sequence ..." << std::endl;
@@ -162,6 +165,8 @@ int main(int argc, char **argv)
         cv::cvtColor(imRGB, imRGB, CV_BGR2RGB);
         imD = cv::imread(vstrImageFilenamesD[ni], cv::IMREAD_UNCHANGED);
         double tframe = ni;
+
+        tracking_image_paths.push_back(vstrImageFilenamesRGB[ni]);
 
         if (imRGB.empty())
         {
@@ -201,17 +206,33 @@ int main(int argc, char **argv)
         vTimesTrack[ni] = ttrack;
     }
 
+    std::cout << "Sequence processing finished. Waiting for backend to sync..." << std::endl;
+
     // Stop all threads
     pSLAM->Shutdown();
-    training_thd.join();
-    if (use_viewer)
+
+    // 4. 等待训练线程结束
+    // 因为你在 GaussianMapperLine::run() 结尾加了 target_stop_iter 循环，
+    // 所以 training_thd.join() 会阻塞在这里，直到那 2000 次优化全部完成。
+    if (training_thd.joinable())
+        training_thd.join();
+    if (use_viewer && viewer_thd.joinable())
         viewer_thd.join();
+
+    std::cout << "All threads finished. Saving results..." << std::endl;
+
+    //training_thd.join();
+    //if (use_viewer)
+    //    viewer_thd.join();
 
     // GPU peak usage
     saveGpuPeakMemoryUsage(output_dir / "GpuPeakUsageMB.txt");
 
     // Tracking time statistics
     saveTrackingTime(vTimesTrack, (output_dir / "TrackingTime.txt").string());
+
+    // Save tracking image paths
+    saveTrackingImagePaths(tracking_image_paths, (output_dir / "TrackingImagePaths.txt").string());
 
     // Save camera trajectory
     pSLAM->SaveTrajectoryTUM((output_dir / "CameraTrajectory_TUM.txt").string());
@@ -282,3 +303,13 @@ void saveGpuPeakMemoryUsage(std::filesystem::path pathSave)
     out << "Peak allocated (MB): " << max_alloc_MB << std::endl;
     out.close();
 }
+
+void saveTrackingImagePaths(const std::vector<std::string> &tracking_image_paths, const std::string &strSavePath)
+{
+    std::ofstream out(strSavePath);
+    for (const auto &path : tracking_image_paths)
+    {
+        out << path << std::endl;
+    }
+    out.close();
+}   

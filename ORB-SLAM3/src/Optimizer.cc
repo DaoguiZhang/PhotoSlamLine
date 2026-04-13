@@ -4077,6 +4077,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(), Tcw.translation().cast<double>()));
         vSE3->setId(pKFi->mnId);
         vSE3->setFixed(false);
+        vSE3->setFixed(pKFi->mnId==pMap->GetInitKFid());
         optimizer.addVertex(vSE3);
         if (pKFi->mnId > (int)maxKFid) maxKFid = pKFi->mnId;
         pCurrentMap->msOptKFs.insert(pKFi->mnId);
