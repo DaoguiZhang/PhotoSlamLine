@@ -77,6 +77,9 @@ Optimization.densify_grad_threshold: 0.001
 Optimization.weight_line_coherence: 0.005
 Optimization.weight_line_shape_ecc: 0.002
 Optimization.weight_line_shape_ori: 0.005
+max_anisotropy_threshold: 600.0
+lambda_anisotropy: 0.01
+absolute_max_ratio: 1500.0
 
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters

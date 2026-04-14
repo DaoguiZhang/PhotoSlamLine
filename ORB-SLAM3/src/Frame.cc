@@ -89,6 +89,11 @@ Frame::Frame(const Frame &frame)
         SetVelocity(frame.GetVelocity());
     }
 
+    // 在 Frame 的拷贝构造函数中添加
+    for(int i=0; i<FRAME_GRID_COLS; i++)
+        for(int j=0; j<FRAME_GRID_ROWS; j++)
+            mLineGrid[i][j] = frame.mLineGrid[i][j];
+
     mmProjectPoints = frame.mmProjectPoints;
     mmMatchedInImage = frame.mmMatchedInImage;
     mmProjectLines = frame.mmProjectLines;
@@ -670,6 +675,18 @@ void Frame::AssignFeaturesToGrid()
                 mGridRight[nGridPosX][nGridPosY].push_back(i - Nleft);
         }
     }
+
+    for(int i=0; i<NL; i++) 
+    {
+        const cv::line_descriptor::KeyLine &kl = mvKeyLinesUn[i];
+        int nGridPosX, nGridPosY;
+    
+        // 使用线段中心点计算所在的网格
+        // 注意：kl.pt 是中心点坐标
+        if(PosInGrid(cv::KeyPoint(kl.pt, 1.0f), nGridPosX, nGridPosY)) {
+            mLineGrid[nGridPosX][nGridPosY].push_back(i);
+        }
+    }
 }
 
 void Frame::ExtractORB(int flag, const cv::Mat &im, const int x0, const int x1)
@@ -953,6 +970,52 @@ bool Frame::isLineInFrustum(MapLine* pML, float viewingCosLimit)
     return true;
 }
 
+std::vector<std::size_t> Frame::GetLinesInRegion(const float &x1, const float &y1, 
+                                       const float &x2, const float &y2, 
+                                       const float &r) const
+{
+    std::vector<std::size_t> vIndices;
+    vIndices.reserve(NL);
+
+    // 1. 计算包围盒并扩充搜索半径 r
+    const float minX = std::min(x1, x2) - r;
+    const float maxX = std::max(x1, x2) + r;
+    const float minY = std::min(y1, y2) - r;
+    const float maxY = std::max(y1, y2) + r;
+
+    // 2. 将像素坐标转换为网格坐标范围
+    const int nMinCellX = std::max(0, (int)floor((minX - mnMinX) * mfGridElementWidthInv));
+    const int nMaxCellX = std::min((int)FRAME_GRID_COLS - 1, (int)ceil((maxX - mnMinX) * mfGridElementWidthInv));
+    const int nMinCellY = std::max(0, (int)floor((minY - mnMinY) * mfGridElementHeightInv));
+    const int nMaxCellY = std::min((int)FRAME_GRID_ROWS - 1, (int)ceil((maxY - mnMinY) * mfGridElementHeightInv));
+
+    // 3. 遍历涉及到的网格单元
+    for(int ix = nMinCellX; ix <= nMaxCellX; ix++) {
+        for(int iy = nMinCellY; iy <= nMaxCellY; iy++) {
+            const std::vector<std::size_t> &vCell = mLineGrid[ix][iy];
+            if(vCell.empty()) continue;
+
+            for(std::size_t iL : vCell) {
+                const cv::line_descriptor::KeyLine &kl = mvKeyLinesUn[iL];
+                
+                // 4. 精细过滤：判断检测到的线段端点是否在包围盒内
+                // 或者简单的计算中心点距离（类似 GetFeaturesInArea）
+                const float dx = kl.pt.x - (x1 + x2) * 0.5f;
+                const float dy = kl.pt.y - (y1 + y2) * 0.5f;
+
+                // 这里使用曼哈顿距离或欧氏距离做初步过滤
+                if(std::abs(dx) < (std::abs(x1 - x2) * 0.5f + r) && 
+                   std::abs(dy) < (std::abs(y1 - y2) * 0.5f + r)) {
+                    vIndices.push_back(iL);
+                }
+            }
+        }
+    }
+
+    // 5. 去重（因为同一条线可能被分到多个网格，如果按包围盒分配的话）
+    // 如果按中心点分配，则不需要去重
+    return vIndices;
+}
 
 // Original simpler version 没有裁剪
 bool Frame::isLineInFrustumOld(MapLine* pML, float viewingCosLimit)

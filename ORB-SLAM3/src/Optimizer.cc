@@ -2170,6 +2170,8 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
     return nInitialCorrespondences - nBad;
 }
 
+
+
 void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, MappingOperation& opr)
 {
     // Local KeyFrames: First Breath Search from Current Keyframe

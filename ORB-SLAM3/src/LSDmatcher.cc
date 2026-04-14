@@ -835,6 +835,88 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    int LSDmatcher::SearchByProjectionNewKeyFrame(KeyFrame* pKF, Frame &currentF, std::vector<MapLine*> &vpMapLineMatches)
+    {
+        if(currentF.NL == 0 || pKF->NL == 0)
+            return 0;
+        int nmatches = 0;
+        vpMapLineMatches.assign(currentF.NL, nullptr);
+
+        // 获取当前帧相对于参考帧/地图的位姿 (用于后续 isInFrustum 等判断)
+        // 假设 currentF 已经由 Motion Model 设置了初步位姿
+
+        // 遍历参考 KeyFrame 中的所有 MapLine
+        const std::vector<MapLine*> vpMapLinesKF = pKF->GetMapLineMatches();
+
+        for (size_t iKF = 0; iKF < vpMapLinesKF.size(); iKF++)
+        {
+            MapLine* pML = vpMapLinesKF[iKF];
+            if (!pML || pML->isBad()) continue;
+
+            // 1. 【几何过滤】检查线段是否在当前帧的视锥体内 (Frustum Culling)
+            // 这个函数会计算线段在当前帧的投影位置 mLsTrackProjX, mLsTrackProjY 等
+            if (!currentF.isLineInFrustum(pML, 0.5f)) 
+                continue;
+
+            // 获取投影后的参数 (投影直线方程或端点)
+            float projStartX = pML->mLsTrackProjX;
+            float projStartY = pML->mLsTrackProjY;
+            float projEndX = pML->mLeTrackProjX;
+            float projEndY = pML->mLeTrackProjY;
+
+            // 计算投影线段的角度 (用于法向约束)
+            float angleProj = atan2(projEndY - projStartY, projEndX - projStartX);
+
+            // 2. 【局部搜索】在投影位置附近的网格中寻找候选线段
+            // 假设你已经像 ORB 那样把线段按坐标分配到了 grid 里
+            float radius = 50.0f; // 搜索半径（像素）
+            vector<size_t> vIndices = currentF.GetLinesInRegion(projStartX, projStartY, projEndX, projEndY, radius);
+
+            if (vIndices.empty()) continue;
+
+            const cv::Mat& dKF = pKF->mLineDescriptors.row(iKF);
+            int bestDist = 256;
+            int bestIdx = -1;
+
+            for (const size_t iF : vIndices)
+            {
+                if (vpMapLineMatches[iF]) continue; // 已经被匹配过了
+
+                const cv::line_descriptor::KeyLine& kl = currentF.mvKeyLinesUn[iF];
+
+                // 3. 【方向约束 (核心)】 角度差必须小于 10 度
+                float dx = kl.endPointX - kl.startPointX;
+                float dy = kl.endPointY - kl.startPointY;
+                float angleDetected = atan2(dy, dx);
+            
+                float angleDiff = fabs(angleProj - angleDetected);
+                if (angleDiff > M_PI) angleDiff = 2 * M_PI - angleDiff;
+                // 兼容线段方向反向的情况 (0度和180度等效)
+                if (angleDiff > M_PI_2) angleDiff = fabs(M_PI - angleDiff);
+
+                if (angleDiff > 10.0f * M_PI / 180.0f) 
+                    continue; 
+
+                // 4. 【描述子匹配】在通过几何校验的候选集中找最像的
+                const cv::Mat& dF = currentF.mLineDescriptors.row(iF);
+                int dist = DescriptorDistance(dKF, dF); // 计算汉明距离
+
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestIdx = iF;
+                }
+            }
+
+            // 5. 【阈值检查】
+            if (bestDist < 64) // 经验阈值
+            {
+                vpMapLineMatches[bestIdx] = pML;
+                nmatches++;
+            }
+        }
+
+        return nmatches;
+    }
 
     void LSDmatcher::DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame)
     {
@@ -1153,6 +1235,35 @@ namespace ORB_SLAM3
         cv::waitKey(0);
     }
 
+    // 假设 kl1 是地图线段在当前帧的投影，kl2 是当前帧检测到的线段
+    bool LSDmatcher::CheckDirectionConsistency(const cv::line_descriptor::KeyLine& kl1, 
+                                           const cv::line_descriptor::KeyLine& kl2, 
+                                           float angle_threshold_deg)
+    {
+        // 1. 计算线段 1 的方向向量
+        float dx1 = kl1.endPointX - kl1.startPointX;
+        float dy1 = kl1.endPointY - kl1.startPointY;
+        float len1 = sqrt(dx1*dx1 + dy1*dy1 + 1e-6f);
+    
+        // 2. 计算线段 2 的方向向量
+        float dx2 = kl2.endPointX - kl2.startPointX;
+        float dy2 = kl2.endPointY - kl2.startPointY;
+        float len2 = sqrt(dx2*dx2 + dy2*dy2 + 1e-6f);
+
+        // 3. 计算余弦相似度 (点积 / 长度乘积)
+        // cos(theta) = (v1 . v2) / (|v1| * |v2|)
+        float cos_theta = (dx1 * dx2 + dy1 * dy2) / (len1 * len2);
+
+        // 4. 由于线段没有方向性（start和end交换也是同一条线），取绝对值
+        // 这样即便线段反向了，夹角也会被视为 0 度而不是 180 度
+        cos_theta = std::abs(cos_theta);
+
+        // 5. 角度检查
+        // 10度对应的余弦值约为 0.9848
+        float threshold_cos = cos(angle_threshold_deg * M_PI / 180.0f);
+
+        return cos_theta >= threshold_cos;
+    }
 
     //debug SearchByDescriptor(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)
     void LSDmatcher::DebugLineMatchSearchbyProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)

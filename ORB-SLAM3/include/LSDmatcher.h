@@ -62,10 +62,12 @@ namespace ORB_SLAM3
         void DebugDrawLineMatches(const Frame &lastFrame, const Frame &currentFrame);
         void DebugDrawLineMatchesFrame(Frame &CurrentFrame, std::string &windowName);
         void DebugSearchByProjectionLinesMatch(Frame &F, std::vector<MapLine*> &vpMapLines,const std::string &windowName);
+        bool CheckDirectionConsistency(const cv::line_descriptor::KeyLine& kl1, const cv::line_descriptor::KeyLine& kl2, float angle_threshold_deg);
         void DebugLineProjectedKeyFrame(KeyFrame* pKF, std::vector<MapLine*> &vpMapLines, const std::string & winName);
         void DebugLineMatchesTwoFrames(KeyFrame* pKF1,KeyFrame* pKF2,const std::vector<std::pair<MapLine*, MapLine*>> &vpMatchedLines,const std::string &winName);
         void DebugDrawProjectedLineFrame(Frame &CurrentFrame, std::string &windowName);
         int SearchByProjection(KeyFrame* pKF,Frame &currentF, std::vector<MapLine*> &vpMapLineMatches);
+        int SearchByProjectionNewKeyFrame(KeyFrame* pKF, Frame &currentF, std::vector<MapLine*> &vpMapLineMatches); //track keyframe
         void DebugDrawLineMatchesKeyFrame(KeyFrame* pKF, const Frame &currentFrame);
         int SearchByProjection(Frame &F, const std::vector<MapLine*> &vpMapLines, const float th=3);
         void DebugLineMatchSearchbyProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th);

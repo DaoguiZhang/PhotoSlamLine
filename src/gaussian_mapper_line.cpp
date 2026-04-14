@@ -368,7 +368,13 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
     densify_min_opacity_ =
         settings_file["Optimization.densify_min_opacity"].operator float();
 
-    
+    // 建议在 Optimization Parameters 块中添加
+    opt_params_.max_anisotropy_threshold_ = 
+        settings_file["Optimization.max_anisotropy_threshold"].isNone() ? 600.0f : settings_file["Optimization.max_anisotropy_threshold"].operator float();
+    opt_params_.lambda_anisotropy_ = 
+        settings_file["Optimization.lambda_anisotropy"].isNone() ? 0.01f : settings_file["Optimization.lambda_anisotropy"].operator float();
+    opt_params_.absolute_max_ratio_ = 
+        settings_file["Optimization.absolute_max_ratio"].isNone() ? 1500.0f : settings_file["Optimization.absolute_max_ratio"].operator float();
 
     // Viewer Parameters
     rendered_image_viewer_scale_ =
@@ -935,6 +941,35 @@ void GaussianMapperLine::trainForOneIteration()
     //loss = loss + loss_line + loss_line_shape;  //modified by zdg
 
     // ==============================================================================
+    // 🌟 [新增] 各向异性惩罚 (Anisotropy Penalty)
+    // ==============================================================================
+    // 限制高斯球的最大缩放比例。通常对于 Line Gaussians 设为 500-1000 较安全。
+    // ==============================================================================
+    // 使用从配置文件读取的参数
+    float max_aniso_th = opt_params_.max_anisotropy_threshold_; 
+    float lambda_aniso = opt_params_.lambda_anisotropy_; 
+
+    // 1. 获取当前尺度 [N, 3]
+    torch::Tensor scaling = gaussians_->getScaling(); 
+    
+    // 2. 修正 max/min 的 tuple 访问方式
+    // torch::max 返回 std::tuple<Tensor, Tensor>，第 0 个是 values
+    auto max_res = torch::max(scaling, /*dim=*/1);
+    torch::Tensor max_s = std::get<0>(max_res);
+    
+    auto min_res = torch::min(scaling, /*dim=*/1);
+    torch::Tensor min_s = std::get<0>(min_res);
+    
+    // 3. 计算比值 Ratio = max / (min + eps)
+    torch::Tensor ratio = max_s / (min_s + 1e-6);
+    
+    // 4. 计算 L2 惩罚项
+    torch::Tensor loss_aniso = torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
+    
+    loss = loss + (lambda_aniso * loss_aniso);
+    // ==============================================================================
+
+    // ==============================================================================
     // 🌟 核心改进：引入结构正则化 L_str (Equation 9 in your paper) 及其消融开关
     // ==============================================================================
     // 从配置文件中读取权重，而不是硬编码 0.1f 或 0.05f
@@ -1029,6 +1064,16 @@ void GaussianMapperLine::trainForOneIteration()
                     scene_->cameras_extent_,
                     size_threshold
                 );
+
+                // ==============================================================================
+                // 🌟 [新增] 强制剔除极致拉伸点 (Post-Pruning)
+                // ==============================================================================
+                // 在 densify 结束后，立即扫描并干掉由于梯度更新意外拉伸过长的“针”
+                if (getIteration() > opt_params_.densify_from_iter_) {
+                    // 使用从配置文件读取的参数
+                    float absolute_max_ratio = opt_params_.absolute_max_ratio_; // 物理极限，超过此比例必是伪影
+                    gaussians_->pruneExceedinglyAnisotropic(absolute_max_ratio);
+                }
             }
 
             if (opacityResetInterval()

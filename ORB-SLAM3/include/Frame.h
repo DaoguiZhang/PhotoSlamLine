@@ -172,6 +172,10 @@ public:
     //Backprojects a line segments(if stereo/depth info available) into 3D world coordinates
     bool UnprojectStereoLineSeg(const int &i, std::pair<Eigen::Vector3f, Eigen::Vector3f>& xLine3D, std::pair<Eigen::Vector3f, Eigen::Vector3f>& colorLine3DRGB);
 
+    std::vector<std::size_t> GetLinesInRegion(const float &x1, const float &y1, 
+                                       const float &x2, const float &y2, 
+                                       const float &r) const;
+
     ConstraintPoseImu* mpcpi;
 
     bool imuIsPreintegrated();
@@ -244,6 +248,8 @@ private:
     // IMU linear velocity
     Eigen::Vector3f mVw;
     bool mbHasVelocity;
+
+    std::vector<std::size_t> mLineGrid[FRAME_GRID_COLS][FRAME_GRID_ROWS];
 
     // === 内部比较器 ===
     static bool compare_descriptor_by_NN_dist(const std::vector<cv::DMatch>& a,

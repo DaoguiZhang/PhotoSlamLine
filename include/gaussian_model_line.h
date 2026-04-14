@@ -67,6 +67,7 @@ public:
     GaussianModelLine(const GaussianModelParamsLine& model_params);
 
     torch::Tensor getScalingActivation();
+    torch::Tensor getScaling();
     torch::Tensor getRotationActivation();
     torch::Tensor getXYZ();
     torch::Tensor getFeatures();
@@ -120,6 +121,8 @@ public:
 
     void prunePoints(torch::Tensor& mask);
     void prunePointsWithLineAwareness(torch::Tensor& mask);
+
+    void pruneExceedinglyAnisotropic(float threshold);
 
     void densificationPostfix(
         torch::Tensor& new_xyz,
@@ -216,6 +219,7 @@ public:
 
     int active_sh_degree_;
     int max_sh_degree_;
+    float max_aniso_threshold_;
 
     torch::Tensor xyz_;
     torch::Tensor is_line_;   // [P] bool, check whether point is line sampled or not

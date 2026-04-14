@@ -273,6 +273,7 @@ public:
 
     float z_near_ = 0.01f;
     float z_far_ = 100.0f;
+    float max_aniso_threshold_ = 1500.0f; // 线高斯的 anisotropic scale 不宜过大，过大会导致训练不稳定（尤其 early stage）
 
     // Data
     bool kfid_shuffled_ = false;

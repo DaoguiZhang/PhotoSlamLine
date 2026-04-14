@@ -98,4 +98,7 @@ public:
     float weight_line_coherence_=0.0;
     float weight_line_shape_ori_=0.0;
     float weight_line_shape_ecc_=0.0;
+    float max_anisotropy_threshold_=600.0f;   // 对应 max_aniso_th
+    float lambda_anisotropy_=0.01f;          // 对应 lambda_aniso
+    float absolute_max_ratio_=1500.0f;         // 对应 absolute_max_ratio
 };

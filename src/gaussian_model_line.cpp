@@ -150,6 +150,12 @@ torch::Tensor GaussianModelLine::getScalingActivation()
     return torch::exp(this->scaling_);
 }
 
+torch::Tensor GaussianModelLine::getScaling()
+{
+    // 3DGS 中 scaling_ 存储的是 log 空间的值，激活需用 exp
+    return torch::exp(this->scaling_);
+}
+
 torch::Tensor GaussianModelLine::getRotationActivation()
 {
     return torch::nn::functional::normalize(this->rotation_);
@@ -1418,6 +1424,28 @@ void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
 
     this->max_radii2D_ =
         this->max_radii2D_.index({valid_points_mask});
+}
+
+
+void GaussianModelLine::pruneExceedinglyAnisotropic(float threshold)
+{
+    torch::NoGradGuard no_grad;
+    torch::Tensor s = getScaling();
+    
+    // 计算每个高斯球的长宽比
+    auto max_s = std::get<0>(torch::max(s, 1));
+    auto min_s = std::get<0>(torch::min(s, 1));
+    torch::Tensor ratio = max_s / (min_s + 1e-6);
+    
+    // 找出那些长得像“针”一样的点
+    torch::Tensor cull_mask = ratio > threshold;
+    
+    if (cull_mask.any().item<bool>()) {
+        std::cerr << "[Gaussian Model] Pruning " << cull_mask.sum().item<int>() 
+                  << " spiky Gaussians (Ratio > " << threshold << ")" << std::endl;
+        // 调用你现有的剪裁函数
+        this->prunePointsWithLineAwareness(cull_mask);
+    }
 }
 
 #if 0
