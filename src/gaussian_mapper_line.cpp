@@ -362,6 +362,12 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["Optimization.weight_line_shape_ori"].operator float();
     opt_params_.weight_line_shape_ecc_ =
         settings_file["Optimization.weight_line_shape_ecc"].operator float();
+    //added by zdg
+    opt_params_.voxel_size_ = settings_file["Optimization.voxel_size"].isNone() ? 0.25f : settings_file["Optimization.voxel_size"].operator float();
+    opt_params_.line_sample_step_ = settings_file["Optimization.line_sample_step"].isNone() ? 0.2f : settings_file["Optimization.line_sample_step"].operator float();
+    opt_params_.line_view_weight_ = settings_file["Optimization.line_view_weight"].isNone() ? 2.0f : settings_file["Optimization.line_view_weight"].operator float();
+    opt_params_.line_sigma_ = settings_file["Optimization.line_sigma"].isNone() ? 3.0f : settings_file["Optimization.line_sigma"].operator float();
+    opt_params_.line_top_k_ = settings_file["Optimization.line_top_k"].isNone() ? 3 : settings_file["Optimization.line_top_k"].operator int();
 
     prune_big_point_after_iter_ =
         settings_file["Optimization.prune_big_point_after_iter"].operator int();
@@ -459,10 +465,11 @@ void GaussianMapperLine::run()
 
                     // 3. 执行采样 (Sample Points)
                     // 建议将这些参数放入配置文件 readConfigFromFile 中
-                    float sample_step = 0.1f; 
-                    float view_angle_power = 2.0f;
-                    float sigma_line_pixel = 3.0f;
-                    int top_k = 3;
+                    float sample_step = opt_params_.line_sample_step_; 
+                    float view_angle_power = opt_params_.line_view_weight_;
+                    float sigma_line_pixel = opt_params_.line_sigma_;
+                    int top_k = opt_params_.line_top_k_;
+
                     // 这一步会填充 mapLine 内部的 buffer
                     pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);
                     
@@ -485,11 +492,16 @@ void GaussianMapperLine::run()
                         point3D.sample_step_ = sample_step; // 传入步长，用于初始化 Scale_parallel
                         // 如果 MapLine 能提供 ref_depth 或 ref_focal 更好，否则使用默认值
                         // point3D.ref_depth_z_ = ...;
-                        
+                        // point3D.ref_focal_ = ...;
+
+                        scene_->addPointToVoxel(sampledPoints3D[j], opt_params_.voxel_size_); // 先把点加入体素网格，后续优化时会更新位置
                         ///scene_->cachePoint3D(pML->mnId, point3D);
                         scene_->cacheLineSampledPnts3D(pML->mnId, point3D);
                     }
                 }
+
+                std::cerr << "[Gaussian Mapper] Voxel Grid Initialized. Total occupied cells: " 
+                            << scene_->getVoxelCount() << std::endl;
 
                 //debug by zdg
                 //std::cerr <<"===============================================================" << std::endl;
@@ -631,7 +643,7 @@ void GaussianMapperLine::run()
     // Second loop: Incremental gaussian mapping
     int SLAM_stop_iter = 0;
     while (!isStopped()) {
-        //std::cerr <<"============================start run GaussianMapperLine 3 ===================================" << std::endl;
+        //std::cerr <<"============================start run GaussianMapperLine: LOCAL Mapping  ===================================" << std::endl;
         // Check conditions for incremental mapping
         if (hasMetIncrementalMappingConditions()) {
             combineMappingOperations_withLine();
@@ -1474,7 +1486,18 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     std::vector<Point3D> new_line_sample_points;
                     new_line_sample_points.reserve(num_l_points);
 
+                    // 设定网格大小，建议与采样步长一致或略大
+                    //const float v_size = 0.25f; //added by zdg
+
                     for (size_t i = 0; i < num_l_points; ++i) {
+
+                        Eigen::Vector3f p_pos(l_positions[i*3], l_positions[i*3+1], l_positions[i*3+2]);
+                
+                        // 🌟 核心去重判断：O(1) 复杂度
+                        if (scene_->isVoxelOccupied(p_pos, opt_params_.voxel_size_)) {
+                            continue; // 空间上已经存在线段高斯，跳过
+                        }
+
                         Point3D p;
                         // Position
                         p.xyz_(0) = l_positions[i * 3 + 0];
@@ -1498,6 +1521,9 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         p.sample_step_ = 0.1f; // 需与 LocalMapping 中的采样步长一致
 
                         new_line_sample_points.push_back(p);
+
+                        // 记录到场景缓存和 VoxelGrid 中
+                        scene_->addPointToVoxel(p_pos, opt_params_.voxel_size_);
                         
                         // (可选) 如果你想在 Scene 中也缓存这些点用于 Debug/SavePly
                         // scene_->cacheLineSampledPnts3D(0 /*dummy_line_id*/, p);

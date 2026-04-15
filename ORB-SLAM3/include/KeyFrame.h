@@ -564,8 +564,20 @@ protected:
     std::mutex mMutexFeatures;
     std::mutex mMutexMap;
 
+    //--------------------------------------------------------------------------------------------
+    // Line Segment Sampling Parameters (For Photo-SLAM-L Refinement)
+    //--------------------------------------------------------------------------------------------
+    float mLineSampleStep, mLineViewWeight, mLineSigma;
+    int mLineTopK;
+
+
 public:
-    
+
+    float getLineSampleStep() const { return mLineSampleStep; }
+    float getLineViewWeight() const { return mLineViewWeight; }
+    float getLineSigma() const { return mLineSigma; }
+    int getLineTopK() const { return mLineTopK; }
+
     GeometricCamera* mpCamera, *mpCamera2;
 
     //Indexes of stereo observations correspondences

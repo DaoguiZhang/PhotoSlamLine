@@ -3331,13 +3331,67 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
 {
     using namespace torch::indexing;
 
+    // 1. 获取归一化梯度 (此时长度为 N)
+    auto grads = this->xyz_gradient_accum_ / this->denom_;
+    grads.index_put_({grads.isnan()}, 0.0f);
+
+    // =========================================================
+    // 2. 核心改进：在点数增加前，先计算针对当前点的剪裁掩码
+    // =========================================================
+    // A. 基础透明度掩码
+    auto opacity_mask = (this->getOpacityActivation() < min_opacity).view({-1});
+
+    // B. 激进线段剪裁 (只针对已经在图中存在一段时间的点)
+    float lazy_threshold = max_grad * 0.05f;
+    // 增加一个条件：denom_ > 0 确保这个点至少被投影过，且不是刚诞生的
+    auto lazy_line_mask = torch::logical_and(
+        this->is_line_, 
+        torch::logical_and(grads.squeeze() < lazy_threshold, this->denom_.squeeze() > 0)
+    );
+
+    auto prune_mask = torch::logical_or(opacity_mask, lazy_line_mask);
+
+    // C. 屏幕空间与世界空间尺寸检查
+    if (max_screen_size > 0) {
+        auto big_points_vs = this->max_radii2D_ > max_screen_size;
+        auto big_points_ws = std::get<0>(this->getScalingActivation().max(1)) > 0.1f * extent;
+        prune_mask = torch::logical_or(prune_mask, torch::logical_or(big_points_vs, big_points_ws));
+    }
+
+    // =========================================================
+    // 3. 执行物理剪裁 (先清减，再增补)
+    // =========================================================
+    this->prunePointsWithLineAwareness(prune_mask);
+
+    // 重新计算剪裁后的梯度，用于加密逻辑
+    // 因为 prune 之后原有 grads 已经失效了
+    auto grads_after_prune = this->xyz_gradient_accum_ / this->denom_;
+    grads_after_prune.index_put_({grads_after_prune.isnan()}, 0.0f);
+
+    // =========================================================
+    // 4. 执行加密 (此时 N 已变，内部会更新状态)
+    // =========================================================
+    this->densifyAndCloneWithLineAwareness(grads_after_prune, max_grad, extent);
+    this->densifyAndSplitWithLineAwareness(grads_after_prune, max_grad, extent, 2);
+
+    // 5. 显存清理
+    c10::cuda::CUDACachingAllocator::emptyCache();
+}
+
+/*
+void GaussianModelLine::densifyAndPruneWithLineAwareness(
+    float max_grad,
+    float min_opacity,
+    float extent,
+    int max_screen_size)
+{
+    using namespace torch::indexing;
     // =========================================================
     // 1. Accumulated gradient (photometric-driven)
     // =========================================================
     auto grads = this->xyz_gradient_accum_ / this->denom_;
     grads.index_put_({grads.isnan()}, 0.0f);
     grads.index_put_({grads.isinf()}, 0.0f);
-
     // =========================================================
     // 2. Structure-aware densification
     // =========================================================
@@ -3345,18 +3399,23 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     //std::cerr << "[DEBUG] Before Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
     this->densifyAndCloneWithLineAwareness(grads, max_grad, extent);
     //std::cerr << "[DEBUG] After Clone: Rot Shape = " << this->rotation_.sizes() << std::endl;
-
     const int split_N = 2; // recommended
     //std::cerr << "[DEBUG] Before Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
     this->densifyAndSplitWithLineAwareness(grads, max_grad, extent, split_N);
     //std::cerr << "[DEBUG] After Split: Rot Shape = " << this->rotation_.sizes() << std::endl;
-
+    // 3. 【核心改进：激进剪裁掩码】
     // =========================================================
     // 3. Base pruning criteria (opacity-driven)
     // =========================================================
-    auto prune_mask =
-        (this->getOpacityActivation() < min_opacity).view({-1});
-
+    auto opacity_mask = (this->getOpacityActivation() < min_opacity).view({-1});
+    // 策略 B: 梯度贡献度剪裁 (仅针对线特征)
+    // 如果一个线点在当前周期的平均梯度低于阈值的 5%，认为其“无贡献”
+    float lazy_threshold = max_grad * 0.05f;    //added by zdg
+    auto lazy_line_mask = torch::logical_and(this->is_line_, grads.squeeze() < lazy_threshold);
+    // 合并剪裁掩码
+    auto prune_mask = torch::logical_or(opacity_mask, lazy_line_mask);
+    //auto prune_mask =
+    //    (this->getOpacityActivation() < min_opacity).view({-1});
     // =========================================================
     // 4. Screen-space and world-space pruning
     // =========================================================
@@ -3374,18 +3433,16 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
             torch::logical_or(big_points_vs, big_points_ws)
         );
     }
-
     // =========================================================
     // 5. Prune (line-aware state-safe)
     // =========================================================
     this->prunePointsWithLineAwareness(prune_mask);
-
     // =========================================================
     // 6. Free cached CUDA memory
     // =========================================================
     c10::cuda::CUDACachingAllocator::emptyCache();
 }
-
+*/
 
 //
 torch::Tensor GaussianModelLine::computeLineLevelPruneMask(

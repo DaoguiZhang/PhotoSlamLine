@@ -52,7 +52,7 @@ Record.record_loop_ply: 0 # 0:false, 1 or other integer:true
 #--------------------------------------------------------------------------------------------
 
 # Learning rate
-Optimization.max_num_iterations: 30100
+Optimization.max_num_iterations: 301000
 Optimization.position_lr_init: 0.00032 #0.00016
 Optimization.position_lr_final: 0.00032
 Optimization.position_lr_delay_mult: 0.01
@@ -80,6 +80,17 @@ Optimization.weight_line_shape_ori: 0.005
 max_anisotropy_threshold: 600.0
 lambda_anisotropy: 0.01
 absolute_max_ratio: 1500.0
+
+#--------------------------------------------------------------------------------------------
+# Line Segment Sampling Parameters (For Photo-SLAM-L Refinement)
+#--------------------------------------------------------------------------------------------
+Line.SampleStep: 0.2      # sample point (meter)
+Line.ViewWeight: 2.0      # 视角权重因子
+Line.Sigma: 3.0           # 像素一致性标准差
+Line.TopK: 3              # 选取前K个最佳视角进行融合
+
+#line point voxel
+Optimization.voxel_size: 0.25
 
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters

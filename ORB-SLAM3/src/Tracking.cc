@@ -626,6 +626,16 @@ void Tracking::newParameterLoader(Settings *settings) {
         mpIniLSDextractor = new LSDextractor();
 
     std::cout << std::endl << "LSD Extractor Parameters(to do next): " << std::endl;
+    // 🌟 新增：从 settings 中读取线段采样参数
+    mLineSampleStep = settings->lineSampleStep();
+    mLineViewWeight = settings->lineViewWeight();
+    mLineSigma = settings->lineSigma();
+    mLineTopK = settings->lineTopK();
+
+    std::cout << "\t-Sampling step: " << mLineSampleStep << std::endl;
+    std::cout << "\t-View weight: " << mLineViewWeight << std::endl;
+    std::cout << "\t-Sigma: " << mLineSigma << std::endl;
+    std::cout << "\t-Top-K: " << mLineTopK << std::endl;
 
     //IMU parameters
     Sophus::SE3f Tbc = settings->Tbc();
@@ -1337,58 +1347,12 @@ bool Tracking::ParseORBParamFile(cv::FileStorage &fSettings)
 bool Tracking::ParseLSDParamFile(cv::FileStorage &fSettings)
 {
     bool b_miss_params = false;
-    //int nFeatures, nLevels, fIniThFAST, fMinThFAST;
-    //float fScaleFactor;
-    // cv::FileNode node = fSettings["LSDextractor.nFeatures"];
-    // if(!node.empty() && node.isInt())
-    // {
-    //     nFeatures = node.operator int();
-    // }
-    // else
-    // {
-    //     std::cerr << "*LSDextractor.nFeatures parameter doesn't exist or is not an integer*" << std::endl;
-    //     b_miss_params = true;
-    // }
-    // node = fSettings["ORBextractor.scaleFactor"];
-    // if(!node.empty() && node.isReal())
-    // {
-    //     fScaleFactor = node.real();
-    // }
-    // else
-    // {
-    //     std::cerr << "*ORBextractor.scaleFactor parameter doesn't exist or is not a real number*" << std::endl;
-    //     b_miss_params = true;
-    // }
-    // node = fSettings["ORBextractor.nLevels"];
-    // if(!node.empty() && node.isInt())
-    // {
-    //     nLevels = node.operator int();
-    // }
-    // else
-    // {
-    //     std::cerr << "*ORBextractor.nLevels parameter doesn't exist or is not an integer*" << std::endl;
-    //     b_miss_params = true;
-    // }
-    // node = fSettings["ORBextractor.iniThFAST"];
-    // if(!node.empty() && node.isInt())
-    // {
-    //     fIniThFAST = node.operator int();
-    // }
-    // else
-    // {
-    //     std::cerr << "*ORBextractor.iniThFAST parameter doesn't exist or is not an integer*" << std::endl;
-    //     b_miss_params = true;
-    // }
-    // node = fSettings["ORBextractor.minThFAST"];
-    // if(!node.empty() && node.isInt())
-    // {
-    //     fMinThFAST = node.operator int();
-    // }
-    // else
-    // {
-    //     std::cerr << "*ORBextractor.minThFAST parameter doesn't exist or is not an integer*" << std::endl;
-    //     b_miss_params = true;
-    // }
+
+    // 在解析 YAML 的地方增加
+    mLineSampleStep = fSettings["Line.SampleStep"].isNone() ? 0.1f : (float)fSettings["Line.SampleStep"];
+    mLineViewWeight = fSettings["Line.ViewWeight"].isNone() ? 2.0f : (float)fSettings["Line.ViewWeight"];
+    mLineSigma      = fSettings["Line.Sigma"].isNone() ? 3.0f : (float)fSettings["Line.Sigma"];
+    mLineTopK       = fSettings["Line.TopK"].isNone() ? 2 : (int)fSettings["Line.TopK"];
 
     if(b_miss_params)
     {
@@ -1405,7 +1369,10 @@ bool Tracking::ParseLSDParamFile(cv::FileStorage &fSettings)
         mpIniLSDextractor = new LSDextractor();
 
     std::cout << std::endl << "LSD Extractor Parameters(to do next): " << std::endl;
-    //cout << "- Number of Line Features: " << nFeatures << endl;
+    std::cout << "\t-Sampling step: " << mLineSampleStep << std::endl;
+    std::cout << "\t-View weight: " << mLineViewWeight << std::endl;
+    std::cout << "\t-Sigma: " << mLineSigma << std::endl;
+    std::cout << "\t-Top-K: " << mLineTopK << std::endl;
 
     return true;
 }
@@ -1786,18 +1753,20 @@ Sophus::SE3f Tracking::GrabImageRGBDWithLine(const cv::Mat &imRGB,const cv::Mat 
         //Get Line featrue and point featrue
         //std::cerr << "-------------------------------frame start ------------------------------" <<std::endl;
         mCurrentFrame = Frame(mImGray,imDepth,mImRGB,timestamp,mpORBextractorLeft, mpLSDextractorLeft, mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera);
+        mCurrentFrame.setLineSegmentSamplingParams(mLineSampleStep, mLineViewWeight, mLineSigma, mLineTopK);    //Set line segment sampling parameters
         //std::cerr << "-------------------------------frame end ------------------------------" <<std::endl;
         //mCurrentFrame = Frame(mImGray,imDepth,mImRGB,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera);
     }   
     else if(mSensor == System::IMU_RGBD)
     {
         mCurrentFrame = Frame(mImGray,imDepth,mImRGB,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,&mLastFrame,*mpImuCalib);
+        mCurrentFrame.setLineSegmentSamplingParams(mLineSampleStep, mLineViewWeight, mLineSigma, mLineTopK);
     }
 
     mCurrentFrame.mNameFile = filename;
     mCurrentFrame.mnDataset = mnNumDataset;
     std::cerr << "Frame id: " << mCurrentFrame.mnId << std::endl;
-    std::cerr << "mCurrentFrame.mNameFile: " << mCurrentFrame.mNameFile << std::endl;
+    //std::cerr << "mCurrentFrame.mNameFile: " << mCurrentFrame.mNameFile << std::endl;
 
 #ifdef REGISTER_TIMES
     vdORBExtract_ms.push_back(mCurrentFrame.mTimeORB_Ext);
@@ -1806,7 +1775,7 @@ Sophus::SE3f Tracking::GrabImageRGBDWithLine(const cv::Mat &imRGB,const cv::Mat 
     TrackWithLine();
 
     //查看一下是否有很多Map,用于后续的优化
-    std::cerr <<"------------------------------------------------atlas map---------------------------------------- size: " << mpAtlas->CountMaps() << std::endl;
+    //std::cerr <<"------------------------------------------------atlas map---------------------------------------- size: " << mpAtlas->CountMaps() << std::endl;
 
     return mCurrentFrame.GetPose();
 }
@@ -2788,7 +2757,7 @@ void Tracking::TrackWithLine()
                 {
                     Verbose::PrintMess("TRACK: Track with respect to the reference KF ", Verbose::VERBOSITY_DEBUG);
                     bOK = TrackReferenceKeyFrameWithLine();
-                    std::cerr << "---------------------------------------- 0000 end TrackReferenceKeyFrameWithLine----------------------------" << std::endl;
+                    //std::cerr << "---------------------------------------- 0000 end TrackReferenceKeyFrameWithLine----------------------------" << std::endl;
                 }
                 else
                 {
@@ -4495,7 +4464,7 @@ bool Tracking::TrackWithMotionModelWithLine()
     //std::cerr << mCurrentFrame.GetPose().rotationMatrix() << std::endl;
     //std::cerr << mCurrentFrame.GetPose().translation() << std::endl;
     //如果匹配点和线都足够，则进行联合优化，如果真有线段不够，则只进行点的优化
-    if(nLinematches>=20)
+    if(nLinematches>=10)
     {
         // Optimize frame pose with all matches
         //Optimizer::PoseOptimizationWithLine(&mCurrentFrame);

@@ -190,6 +190,23 @@ GaussianSceneLine::getNerfppNorm()
     return std::make_tuple(translate, radius);
 }
 
+bool GaussianSceneLine::isVoxelOccupied(const Eigen::Vector3f& pos, float voxel_size) {
+    VoxelKeyGaussian key;
+    key.x = static_cast<int>(std::floor(pos.x() / voxel_size));
+    key.y = static_cast<int>(std::floor(pos.y() / voxel_size));
+    key.z = static_cast<int>(std::floor(pos.z() / voxel_size));
+
+    return line_voxel_grid_.find(key) != line_voxel_grid_.end();
+}
+
+void GaussianSceneLine::addPointToVoxel(const Eigen::Vector3f& pos, float voxel_size) {
+    VoxelKeyGaussian key;
+    key.x = static_cast<int>(std::floor(pos.x() / voxel_size));
+    key.y = static_cast<int>(std::floor(pos.y() / voxel_size));
+    key.z = static_cast<int>(std::floor(pos.z() / voxel_size));
+    
+    line_voxel_grid_.insert(key);
+}
 
 void GaussianSceneLine::saveDebugSceneToObj(const std::filesystem::path& filename)
 {

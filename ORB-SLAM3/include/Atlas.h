@@ -333,6 +333,7 @@ public:
 
     // Data
     float mfScale; ///<  ScaleRefinement: global; LoopClosingBA: only for visible; LocalMappingBA: meaningless
+    float line_sample_distance_ = 0.05f; // added by zdg
     Sophus::SE3f mT;
 
 protected:

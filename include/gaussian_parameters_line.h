@@ -101,4 +101,9 @@ public:
     float max_anisotropy_threshold_=600.0f;   // 对应 max_aniso_th
     float lambda_anisotropy_=0.01f;          // 对应 lambda_aniso
     float absolute_max_ratio_=1500.0f;         // 对应 absolute_max_ratio
+    float voxel_size_=0.25f;                   // 对应 voxel_size
+    float line_sample_step_= 0.2f;                 // 对应 lineSampleStep
+    float line_view_weight_ = 2.0f;              // 对应 lineViewWeight
+    float line_sigma_ = 3.0f;                        // 对应 lineSigma
+    int line_top_k_ = 3;                       // 对应 lineTopK
 };

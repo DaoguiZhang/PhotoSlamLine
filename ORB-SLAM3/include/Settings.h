@@ -126,6 +126,12 @@ namespace ORB_SLAM3 {
         cv::Mat M2r() {return M2r_;}
         cv::Mat Q() {return Q_;}
 
+        // 增加线段相关参数
+        float lineSampleStep() { return lineSampleStep_; }
+        float lineViewWeight() { return lineViewWeight_; }
+        float lineSigma() { return lineSigma_; }
+        int lineTopK() { return lineTopK_; }
+
     private:
         template<typename T>
         T readParameter(cv::FileStorage& fSettings, const std::string& name, bool& found,const bool required = true){
@@ -157,6 +163,7 @@ namespace ORB_SLAM3 {
         void readViewer(cv::FileStorage& fSettings);
         void readLoadAndSave(cv::FileStorage& fSettings);
         void readOtherParameters(cv::FileStorage& fSettings);
+        void readLSD(cv::FileStorage &fSettings);
 
         void precomputeRectificationMaps();
 
@@ -232,6 +239,9 @@ namespace ORB_SLAM3 {
          * Other stuff
          */
         float thFarPoints_;
+
+        float lineSampleStep_, lineViewWeight_, lineSigma_;
+        int lineTopK_;
 
     };
 };

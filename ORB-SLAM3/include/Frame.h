@@ -89,6 +89,9 @@ public:
     // extract line feature, 自己添加的
     void ExtractLSD(int flag, const cv::Mat &im);
 
+    // set the line segment sampling parameters
+    void setLineSegmentSamplingParams(float step, float viewWeight, float sigma, int topK);
+
     //点线特征选择
     void featureSelect(const cv::Mat &im);
 
@@ -429,6 +432,11 @@ public:
     string mNameFile;
 
     int mnDataset;
+    //--------------------------------------------------------------------------------------------
+    // Line Segment Sampling Parameters (For Photo-SLAM-L Refinement)
+    //--------------------------------------------------------------------------------------------
+    float mLineSampleStep, mLineViewWeight, mLineSigma;
+    int mLineTopK;
 
 #ifdef REGISTER_TIMES
     double mTimeORB_Ext;

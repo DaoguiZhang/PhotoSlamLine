@@ -71,7 +71,7 @@ Frame::Frame(const Frame &frame)
      monoLeft(frame.monoLeft), monoRight(frame.monoRight), mvLeftToRightMatch(frame.mvLeftToRightMatch),
      mvRightToLeftMatch(frame.mvRightToLeftMatch), mvStereo3Dpoints(frame.mvStereo3Dpoints),
      mTlr(frame.mTlr), mRlr(frame.mRlr), mtlr(frame.mtlr), mTrl(frame.mTrl),
-     mTcw(frame.mTcw), mbHasPose(false), mbHasVelocity(false)
+     mTcw(frame.mTcw), mbHasPose(false), mbHasVelocity(false), mLineSampleStep(frame.mLineSampleStep), mLineViewWeight(frame.mLineViewWeight), mLineSigma(frame.mLineSigma), mLineTopK(frame.mLineTopK)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++){
@@ -112,7 +112,8 @@ Frame::Frame(const Frame &frame)
 Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const cv::Mat &imRGB, const cv::Mat &imRightRGB, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera, Frame* pPrevF, const IMU::Calib &ImuCalib)
     :mpcpi(NULL), mpORBvocabulary(voc),mpORBextractorLeft(extractorLeft),mpORBextractorRight(extractorRight), mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
-     mpCamera(pCamera) ,mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+     mpCamera(pCamera) ,mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false),
+     mLineSampleStep(0.1f), mLineViewWeight(2.0f), mLineSigma(3.0f), mLineTopK(2)
 {
     // Frame ID
     mnId=nNextId++;
@@ -218,7 +219,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
-     mpCamera(pCamera),mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+     mpCamera(pCamera),mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false),
+     mLineSampleStep(0.1f), mLineViewWeight(2.0f), mLineSigma(3.0f), mLineTopK(2)
 {
     // Frame ID
     mnId=nNextId++;
@@ -313,7 +315,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),  mpORBextractorRight(static_cast<ORBextractor*>(NULL)), mpLineExtractorLeft(lsd_extractor), mpLineExtractorRight(static_cast<LSDextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
-     mpCamera(pCamera),mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+     mpCamera(pCamera),mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false),
+     mLineSampleStep(0.1f), mLineViewWeight(2.0f), mLineSigma(3.0f), mLineTopK(2)
 {
     // Frame ID
     mnId=nNextId++;
@@ -429,7 +432,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(static_cast<Pinhole*>(pCamera)->toK()), mK_(static_cast<Pinhole*>(pCamera)->toK_()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL),mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false), mpCamera(pCamera),
-     mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+     mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false), mLineSampleStep(0.1f), mLineViewWeight(2.0f), mLineSigma(3.0f), mLineTopK(2)
 {
     // Frame ID
     mnId=nNextId++;
@@ -529,7 +532,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor), mpORBextractorRight(static_cast<ORBextractor*>(NULL)), mpLineExtractorLeft(lsd_extractor), mpLineExtractorRight(static_cast<LSDextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(static_cast<Pinhole*>(pCamera)->toK()), mK_(static_cast<Pinhole*>(pCamera)->toK_()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL),mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false), mpCamera(pCamera),
-     mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+     mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false), mLineSampleStep(0.1f), mLineViewWeight(2.0f), mLineSigma(3.0f), mLineTopK(2)
 {
     // Frame ID
     mnId=nNextId++;
@@ -706,6 +709,14 @@ void Frame::ExtractLSD(int flag, const cv::Mat &im)
         (*mpLineExtractorLeft)(im, cv::Mat(), mvKeyLines, mLineDescriptors, vLapping);
     else
         (*mpLineExtractorRight)(im, cv::Mat(), mvKeyLinesRight, mLineDescriptorsRight, vLapping);
+}
+
+void Frame::setLineSegmentSamplingParams(float step, float viewWeight, float sigma, int topK)
+{
+    mLineSampleStep = step;
+    mLineViewWeight = viewWeight;
+    mLineSigma = sigma;
+    mLineTopK = topK;
 }
 
 void Frame::featureSelect(const cv::Mat &im)

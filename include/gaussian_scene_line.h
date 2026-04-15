@@ -20,6 +20,7 @@
 
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>    //added by zdg
 #include <memory>
 #include <mutex>
 #include <tuple>
@@ -34,6 +35,24 @@
 #include "gaussian_parameters_line.h"
 #include "gaussian_model_line.h"
 #include "gaussian_keyframe_line.h"
+
+//added by zdg
+// 定义 Voxel 的 Key (哈希用)
+struct VoxelKeyGaussian {
+    int x, y, z;
+
+    bool operator==(const VoxelKeyGaussian& other) const {
+        return x == other.x && y == other.y && z == other.z;
+    }
+};
+
+// Voxel 坐标的哈希函数
+struct VoxelHasherGaussian {
+    size_t operator()(const VoxelKeyGaussian& k) const {
+        // 使用质数进行哈希混合，减少碰撞
+        return ((std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1)) >> 1) ^ (std::hash<int>()(k.z) << 1);
+    }
+};
 
 class GaussianSceneLine
 {
@@ -66,6 +85,13 @@ public:
     void clearCachedPoint3D();
     void clearCachedLine3D();   //Clear line3D cache
     void clearCachedLine3DToPoint3D();  //Clear line3D to point3D cache
+
+    // 检查并更新 Voxel Grid
+    bool isVoxelOccupied(const Eigen::Vector3f& pos, float voxel_size = 0.03f);
+    void addPointToVoxel(const Eigen::Vector3f& pos, float voxel_size = 0.03f);
+    void clearVoxelGrid() { line_voxel_grid_.clear(); }
+
+    int getVoxelCount() const { return line_voxel_grid_.size(); }
 
     //Convert line3D to point3D(TO DO NEXT)
     void convertLines3DToPoints3D();  //sample the 3D line and store into Point3D
@@ -104,5 +130,8 @@ public:
 
 
 protected:
+
+    // 存储已占用的网格
+    std::unordered_set<VoxelKeyGaussian, VoxelHasherGaussian> line_voxel_grid_;
     std::mutex mutex_kfs_;
 };

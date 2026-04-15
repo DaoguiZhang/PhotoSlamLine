@@ -4643,10 +4643,15 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
             // =========================================================
             std::cerr << "Modify MapLine: " << pML->mnId << std::endl;
             // 参数建议放到类成员变量或配置中
-            float sample_step = 0.1f;  // 采样步长，比如 10cm
-            float view_weight = 2.0f; 
-            float sigma = 3.0f;
-            int top_k = 2;
+            //float sample_step = 0.2f;  // 采样步长，比如 10cm
+            //float view_weight = 2.0f; 
+            //float sigma = 3.0f;
+            //int top_k = 2;
+
+            float sample_step = pKF->getLineSampleStep();
+            float view_weight = pKF->getLineViewWeight();
+            float sigma = pKF->getLineSigma();
+            int top_k = pKF->getLineTopK();
 
             // 这一步会清空 pML 内部旧的 sampled points，并生成基于 new_p1, new_p2 的新点
             pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(

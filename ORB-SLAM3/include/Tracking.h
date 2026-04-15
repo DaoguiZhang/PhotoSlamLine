@@ -306,6 +306,10 @@ protected:
     std::vector<KeyFrame*> mvpLocalKeyFrames;
     std::vector<MapPoint*> mvpLocalMapPoints;
     std::vector<MapLine*> mvpLocalMapLines;
+
+    //
+    float mLineSampleStep, mLineViewWeight, mLineSigma;
+    int mLineTopK;
     
     // System
     System* mpSystem;

@@ -166,6 +166,9 @@ namespace ORB_SLAM3 {
 
         readORB(fSettings);
         cout << "\t-Loaded ORB settings" << endl;
+        // 🌟 新增：读取线段相关参数
+        readLSD(fSettings);
+        cout << "\t-Loaded LSD sampling settings" << endl;
         readViewer(fSettings);
         cout << "\t-Loaded viewer settings" << endl;
         readLoadAndSave(fSettings);
@@ -633,7 +636,30 @@ namespace ORB_SLAM3 {
         output << "\t-ORB number of scales: " << settings.nLevels_ << endl;
         output << "\t-Initial FAST threshold: " << settings.initThFAST_ << endl;
         output << "\t-Min FAST threshold: " << settings.minThFAST_ << endl;
+        // 在 Settings.cc 的 operator<< 函数末尾添加
+        output << "\t-Line sampling step: " << settings.lineSampleStep_ << endl;
+        output << "\t-Line view weight: " << settings.lineViewWeight_ << endl;
+        output << "\t-Line sigma: " << settings.lineSigma_ << endl;
+        output << "\t-Line Top-K: " << settings.lineTopK_ << endl;
 
         return output;
+    }
+
+
+    void Settings::readLSD(cv::FileStorage &fSettings) {
+        bool found;
+
+        // 使用 readParameter 模板函数读取，如果 YAML 中不存在则使用默认值
+        lineSampleStep_ = readParameter<float>(fSettings, "Line.SampleStep", found, false);
+        if(!found) lineSampleStep_ = 0.1f; // 默认 10cm 采样
+
+        lineViewWeight_ = readParameter<float>(fSettings, "Line.ViewWeight", found, false);
+        if(!found) lineViewWeight_ = 2.0f;
+
+        lineSigma_ = readParameter<float>(fSettings, "Line.Sigma", found, false);
+        if(!found) lineSigma_ = 3.0f;
+
+        lineTopK_ = readParameter<int>(fSettings, "Line.TopK", found, false);
+        if(!found) lineTopK_ = 2;
     }
 };
