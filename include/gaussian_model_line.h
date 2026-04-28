@@ -80,6 +80,7 @@ public:
     static Eigen::Vector3f initLineSampleLogScale(float sample_step, float ref_depth_z,float ref_focal, float k_t = 0.7f,float k_n = 0.4f);
     static Eigen::Vector4f initQuatAlignXToDir(const Eigen::Vector3f& dir_unit);
     torch::Tensor computeLineCoherenceLoss(float lambda_line = 1.0f);
+    torch::Tensor computeVectorizedLineLoss(float lambda_coherence = 1.0f);
 
     void oneUpShDegree();
     void setShDegree(const int sh);
@@ -142,7 +143,8 @@ public:
         torch::Tensor& new_exist_since_iter,
         // -------- 新增：line-aware --------
         torch::Tensor& new_is_line,        // [N_new]
-        torch::Tensor& new_line_dir_w      // [N_new,3]
+        torch::Tensor& new_line_dir_w,      // [N_new,3]
+        torch::Tensor& new_xyz_init         // [N_new, 3]
     );
 
     torch::Tensor computeLineLevelPruneMaskGPU(
@@ -222,6 +224,7 @@ public:
     float max_aniso_threshold_;
 
     torch::Tensor xyz_;
+    torch::Tensor xyz_init_;    // [N, 3] float
     torch::Tensor is_line_;   // [P] bool, check whether point is line sampled or not
     // 可选：每个 line Gaussian 的方向（世界系）
     torch::Tensor line_dir_w_;  // N x 3, float

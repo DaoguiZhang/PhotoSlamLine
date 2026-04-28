@@ -71,6 +71,14 @@ public:
                     std::vector<cv::line_descriptor::KeyLine>& _keyplines,
                     cv::OutputArray _descriptors, std::vector<int> &vLappingArea);
 
+    void SetMinLineLength(float length) {
+        minLineLength = length;
+    }
+
+    float GetMinLineLength() const {
+        return minLineLength;
+    }
+
     // int inline GetLevels(){
     //     return nlevels;}
     // float inline GetScaleFactor(){
@@ -92,6 +100,9 @@ public:
 
     //implementation of detectAndCompute
     void detectAndCompute(const cv::Mat& img, std::vector<cv::line_descriptor::KeyLine>& keylines, cv::Mat& descriptors);
+
+    //filtered: 1: 引入局部密度抑制（Grid-based Suppression） 2:改进长度过滤逻辑 3:线段合并（可选，计算量稍大）
+    void detectAndComputeFiltered(const cv::Mat& img, std::vector<cv::line_descriptor::KeyLine>& keylines, cv::Mat& descriptors);
 
 private:
 

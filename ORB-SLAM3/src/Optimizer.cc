@@ -2066,6 +2066,12 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
             Eigen::Vector3d Xw1 = pML->GetLineWorldPos().first.cast<double>();
             Eigen::Vector3d Xw2 = pML->GetLineWorldPos().second.cast<double>();
 
+            if (!std::isfinite(Xw1.norm()) || !std::isfinite(Xw2.norm()))
+                continue;
+
+            if ((Xw2 - Xw1).norm() < 1e-6)
+                continue;
+
             // === 单目线段边 ===
             auto *eLine = new ORB_SLAM3::EdgeSE3ProjectLineXYZOnlyPose_PointToLine();
             eLine->setVertex(0, optimizer.vertex(0));
@@ -2075,7 +2081,7 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
             eLine->SetCameraIntrinsics(pFrame->fx, pFrame->fy, pFrame->cx, pFrame->cy);
 
             const float invSigma2 = pFrame->mvInvLevelSigma2[kl.octave];
-            eLine->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+            eLine->setInformation(Eigen::Matrix2d::Identity() * invSigma2 * 0.1);   // 线段边的观测信息
             g2o::RobustKernelHuber* rkL = new g2o::RobustKernelHuber;
             rkL->setDelta(deltaLineMono);
             eLine->setRobustKernel(rkL);
@@ -2093,9 +2099,20 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
 
     const float chi2Mono[4] = {5.991,5.991,5.991,5.991};
     const float chi2Stereo[4] = {7.815,7.815,7.815,7.815};
-    const float chi2LineMono[4] = {9.488,9.488,9.488,9.488};
-    const float chi2LineStereo[4] = {11.345,11.345,11.345,11.345};
+    const float chi2LineMono[4] = {25,25,25,25}; // 你可以根据线段观测的实际误差分布调整这个阈值
+    const float chi2LineStereo[4] = {35.345,35.345,35.345,35.345};
     const int its[4] = {10,10,10,10};
+
+    //std::cerr << "PoseOpt Debug: "
+    //      << "edges=" << optimizer.edges().size()
+    //      << ", vertices=" << optimizer.vertices().size()
+    //      << std::endl;
+
+    if (optimizer.edges().empty())
+    {
+        std::cerr << "[WARN] PoseOptimizationWithLine: no edges, skip." << std::endl;
+        return 0;
+    }
 
     int nBad = 0;
     for (int it = 0; it < 4; it++)
@@ -2157,8 +2174,12 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
             if (it==2) e->setRobustKernel(0);
         }
 
-        if (optimizer.edges().size() < 10)
+        if (optimizer.activeEdges().size() < 5)
+        {
+            std::cerr << "[WARN] too few edges, stop early" << std::endl;
             break;
+        }
+            
     }
 
     // === 更新优化后的位姿 ===
@@ -3988,6 +4009,712 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization(
     num_Lines = lLocalMapLines.size();
 }
 
+#if 1   // 调试模式
+// Local Bundle Adjustment with Line Support, and lines are optimized + Regularized terms
+void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
+    KeyFrame *pKF,
+    bool* pbStopFlag,
+    Map* pMap,
+    int& num_fixedKF,
+    int& num_OptKF,
+    int& num_MPs,
+    int& num_edges,
+    int& num_Lines,
+    MappingOperation& opr)
+{
+    // --- 1. collect local keyframes (BFS) ---
+    list<KeyFrame*> lLocalKeyFrames;
+    lLocalKeyFrames.push_back(pKF);
+    pKF->mnBALocalForKF = pKF->mnId;
+    Map* pCurrentMap = pKF->GetMap();
+
+    const vector<KeyFrame*> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    for (KeyFrame* pKFi : vNeighKFs)
+    {
+        if (!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+        {
+            pKFi->mnBALocalForKF = pKF->mnId;
+            lLocalKeyFrames.push_back(pKFi);
+        }
+    }
+    // --- 2. collect local MapPoints ---
+    num_fixedKF = 0;
+    list<MapPoint*> lLocalMapPoints;
+    for (KeyFrame* pKFi : lLocalKeyFrames)
+    {
+        if (pKFi->mnId == pMap->GetInitKFid())
+            num_fixedKF = 1;
+        vector<MapPoint*> vpMPs = pKFi->GetMapPointMatches();
+        for (MapPoint* pMP : vpMPs)
+        {
+            if (pMP && !pMP->isBad() && pMP->GetMap() == pCurrentMap)
+            {
+                if (pMP->mnBALocalForKF != pKF->mnId)
+                {
+                    pMP->mnBALocalForKF = pKF->mnId;
+                    lLocalMapPoints.push_back(pMP);
+                }
+            }
+        }
+    }
+    // --- 3. collect fixed keyframes (that see local map points but are not local) ---
+    list<KeyFrame*> lFixedCameras;
+    for (MapPoint* pMP : lLocalMapPoints)
+    {
+        const map<KeyFrame*, tuple<int,int>>& obs = pMP->GetObservations();
+        for (auto & mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if (pKFi->mnBALocalForKF != pKF->mnId && pKFi->mnBAFixedForKF != pKF->mnId)
+            {
+                pKFi->mnBAFixedForKF = pKF->mnId;
+                if (!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+                    lFixedCameras.push_back(pKFi);
+            }
+        }
+    }
+    num_fixedKF = lFixedCameras.size() + num_fixedKF;
+    if (num_fixedKF == 0)
+    {
+        Verbose::PrintMess("LM-LBA: There are 0 fixed KF in the optimizations, LBA aborted", Verbose::VERBOSITY_NORMAL);
+        return;
+    }
+    // --- 4. setup optimizer ---
+    g2o::SparseOptimizer optimizer;
+    g2o::BlockSolver_6_3::LinearSolverType * linearSolver = new g2o::LinearSolverEigen<g2o::BlockSolver_6_3::PoseMatrixType>();
+    g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    if (pMap->IsInertial())
+       solver->setUserLambdaInit(100.0);
+    optimizer.setAlgorithm(solver);
+    //optimizer.setVerbose(false);
+    optimizer.setVerbose(true);
+    if (pbStopFlag) optimizer.setForceStopFlag(pbStopFlag);
+    unsigned long maxKFid = 0;
+    pCurrentMap->msOptKFs.clear();
+    pCurrentMap->msFixedKFs.clear();
+    // --- 5. add local keyframe vertices (optimizable) ---
+    for (KeyFrame* pKFi : lLocalKeyFrames)
+    {
+        g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+        Sophus::SE3<float> Tcw = pKFi->GetPose();
+        vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(), Tcw.translation().cast<double>()));
+        vSE3->setId(pKFi->mnId);
+        vSE3->setFixed(false);
+        vSE3->setFixed(pKFi->mnId==pMap->GetInitKFid());
+        optimizer.addVertex(vSE3);
+        if (pKFi->mnId > (int)maxKFid) maxKFid = pKFi->mnId;
+        pCurrentMap->msOptKFs.insert(pKFi->mnId);
+    }
+    // --- 6. add fixed keyframe vertices ---
+    for (KeyFrame* pKFi : lFixedCameras)
+    {
+        g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+        Sophus::SE3<float> Tcw = pKFi->GetPose();
+        vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(), Tcw.translation().cast<double>()));
+        vSE3->setId(pKFi->mnId);
+        vSE3->setFixed(true);
+        optimizer.addVertex(vSE3);
+        if (pKFi->mnId > (int)maxKFid) maxKFid = pKFi->mnId;
+        pCurrentMap->msFixedKFs.insert(pKFi->mnId);
+    }
+    // --- 7. add MapPoint vertices + edges (same as original) ---
+    const float thHuberMono = sqrt(5.991);
+    const float thHuberStereo = sqrt(7.815);
+    std::vector<ORB_SLAM3::EdgeSE3ProjectXYZ*> vpEdgesMono;
+    std::vector<ORB_SLAM3::EdgeSE3ProjectXYZToBody*> vpEdgesBody;
+    std::vector<g2o::EdgeStereoSE3ProjectXYZ*> vpEdgesStereo;
+    std::vector<KeyFrame*> vpEdgeKFMono, vpEdgeKFBody, vpEdgeKFStereo;
+    std::vector<MapPoint*> vpMapPointEdgeMono, vpMapPointEdgeBody, vpMapPointEdgeStereo;
+    vpEdgesMono.reserve(1000);
+    vpEdgesBody.reserve(1000);
+    vpEdgesStereo.reserve(1000);
+    int nEdges = 0;
+    for (MapPoint* pMP : lLocalMapPoints)
+    {
+        g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
+        vPoint->setEstimate(pMP->GetWorldPos().cast<double>());
+        int id = pMP->mnId + maxKFid + 1;
+        vPoint->setId(id);
+        vPoint->setMarginalized(true);
+        optimizer.addVertex(vPoint);
+        const map<KeyFrame*, tuple<int,int>>& observations = pMP->GetObservations();
+        for (auto & mit : observations)
+        {
+            KeyFrame* pKFi = mit.first;
+            if (pKFi->isBad() || pKFi->GetMap() != pCurrentMap) continue;
+            const int leftIndex = get<0>(mit.second);
+            if (leftIndex != -1 && pKFi->mvuRight[leftIndex] < 0)
+            {
+                // mono
+                const cv::KeyPoint &kpUn = pKFi->mvKeysUn[leftIndex];
+                Eigen::Matrix<double,2,1> obs; obs << kpUn.pt.x, kpUn.pt.y;
+                ORB_SLAM3::EdgeSE3ProjectXYZ* e = new ORB_SLAM3::EdgeSE3ProjectXYZ();
+                e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                e->setMeasurement(obs);
+                const float invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
+                e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+                g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber; rk->setDelta(thHuberMono); e->setRobustKernel(rk);
+                e->pCamera = pKFi->mpCamera;
+                optimizer.addEdge(e);
+                vpEdgesMono.push_back(e);
+                vpEdgeKFMono.push_back(pKFi);
+                vpMapPointEdgeMono.push_back(pMP);
+                nEdges++;
+            }
+            else if (leftIndex != -1 && pKFi->mvuRight[leftIndex] >= 0)
+            {
+                // stereo
+                const cv::KeyPoint &kpUn = pKFi->mvKeysUn[leftIndex];
+                Eigen::Matrix<double,3,1> obs; obs << kpUn.pt.x, kpUn.pt.y, pKFi->mvuRight[leftIndex];
+                g2o::EdgeStereoSE3ProjectXYZ* e = new g2o::EdgeStereoSE3ProjectXYZ();
+                e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                e->setMeasurement(obs);
+                const float invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
+                e->setInformation(Eigen::Matrix3d::Identity() * invSigma2);
+                g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber; rk->setDelta(thHuberStereo); e->setRobustKernel(rk);
+                e->fx = pKFi->fx; e->fy = pKFi->fy; e->cx = pKFi->cx; e->cy = pKFi->cy; e->bf = pKFi->mbf;
+                optimizer.addEdge(e);
+                vpEdgesStereo.push_back(e);
+                vpEdgeKFStereo.push_back(pKFi);
+                vpMapPointEdgeStereo.push_back(pMP);
+                nEdges++;
+            }
+            // body / right camera observation for systems with mpCamera2
+            if (pKFi->mpCamera2)
+            {
+                int rightIndex = get<1>(mit.second);
+                if (rightIndex != -1)
+                {
+                    rightIndex -= pKFi->NLeft;
+                    cv::KeyPoint kp = pKFi->mvKeysRight[rightIndex];
+                    Eigen::Matrix<double,2,1> obs; obs << kp.pt.x, kp.pt.y;
+                    ORB_SLAM3::EdgeSE3ProjectXYZToBody * e = new ORB_SLAM3::EdgeSE3ProjectXYZToBody();
+                    e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                    e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                    e->setMeasurement(obs);
+                    const float invSigma2 = pKFi->mvInvLevelSigma2[kp.octave];
+                    e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+                    g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber; rk->setDelta(thHuberMono); e->setRobustKernel(rk);
+                    Sophus::SE3f Trl = pKFi->GetRelativePoseTrl();
+                    e->mTrl = g2o::SE3Quat(Trl.unit_quaternion().cast<double>(), Trl.translation().cast<double>());
+                    e->pCamera = pKFi->mpCamera2;
+                    optimizer.addEdge(e);
+                    vpEdgesBody.push_back(e);
+                    vpEdgeKFBody.push_back(pKFi);
+                    vpMapPointEdgeBody.push_back(pMP);
+                    nEdges++;
+                }
+            }
+        }
+    }
+    // --- 8. add MapLine edges (Point-to-Line), using your Edge classes ---
+    // collect local maplines observed by local keyframes
+    list<MapLine*> lLocalMapLines;
+    for (KeyFrame* pKFi : lLocalKeyFrames)
+    {
+        vector<MapLine*> vpLines = pKFi->GetMapLineMatches();
+        for (MapLine* pML : vpLines)
+        {
+            if (pML && !pML->isBad() && pML->GetMap() == pCurrentMap)
+            {
+                if (pML->mnBALocalForKF != pKF->mnId)
+                {
+                    pML->mnBALocalForKF = pKF->mnId;
+                    lLocalMapLines.push_back(pML);
+                }
+            }
+        }
+    }
+    // containers for line edges
+    std::vector<ORB_SLAM3::EdgeSE3ProjectPointToLine2D*> vpEdgesLineMono;  // pose + line points
+    std::vector<KeyFrame*> vpEdgeKFLineMono;
+    std::vector<MapLine*> vpMapLineEdgeMono;
+    const float deltaLineMono = sqrt(9.488);
+    const float deltaLineStereo = sqrt(11.345);
+
+    // Compute a safe offset for line vertex ids so they do not collide with point ids used above
+    int nextVertexId = (int)maxKFid + 1;
+    for (MapPoint* pMP : lLocalMapPoints)
+    {
+        int pid = (int)pMP->mnId + (int)maxKFid + 2;
+        if (pid > nextVertexId) nextVertexId = pid;
+    }
+
+    // --------- NEW: add MapLine endpoint vertices ----------
+    unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
+    mapLineVertexId.reserve(lLocalMapLines.size() * 2);
+
+    // 阈值设置：比如小于 0.1米 (10cm) 或者像素长度小于 20px
+    const double min_3d_length_sq = 0.1 * 0.1;
+    //const double min_2d_length_sq = 20.0 * 20.0;
+    const double min_pixel_len = 40.0;         // 2D 像素长度阈值 (用于降权)
+
+    int numLineVertices = 0;
+    for (MapLine* pML : lLocalMapLines)
+    {
+        if (!pML || pML->isBad()) continue;
+
+        auto endpoints = pML->GetLineWorldPos();
+        Eigen::Vector3d Xw1 = endpoints.first.cast<double>();
+        Eigen::Vector3d Xw2 = endpoints.second.cast<double>();
+
+        Eigen::Vector3d d = Xw2 - Xw1;
+        if (!d.allFinite() || d.squaredNorm() < 1e-12) continue;
+
+        double len_sq = d.squaredNorm();
+        // [策略一] 判断是否是短线段
+        bool bIsShortLine = (len_sq < min_3d_length_sq);
+
+        // endpoint 1
+        auto* vP1 = new g2o::VertexSBAPointXYZ();
+        int id1 = ++nextVertexId;
+        vP1->setId(id1);
+        vP1->setEstimate(Xw1);
+        vP1->setFixed(true);
+        vP1->setMarginalized(true);
+
+        // endpoint 2
+        auto* vP2 = new g2o::VertexSBAPointXYZ();
+        int id2 = ++nextVertexId;
+        vP2->setId(id2);
+        vP2->setEstimate(Xw2);
+        vP2->setFixed(false);
+        vP2->setMarginalized(true);
+
+        // // [关键修改] 设置 Fixed 属性
+        // if (bIsShortLine) 
+        // {
+        //     // 如果是短线段，直接锁死，不让优化器动它 (防止乱飞)
+        //     vP1->setFixed(true);
+        //     vP2->setFixed(true);
+        // }
+        // else 
+        // {
+        //     // 如果是正常线段，两个端点都允许移动 (你原来锁了vP1，会导致无法平移)
+        //     vP1->setFixed(false);
+        //     vP2->setFixed(false);
+        // }
+
+        bool ok1 = optimizer.addVertex(vP1);
+        bool ok2 = optimizer.addVertex(vP2);
+
+        if (!ok1 || !ok2)
+        {
+            if (ok1) optimizer.removeVertex(vP1);
+            delete vP1;
+            delete vP2;
+            continue;
+        }
+
+        mapLineVertexId[pML] = {id1, id2};
+        numLineVertices += 2;
+    }
+
+    // // --------- add Line Length Prior edges (ONCE per MapLine) ----------
+    ///const double lambdaL = 50.0;   // 1~5
+    ///const double lambdaD = 20.0;   // 0.5~2
+    ///const double lambdaM = 5.0;   // 0.05~0.5  (不要太大，防止锁死)
+    // // --------- add Line Length Prior edges (ONCE per MapLine) ----------
+    // [修改] 大幅降低权重，让观测数据说话
+    //const double lambdaL = 0.5;   // 原 50.0 -> 改 0.5 (允许长度变化)
+    //const double lambdaD = 5.0;   // 原 20.0 -> 改 5.0 (允许方向微调)
+    //const double lambdaM = 0.01;  // 原 5.0  -> 改 0.01 (几乎移除中点约束，仅防飞逸)
+
+    // 默认的“松弛”权重 (用于长线段，允许优化)
+    const double lambdaL_Loose = 0.5;   
+    const double lambdaD_Loose = 5.0;   
+    const double lambdaM_Loose = 0.5;
+
+    // “强力”权重 (用于短线段，用于固定)
+    const double lambda_Hard = 1000.0;
+    
+    for (MapLine* pML : lLocalMapLines)
+    {
+        if (!pML || pML->isBad()) continue;
+
+        auto it = mapLineVertexId.find(pML);
+        if (it == mapLineVertexId.end()) continue;
+
+        int idP1 = it->second.first;
+        int idP2 = it->second.second;
+
+        // ... 获取 id1, id2 ...
+        //auto endpoints = pML->GetLineWorldPos();
+        //Eigen::Vector3d d = endpoints.second.cast<double>() - endpoints.first.cast<double>();
+        //double len_sq = d.squaredNorm();
+
+        auto* vP1 = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(idP1));
+        auto* vP2 = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(idP2));
+        if (!vP1 || !vP2) continue;
+
+        // initial geometry from current mapline
+        auto endpoints_f = pML->GetLineWorldPos();
+        Eigen::Vector3d P10 = endpoints_f.first.cast<double>();
+        Eigen::Vector3d P20 = endpoints_f.second.cast<double>();
+        Eigen::Vector3d d0  = P20 - P10;
+
+        double L0 = d0.norm();
+        if (!std::isfinite(L0) || L0 < 1e-6) continue;
+
+        Eigen::Vector3d d0_unit = d0 / L0;
+        Eigen::Vector3d m0 = 0.5 * (P10 + P20);
+
+        double wL = lambdaL_Loose;
+        double wD = lambdaD_Loose;
+        double wM = lambdaM_Loose;
+
+        // Tier 1: "Trash" / Noise (Length < 0.1m)
+        // Behavior: LOCK IT DOWN. It's too small to be useful for optimizing pose, 
+        // just keep it for visualization or map density.
+        if (L0 < 0.1) 
+        {
+            wL = lambda_Hard; 
+            wD = lambda_Hard; 
+            wM = lambda_Hard; 
+        }
+        // Tier 2: "The Danger Zone" (0.1m <= Length < 0.5m) <--- YOUR PROBLEM AREA
+        // Behavior: These are the lines on the wall. They are likely unstable.
+        // We trust their Direction (mostly), but we DO NOT trust their Depth/Position sliding.
+        // We need to constrain them heavily to their initial guess to prevent sliding.
+        else if (L0 < 0.5) 
+        {
+            wL = 2.0;    // Prevent length changing too much
+            wD = 20.0;   // Strong direction constraint (keep parallel)
+            wM = 10.0;   // Strong midpoint constraint (STOP SLIDING!)
+        }
+        // Tier 3: "Stable Features" (Length >= 0.5m)
+        // Behavior: Long lines (floor edges, door frames). 
+        // We trust the image observation more. Let them adjust to minimize reprojection error.
+        else 
+        {
+            wL = lambdaL_Loose;    // Allow length to breathe
+            wD = lambdaD_Loose;    // Direction is usually stable due to length
+            wM = lambdaM_Loose;    // Weak midpoint constraint (allow slight sliding to fit data)
+        }
+
+        // // ========================================================
+        // // [关键修改]: 动态权重分配 (Soft Fix Logic)
+        // // ========================================================
+        // double wL = lambdaL_Loose;
+        // double wD = lambdaD_Loose;
+        // double wM = lambdaM_Loose;
+        // // 如果线段短于 10cm (0.1m)，则认为它极不稳定，施加超强约束
+        // if (L0 < 0.1) 
+        // {
+        //     wL = lambda_Hard; // 锁死长度
+        //     wD = lambda_Hard; // 锁死方向
+        //     wM = lambda_Hard; // 锁死位置 (核心)
+        // }
+        // if(L0 < 0.2 && L0 > 0.1)
+        // {
+        //     //wL = lambda_Hard;
+        //     wD = lambdaD_Loose * 3;
+        //     //wM = lambda_Hard;
+        // }
+        // // ========================================================
+
+        // (A) length prior
+        {
+            auto* eLen = new EdgeLineLengthPrior(L0, wL);
+            eLen->setVertex(0, vP1);
+            eLen->setVertex(1, vP2);
+            eLen->setInformation(Eigen::Matrix<double,1,1>::Identity());
+            optimizer.addEdge(eLen);
+            nEdges++;
+        }
+
+        // (B) direction prior
+        {
+            auto* eDir = new EdgeLineDirectionPrior(d0_unit, wD);
+            eDir->setVertex(0, vP1);
+            eDir->setVertex(1, vP2);
+            eDir->setInformation(Eigen::Matrix3d::Identity());
+            optimizer.addEdge(eDir);
+            nEdges++;
+        }
+
+        // (C) midpoint prior
+        {
+            auto* eMid = new EdgeLineMidpointPrior(m0, wM);
+            eMid->setVertex(0, vP1);
+            eMid->setVertex(1, vP2);
+            eMid->setInformation(Eigen::Matrix3d::Identity());
+            optimizer.addEdge(eMid);
+            nEdges++;
+        }
+    }
+
+    // add edges using endpoint vertices
+    int addedLineEdges = 0;
+    for (MapLine* pML : lLocalMapLines)
+    {
+        if(!pML || pML->isBad()) continue;
+
+        auto it = mapLineVertexId.find(pML);
+        if(it == mapLineVertexId.end()) continue;
+
+        int idP1 = it->second.first;
+        int idP2 = it->second.second;
+
+        const auto& obs = pML->GetLineObservations();
+        for(auto& mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if(!pKFi || pKFi->isBad() || pKFi->GetMap()!=pCurrentMap) continue;
+            int idxLine = get<0>(mit.second);
+            if(idxLine < 0 || idxLine >= (int)pKFi->mvKeyLines.size()) continue;
+            const cv::line_descriptor::KeyLine& kl = pKFi->mvKeyLines[idxLine];
+            // build normalized 2D line: a u + b v + c = 0
+            const double u1 = kl.startPointX, v1 = kl.startPointY;
+            const double u2 = kl.endPointX,   v2 = kl.endPointY;
+            const double dx = u2 - u1;
+            const double dy = v2 - v1;
+            const double na = dy;
+            const double nb = -dx;
+            const double nrm = std::sqrt(na*na + nb*nb);
+            if (!std::isfinite(nrm) || nrm < 1e-12) continue;
+            const double a = na / nrm;
+            const double b = nb / nrm;
+            const double c = -(a*u1 + b*v1);
+            Eigen::Vector3d line_abc(a,b,c);
+
+            // [策略二] 根据 2D 长度计算权重
+            double length_weight = 1.0;
+            if (nrm < min_pixel_len) {
+                // 线性下降后平方，例如 20px -> 0.5 -> weight 0.25
+                double ratio = nrm / min_pixel_len;
+                length_weight = ratio * ratio; 
+            }
+
+            // invSigma2 guard
+            int octave = kl.octave;
+            if (octave < 0 || octave >= (int)pKFi->mvInvLevelSigma2.size()) octave = 0;
+            const double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
+            if (!std::isfinite(invSigma2) || invSigma2 <= 0.0) continue;
+
+            double final_info_val = invSigma2 * length_weight;
+
+            auto* vPose = optimizer.vertex(pKFi->mnId);
+            auto* vertex1 = optimizer.vertex(idP1);
+            auto* vertex2 = optimizer.vertex(idP2);
+            if(!vPose || !vertex1 || !vertex2) continue;
+            // Edge for endpoint1
+            {
+                auto* e1 = new EdgeSE3ProjectPointToLine2D();
+                e1->setVertex(0, vertex1);      // point
+                e1->setVertex(1, vPose);   // pose
+                e1->setMeasurement(line_abc);
+                e1->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
+                //const double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
+                // 应该应用到 Information 矩阵：
+                e1->setInformation(Eigen::Matrix<double,1,1>::Identity() * final_info_val);
+                auto* rk = new g2o::RobustKernelHuber;
+                //rk->setDelta(std::sqrt(3.84)); // 1D chi2 95% ~= 3.84
+                rk->setDelta(3.0); // 宽松一点的 Huber
+                e1->setRobustKernel(rk);
+                optimizer.addEdge(e1);
+                vpEdgesLineMono.push_back(e1);
+                vpEdgeKFLineMono.push_back(pKFi);
+                vpMapLineEdgeMono.push_back(pML);
+                addedLineEdges++;
+                nEdges++;
+            }
+
+            // Edge for endpoint2
+            {
+                auto* e2 = new EdgeSE3ProjectPointToLine2D();
+                e2->setVertex(0, vertex2);      // point
+                e2->setVertex(1, vPose);
+                e2->setMeasurement(line_abc);
+                e2->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
+                //const double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
+                e2->setInformation(Eigen::Matrix<double,1,1>::Identity() * final_info_val);
+
+                auto* rk = new g2o::RobustKernelHuber;
+                //rk->setDelta(std::sqrt(3.84));
+                rk->setDelta(3.0); // 宽松一点的 Huber
+                e2->setRobustKernel(rk);
+
+                optimizer.addEdge(e2);
+                vpEdgesLineMono.push_back(e2);
+                vpEdgeKFLineMono.push_back(pKFi);
+                vpMapLineEdgeMono.push_back(pML);
+                addedLineEdges++;
+                nEdges++;
+            }
+        }
+    }
+
+    std::cerr << "Added " << addedLineEdges << " (binary) line endpoint edges.\n";
+    std::cout << "===== BA DEBUG =====" << std::endl;
+    std::cout << "Vertices: " << optimizer.vertices().size() << std::endl;
+    std::cout << "Edges: " << optimizer.edges().size() << std::endl;
+
+    int active = 0;
+    for (auto& it : optimizer.vertices())
+    {
+        if (!static_cast<g2o::OptimizableGraph::Vertex*>(it.second)->fixed())
+            active++;
+    }
+    std::cout << "Active vertices: " << active << std::endl;
+
+    if (optimizer.vertices().empty() || optimizer.edges().empty())
+    {
+        std::cout << "[WARN] Empty graph, skip BA" << std::endl;
+        return;
+    }
+
+    // --- 9. run optimization (you can do robust iterations as desired) ---
+    if (pbStopFlag && *pbStopFlag) return;
+    optimizer.initializeOptimization();
+    //std::cerr << "Starting optimization with " << nEdges << " edges." << std::endl;
+    //std::cerr << "Line edges added: " << vpEdgesLineMono.size() << std::endl;
+    optimizer.optimize(10);
+    //std::cerr << "Optimization done." << std::endl;
+    // --- 10. outlier detection (points) ---
+    vector<pair<KeyFrame*,MapPoint*>> vToErasePoints;
+    vToErasePoints.reserve(vpEdgesMono.size() + vpEdgesBody.size() + vpEdgesStereo.size());
+    for (size_t i = 0; i < vpEdgesMono.size(); ++i)
+    {
+        ORB_SLAM3::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
+        MapPoint* pMP = vpMapPointEdgeMono[i];
+        if (!pMP) continue;
+        if (e->chi2() > 5.991 || !e->isDepthPositive())
+            vToErasePoints.emplace_back(vpEdgeKFMono[i], pMP);
+    }
+    for (size_t i = 0; i < vpEdgesBody.size(); ++i)
+    {
+        ORB_SLAM3::EdgeSE3ProjectXYZToBody* e = vpEdgesBody[i];
+        MapPoint* pMP = vpMapPointEdgeBody[i];
+        if (!pMP) continue;
+        if (e->chi2() > 5.991 || !e->isDepthPositive())
+            vToErasePoints.emplace_back(vpEdgeKFBody[i], pMP);
+    }
+    for (size_t i = 0; i < vpEdgesStereo.size(); ++i)
+    {
+        g2o::EdgeStereoSE3ProjectXYZ* e = vpEdgesStereo[i];
+        MapPoint* pMP = vpMapPointEdgeStereo[i];
+        if (!pMP) continue;
+        if (e->chi2() > 7.815 || !e->isDepthPositive())
+            vToErasePoints.emplace_back(vpEdgeKFStereo[i], pMP);
+    }
+    // --- 11. outlier detection (lines) ---
+    vector<pair<KeyFrame*,MapLine*>> vToEraseLines;
+    vToEraseLines.reserve(vpEdgesLineMono.size());
+    for (size_t i = 0; i < vpEdgesLineMono.size(); ++i)
+    {
+        auto *e = vpEdgesLineMono[i];
+        MapLine* pML = vpMapLineEdgeMono[i];
+        if (!pML) continue;
+        if (e->chi2() > 2*3.84)
+            vToEraseLines.emplace_back(vpEdgeKFLineMono[i], pML);
+    }
+    // --- 12. apply erasures under map mutex ---
+    {
+        unique_lock<mutex> lock(pMap->mMutexMapUpdate);
+        for (auto & pr : vToErasePoints)
+        {
+            KeyFrame* pKFi = pr.first;
+            MapPoint* pMPi = pr.second;
+            if (pKFi && pMPi)
+            {
+                pKFi->EraseMapPointMatch(pMPi);
+                pMPi->EraseObservation(pKFi);
+            }
+        }
+        for (auto & pr : vToEraseLines)
+        {
+            KeyFrame* pKFi = pr.first;
+            MapLine* pMLi = pr.second;
+            if (pKFi && pMLi)
+            {
+                pKFi->EraseMapLineMatch(pMLi);
+                pMLi->EraseLineObservation(pKFi);
+            }
+        }
+    }
+    // --- 13. write back optimized poses and points ---
+    opr.reserveKeyFrames(lLocalKeyFrames.size());
+    for (KeyFrame* pKFi : lLocalKeyFrames)
+    {
+        g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKFi->mnId));
+        g2o::SE3Quat SE3quat = vSE3->estimate();
+        Sophus::SE3f Tiw(SE3quat.rotation().cast<float>(), SE3quat.translation().cast<float>());
+        pKFi->SetPose(Tiw);
+        opr.addKeyFrame(pKFi);
+    }
+    opr.reserveMapPoints(lLocalMapPoints.size());
+    for (MapPoint* pMP : lLocalMapPoints)
+    {
+        g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->mnId + maxKFid + 1));
+        pMP->SetWorldPos(vPoint->estimate().cast<float>());
+        pMP->UpdateNormalAndDepth();
+        if (!pMP->isRetrived()) { pMP->setRetrived(true); opr.addMapPoint(pMP); }
+    }
+    // MapLine endpoints are optimized jointly with pose and written back here.
+    // If you later add VertexLineXYZ and make edges connect (vertexLine, vertexPose),
+    // you would fetch and write optimized endpoints similar to MapPoints.
+    opr.reserveMapLines(lLocalMapLines.size());
+    for (MapLine* pML : lLocalMapLines)
+    {
+        if(!pML || pML->isBad()) continue;
+
+        auto it = mapLineVertexId.find(pML);
+        if(it == mapLineVertexId.end()) continue;
+
+        auto* vP1 =
+            static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(it->second.first));
+        auto* vP2 =
+            static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(it->second.second));
+
+        pML->SetLineWorldPos(
+            vP1->estimate().cast<float>(),
+            vP2->estimate().cast<float>()
+        );
+        // mark retrieved for reporting
+        if (!pML->isRetrived()) 
+        {
+            // =========================================================
+            // 【关键修改】: 在打包发送给 GS 之前，必须基于"新几何"重新采样！
+            // =========================================================
+            std::cerr << "Modify MapLine: " << pML->mnId << std::endl;
+            // 参数建议放到类成员变量或配置中
+            //float sample_step = 0.2f;  // 采样步长，比如 10cm
+            //float view_weight = 2.0f; 
+            //float sigma = 3.0f;
+            //int top_k = 2;
+
+            float sample_step = pKF->getLineSampleStep();
+            float view_weight = pKF->getLineViewWeight();
+            float sigma = pKF->getLineSigma();
+            int top_k = pKF->getLineTopK();
+
+            // 这一步会清空 pML 内部旧的 sampled points，并生成基于 new_p1, new_p2 的新点
+            pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
+                sample_step, view_weight, sigma, top_k);
+
+            // 3. 将采样后的数据打包进 MappingOperation
+            // (前提：MappingOperation::addMapLine 已经改为了读取 pML->GetLineSampledPoints3D())
+            opr.addMapLine(pML);
+            pML->setRetrived(true); 
+            // 在线段上采样顶点，如果线段是 Combine 两个线段的情况下，怎么处理(后续再处理)
+        }
+    }   // end for each MapLine
+    // keep mapline; mark retrieved for reporting
+    pMap->IncreaseChangeIndex();
+    // --- 14. statistics output ---
+    num_OptKF = lLocalKeyFrames.size();
+    num_MPs = lLocalMapPoints.size();
+    num_edges = nEdges;
+    num_Lines = lLocalMapLines.size();
+}
+
+#else
+
+// 这里是非调试模式下的代码
 // Local Bundle Adjustment with Line Support, and lines are optimized + Regularized terms
 void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     KeyFrame *pKF,
@@ -4527,7 +5254,25 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         }
     }
 
-    std::cerr << "Added " << addedLineEdges << " (binary) line endpoint edges.\n";
+    //std::cerr << "Added " << addedLineEdges << " (binary) line endpoint edges.\n";
+    //std::cout << "===== BA DEBUG =====" << std::endl;
+    //std::cout << "Vertices: " << optimizer.vertices().size() << std::endl;
+    //std::cout << "Edges: " << optimizer.edges().size() << std::endl;
+
+    //int active = 0;
+    //for (auto& it : optimizer.vertices())
+    //{
+    //    if (!static_cast<g2o::OptimizableGraph::Vertex*>(it.second)->fixed())
+    //        active++;
+    //}
+    //std::cout << "Active vertices: " << active << std::endl;
+
+    if (optimizer.vertices().empty() || optimizer.edges().empty())
+    {
+        std::cout << "[WARN] Empty graph, skip BA" << std::endl;
+        return;
+    }
+
     // --- 9. run optimization (you can do robust iterations as desired) ---
     if (pbStopFlag && *pbStopFlag) return;
     optimizer.initializeOptimization();
@@ -4672,6 +5417,9 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     num_edges = nEdges;
     num_Lines = lLocalMapLines.size();
 }
+
+#endif
+
 
 
 /*

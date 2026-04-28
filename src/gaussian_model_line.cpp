@@ -114,6 +114,54 @@ torch::Tensor GaussianModelLine::computeLineCoherenceLoss(float lambda_line)
     return lambda_line * loss;
 }
 
+torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherence)
+{
+    using namespace torch::indexing;
+
+    auto line_mask = this->is_line_; 
+    // 基础安全检查
+    if (!line_mask.any().item<bool>() || !this->xyz_init_.defined() || this->xyz_init_.size(0) != this->xyz_.size(0)) {
+        return torch::zeros({}, torch::TensorOptions().device(device_type_));
+    }
+
+    // 1. 提取所有线点的当前位置 (P)、初始参考位置 (A) 和单位方向向量 (u)
+    auto p_m = this->xyz_.index({line_mask});           // [Nl, 3]
+    auto p_ref = this->xyz_init_.index({line_mask});    // [Nl, 3] (作为直线上的一点参考锚点)
+    auto d_m = this->line_dir_w_.index({line_mask});    // [Nl, 3] (单位方向向量)
+
+    // 2. 计算向量 AP = P - A
+    auto ap = p_m - p_ref; 
+
+    // 3. 计算 AP 在方向 d_m 上的投影向量
+    // 公式: proj = (AP · d) * d
+    // 使用批量点积 sum(dim=1)
+    auto dist_parallel = torch::sum(ap * d_m, /*dim=*/1, /*keepdim=*/true); // [Nl, 1]
+    auto projection = dist_parallel * d_m; // [Nl, 3]
+
+    // 4. 计算垂直分量 (即点到直线的垂直误差向量)
+    // 公式: e_perp = AP - proj
+    auto error_perp = ap - projection; 
+
+    // Huber Loss 参数 delta（通常设为 0.01m 左右）
+    float delta = 0.01f; 
+
+    auto dist_perp = torch::norm(error_perp, 2, 1, true);
+
+    // 计算 Huber 损失
+    // 当 dist <= delta: 0.5 * dist^2
+    // 当 dist >  delta: delta * (dist - 0.5 * delta)
+    auto is_small_error = dist_perp <= delta;
+    auto loss_small = 0.5 * dist_perp.pow(2);
+    auto loss_large = delta * (dist_perp - 0.5 * delta);
+
+    auto huber_loss = torch::where(is_small_error, loss_small, loss_large);
+
+    return lambda_coherence * huber_loss.sum();
+
+    // 5. 返回垂直距离的平方和损失
+    // 只有垂直离开直线的位移会产生 Loss，沿线滑动 Loss 为 0
+    //return lambda_coherence * error_perp.pow(2).sum();
+}
 
 GaussianModelLine::GaussianModelLine(const int sh_degree)
     : active_sh_degree_(0), spatial_lr_scale_(0.0),
@@ -347,6 +395,8 @@ void GaussianModelLine::createFromPcd(
 
     // 7. 赋值给可优化参数 (Requires Grad)
     this->xyz_ = fused_point_cloud.requires_grad_();
+    // 创建一个不带梯度的初始位置副本
+    this->xyz_init_ = this->xyz_.detach().clone();
     this->features_dc_ = features.index({torch::indexing::Slice(),
                                          torch::indexing::Slice(),
                                          torch::indexing::Slice(0, 1)})
@@ -660,11 +710,13 @@ void GaussianModelLine::increasePcd(
     auto new_opacity = general_utils::inverse_sigmoid(0.1f * torch::ones({N, 1}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_)));
     auto new_exist_since_iter = torch::full({N}, iteration, torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
 
+    auto new_xyz_init = new_xyz.clone().detach();
+
     // 5. Call Postfix (Safe Version)
     densificationPostfixWithLineAwareness(
         new_xyz, new_features_dc, new_features_rest, new_opacity, 
         new_scaling, new_rotation, new_exist_since_iter, 
-        new_is_line, new_line_dir_w
+        new_is_line, new_line_dir_w, new_xyz_init
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
@@ -935,6 +987,9 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
         }
     }
 
+    // 在 increasePcd 内部
+    auto new_xyz_init = new_xyz.clone().detach();
+
     // =========================================================
     // 【替换】调用结构感知的 Postfix
     // =========================================================
@@ -947,7 +1002,8 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
         new_rotation,
         new_exist_since_iter,
         new_is_line,       // 传入
-        new_line_dir_w     // 传入
+        new_line_dir_w,    // 传入
+        new_xyz_init       // 传入
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
@@ -1045,6 +1101,9 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
     // 赋予一个非零向量，避免归一化时除零
     new_line_dir_w.index({torch::indexing::Slice(), 0}) = 1.0f; 
 
+    // 在 increasePcd 内部
+    auto new_xyz_init = new_xyz.clone().detach();
+
     // =================================================================================
     // 【替换】使用带 Line Awareness 的 Postfix
     // =================================================================================
@@ -1057,7 +1116,8 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
         new_rotation,
         new_exist_since_iter,
         new_is_line,       // Add
-        new_line_dir_w     // Add
+        new_line_dir_w,    // Add
+        new_xyz_init       // Add
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
@@ -1404,6 +1464,11 @@ void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
     // ---- 完善 point_ids_ 的维护 ----
     this->point_ids_ = this->point_ids_.index({valid_points_mask});
 
+    // --- 🌟 关键修改：同步裁剪影子张量 ---
+    if (this->xyz_init_.defined()) {
+        this->xyz_init_ = this->xyz_init_.index({valid_points_mask});
+    }
+
     // =====================================================
     // C. Structure-only & auxiliary tensors (NO optimizer)
     // =====================================================
@@ -1577,7 +1642,9 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     torch::Tensor& new_rotation,
     torch::Tensor& new_exist_since_iter,
     torch::Tensor& new_is_line,
-    torch::Tensor& new_line_dir_w)
+    torch::Tensor& new_line_dir_w,
+    torch::Tensor& new_xyz_init  // 🌟 新增参数：新点的参考位置
+)
 {
     // ================= [DEBUG PROBE: 强制打印到错误流] =================
     // 使用 std::cerr 而不是 std::cerr，防止崩溃时日志丢失
@@ -1590,6 +1657,10 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     // 解决 "Expected size 4 but got size N" 问题
     // =========================================================
     int64_t N = new_xyz.size(0); // 以 XYZ 的点数为基准
+
+    // 🌟 核心防御代码：确保所有影子属性维度对齐
+    //TORCH_CHECK(new_is_line.size(0) == n_new, "Mismatch in new_is_line");
+    //TORCH_CHECK(new_xyz_init.size(0) == n_nwe, "Mismatch in new_xyz_init");
 
     // 1. 修复 Rotation: 必须是 [N, 4]
     // 报错 Expected size 4 but got 115 就是在这里被拦截修复
@@ -1713,6 +1784,9 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
         torch::TensorOptions().dtype(torch::kLong).device(device_type_));
     this->point_ids_ = torch::cat({this->point_ids_, new_ids}, 0);
 
+    // --- 🌟 关键修改：同步拼接影子张量 ---
+    this->xyz_init_ = torch::cat({this->xyz_init_, new_xyz_init.to(device_type_)}, 0).detach();
+
     // =====================================================
     // C. Structure-only tensors (NO optimizer state)
     // =====================================================
@@ -1720,6 +1794,10 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     this->is_line_ = torch::cat({this->is_line_, new_is_line.to(device_type_)}, 0);
     this->line_dir_w_ = torch::cat({this->line_dir_w_, new_line_dir_w.to(device_type_)}, 0);
     this->exist_since_iter_ = torch::cat({this->exist_since_iter_, new_exist_since_iter.to(device_type_)}, 0);
+
+    // 🌟 拼接后再次确认全局同步
+    TORCH_CHECK(this->xyz_.size(0) == this->xyz_init_.size(0), "Global xyz and xyz_init out of sync!");
+    TORCH_CHECK(this->xyz_.size(0) == this->is_line_.size(0), "Global xyz and is_line out of sync!");
 
     // =====================================================
     // D. Reset auxiliary buffers (size must match new total)
@@ -2535,6 +2613,9 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
         std::cerr << "\033[1;31m[FATAL] Rotation is 3D at entry! It was corrupted in previous step.\033[0m" << std::endl;
     }
 
+    // 1. [增加断言] 在函数入口确保影子张量处于同步状态
+    TORCH_CHECK(this->xyz_.size(0) == this->xyz_init_.size(0), "xyz and xyz_init out of sync at Split entry!");
+
     // =========================================================================
     // 1. Selection
     // =========================================================================
@@ -2731,13 +2812,20 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     auto new_is_line = torch::cat(list_is_line, 0);
     auto new_line_dir_w = torch::cat(list_line_dir, 0);
 
+    // 逻辑同上
+    auto xyz_init_sel = this->xyz_init_.index({selected_mask});
+    auto new_xyz_init = xyz_init_sel.index({combined_indices});
+
+    // 3. [增加维度终检] 防止 Postfix 因为维度不一致而 crash
+    TORCH_CHECK(new_xyz.size(0) == new_xyz_init.size(0), "new_xyz and new_xyz_init size mismatch!");
+
     // =========================================================================
     // 5. Postfix
     // =========================================================================
     this->densificationPostfixWithLineAwareness(
         new_xyz, new_features_dc, new_features_rest, new_opacity,
         new_scaling, new_rotation, new_exist_iter,
-        new_is_line, new_line_dir_w
+        new_is_line, new_line_dir_w, new_xyz_init
     );
 
     // =========================================================================
@@ -2879,6 +2967,10 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     auto new_is_line = torch::cat(list_is_line, 0);
     auto new_line_dir_w = torch::cat(list_line_dir, 0);
 
+    // 在该函数内部获取被选中点的初始位置
+    auto xyz_init_sel = this->xyz_init_.index({selected_mask});
+    auto new_xyz_init = xyz_init_sel.index({combined_indices}); // 对应生成的 new_xyz
+
     // ================= [DEBUG PROBE 3] =================
     std::cerr << "[DEBUG FLOW] Inside densifyAndClone. Prepared tensors:" << std::endl;
     std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
@@ -2890,7 +2982,7 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     this->densificationPostfixWithLineAwareness(
         new_xyz, new_features_dc, new_features_rest, new_opacity,
         new_scaling, new_rotation, new_exist_iter,
-        new_is_line, new_line_dir_w
+        new_is_line, new_line_dir_w, new_xyz_init
     );
 }
 
@@ -3341,8 +3433,8 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // A. 基础透明度掩码
     auto opacity_mask = (this->getOpacityActivation() < min_opacity).view({-1});
 
-    // B. 激进线段剪裁 (只针对已经在图中存在一段时间的点)
-    float lazy_threshold = max_grad * 0.05f;
+    // B. 激进线段剪裁 (只针对已经在图中存在一段时间的点, important)
+    float lazy_threshold = max_grad * 0.1f;
     // 增加一个条件：denom_ > 0 确保这个点至少被投影过，且不是刚诞生的
     auto lazy_line_mask = torch::logical_and(
         this->is_line_, 
@@ -3358,10 +3450,17 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
         prune_mask = torch::logical_or(prune_mask, torch::logical_or(big_points_vs, big_points_ws));
     }
 
+    auto lazy_count = lazy_line_mask.sum().item<int>();
+    auto total_before = this->xyz_.size(0);
+
     // =========================================================
     // 3. 执行物理剪裁 (先清减，再增补)
     // =========================================================
     this->prunePointsWithLineAwareness(prune_mask);
+
+    std::cerr << "[Pruning Report] Total Gaussians: " << total_before 
+          << " | Pruned (Lazy Line): " << lazy_count 
+          << " | Remaining: " << this->xyz_.size(0) << std::endl;
 
     // 重新计算剪裁后的梯度，用于加密逻辑
     // 因为 prune 之后原有 grads 已经失效了

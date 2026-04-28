@@ -996,7 +996,8 @@ void GaussianMapperLine::trainForOneIteration()
         // 方向一致性损失 L_ori
         if (w_ori > 0.0f) {
             // 建议：将权重乘法移到函数外部，让函数只返回纯粹的 Loss 标量，更符合 PyTorch 规范
-            loss_str = loss_str +  gaussians_->computeLineCoherenceLoss(w_ori); 
+            //loss_str = loss_str +  gaussians_->computeLineCoherenceLoss(w_ori);
+            loss_str = loss_str +  gaussians_->computeVectorizedLineLoss(w_ori);
         }
         // 形状各向异性约束 L_ecc
         if (w_shape_ecc > 0.0f && w_shape_ori > 0.0f) {
@@ -1488,6 +1489,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
                     // 设定网格大小，建议与采样步长一致或略大
                     //const float v_size = 0.25f; //added by zdg
+                    int raw_points = l_positions.size() / 3;
+                    int filtered_points = 0;
 
                     for (size_t i = 0; i < num_l_points; ++i) {
 
@@ -1495,6 +1498,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                 
                         // 🌟 核心去重判断：O(1) 复杂度
                         if (scene_->isVoxelOccupied(p_pos, opt_params_.voxel_size_)) {
+                            filtered_points++;
                             continue; // 空间上已经存在线段高斯，跳过
                         }
 
@@ -1528,6 +1532,13 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         // (可选) 如果你想在 Scene 中也缓存这些点用于 Debug/SavePly
                         // scene_->cacheLineSampledPnts3D(0 /*dummy_line_id*/, p);
                     }
+
+                    // 打印日志
+                    std::cerr << "[Voxel Grid Report]: ID"
+                            << " | Incoming: " << raw_points
+                            << " | Accepted: " << filtered_points
+                            << " | Rejected (Redundant): " << (raw_points - filtered_points)
+                            << " | Usage Rate: " << (float)filtered_points/raw_points * 100 << "%" << std::endl;
 
                     // Push to GPU
                     if (!new_line_sample_points.empty()) {

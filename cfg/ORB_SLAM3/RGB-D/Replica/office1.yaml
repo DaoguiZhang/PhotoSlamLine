@@ -59,7 +59,7 @@ ORBextractor.minThFAST: 3
 #--------------------------------------------------------------------------------------------
 # Line Segment Sampling Parameters (For Photo-SLAM-L Refinement)
 #--------------------------------------------------------------------------------------------
-Line.SampleStep: 0.2      # 采样步长 (单位: 米)
+Line.SampleStep: 0.15      # 采样步长 (单位: 米)
 Line.ViewWeight: 2.0      # 视角权重因子
 Line.Sigma: 3.0           # 像素一致性标准差
 Line.TopK: 3              # 选取前K个最佳视角进行融合

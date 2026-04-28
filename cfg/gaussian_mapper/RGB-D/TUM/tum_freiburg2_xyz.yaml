@@ -90,7 +90,7 @@ Line.Sigma: 3.0           # 像素一致性标准差
 Line.TopK: 3              # 选取前K个最佳视角进行融合
 
 #line point voxel
-Optimization.voxel_size: 0.25
+Optimization.voxel_size: 0.1
 
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters
