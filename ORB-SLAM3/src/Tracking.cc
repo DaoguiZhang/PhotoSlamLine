@@ -5693,6 +5693,22 @@ void Tracking::SearchLocalPointsAndLine()
     // ============ [5] 线匹配 ============
     if (nToMatchLines > 0)
     {
+        // // 1. 评分并排序
+        // // 准则：得分 = 长度 * sqrt(观测次数)
+        // std::sort(mvpLocalMapLines.begin(), mvpLocalMapLines.end(), [](MapLine* a, MapLine* b) {
+        //     if (!a || a->isBad()) return false;
+        //     if (!b || b->isBad()) return true;
+        //     float scoreA = a->GetLineLength() * std::sqrt((float)a->Observations());
+        //     float scoreB = b->GetLineLength() * std::sqrt((float)b->Observations());
+        //     return scoreA > scoreB; // 降序
+        // });
+        // // 2. 选取上限（针对百叶窗：保留前 100 条最强线段）
+        // const size_t maxMatchLines = 100;
+        // std::vector<MapLine*> vpSelectedLines = mvpLocalMapLines;
+        // if (vpSelectedLines.size() > maxMatchLines) {
+        //     vpSelectedLines.resize(maxMatchLines);
+        // }
+
         LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f,2.0f); // 类似 ORBmatcher 的线版本
         float thLine = 50.0f;
         if (mCurrentFrame.mnId < mnLastRelocFrameId + 2)

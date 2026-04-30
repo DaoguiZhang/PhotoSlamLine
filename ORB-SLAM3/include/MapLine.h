@@ -261,6 +261,9 @@ public:
         int   top_k               // Top-K 视角 (e.g. 3)
     );
 
+    bool IsValidLineMultiView(float pixel_thresh);
+    float ComputeMaxParallaxAngle();
+
     // 计算颜色均值，忽略“黑色 / 近黑色”点
     cv::Vec3b AverageColorIgnoreBlack(const std::vector<cv::Vec3b>& colors, int black_thresh = 5);
 

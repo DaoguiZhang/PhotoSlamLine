@@ -71,7 +71,7 @@ Frame::Frame(const Frame &frame)
      monoLeft(frame.monoLeft), monoRight(frame.monoRight), mvLeftToRightMatch(frame.mvLeftToRightMatch),
      mvRightToLeftMatch(frame.mvRightToLeftMatch), mvStereo3Dpoints(frame.mvStereo3Dpoints),
      mTlr(frame.mTlr), mRlr(frame.mRlr), mtlr(frame.mtlr), mTrl(frame.mTrl),
-     mTcw(frame.mTcw), mbHasPose(false), mbHasVelocity(false), mLineSampleStep(frame.mLineSampleStep), mLineViewWeight(frame.mLineViewWeight), mLineSigma(frame.mLineSigma), mLineTopK(frame.mLineTopK)
+     mTcw(frame.mTcw), mbHasPose(false), mbHasVelocity(false), mLineSampleStep(frame.mLineSampleStep), mLineViewWeight(frame.mLineViewWeight), mLineSigma(frame.mLineSigma), mLineTopK(frame.mLineTopK),mvLineAdaptiveSteps(frame.mvLineAdaptiveSteps)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++){
@@ -377,6 +377,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     mvLineDepthOpti = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
     mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
     mvbLineOutlier = std::vector<bool>(NL, false);
+    
     // if(!mvKeyLines.empty())
     // {  
     // }
@@ -425,6 +426,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB
     NLright = -1;
 
     AssignFeaturesToGrid();
+
+    ComputeAdaptiveSteps();
 }
 
 
@@ -598,6 +601,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
     }
     mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
     mvbLineOutlier = std::vector<bool>(NL, false);
+    
 
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
@@ -631,6 +635,8 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStam
 
     AssignFeaturesToGrid();
 
+    ComputeAdaptiveSteps();
+
     if(pPrevF)
     {
         if(pPrevF->HasVelocity())
@@ -651,6 +657,7 @@ void Frame::AssignFeaturesToGrid()
 {
     // Fill matrix with points
     const int nCells = FRAME_GRID_COLS*FRAME_GRID_ROWS;
+    int nLineReserve = 0.5f * NL / nCells; // 针对线段的预留
 
     int nReserve = 0.5f*N/(nCells);
 
@@ -662,8 +669,7 @@ void Frame::AssignFeaturesToGrid()
             }
         }
 
-
-
+    
     for(int i=0;i<N;i++)
     {
         const cv::KeyPoint &kp = (Nleft == -1) ? mvKeysUn[i]
@@ -676,6 +682,14 @@ void Frame::AssignFeaturesToGrid()
                 mGrid[nGridPosX][nGridPosY].push_back(i);
             else
                 mGridRight[nGridPosX][nGridPosY].push_back(i - Nleft);
+        }
+    }
+
+    for(unsigned int i=0; i<FRAME_GRID_COLS; i++) {
+        for (unsigned int j=0; j<FRAME_GRID_ROWS; j++) {
+            // 🌟 关键修改：清理并预留线网格
+            mLineGrid[i][j].clear(); 
+            mLineGrid[i][j].reserve(nLineReserve);
         }
     }
 
@@ -1151,6 +1165,61 @@ bool Frame::isLineInFrustumOld(MapLine* pML, float viewingCosLimit)
 //     return true;
 // }
 
+//
+float Frame::GetAdaptiveLineSampleStep(int nGridPosX, int nGridPosY) {
+    // 1. 安全边界检查：如果超出网格范围，直接返回默认基础步长
+    if(nGridPosX < 0 || nGridPosX >= FRAME_GRID_COLS || nGridPosY < 0 || nGridPosY >= FRAME_GRID_ROWS)
+        return mLineSampleStep;
+
+    // 2. 局部密度统计
+    // 遍历当前网格及其周围 3x3 的邻域（平滑处理，防止边缘突变）
+    int localLineCount = 0;
+    for(int i = std::max(0, nGridPosX-1); i <= std::min((int)FRAME_GRID_COLS-1, nGridPosX+1); ++i) {
+        for(int j = std::max(0, nGridPosY-1); j <= std::min((int)FRAME_GRID_ROWS-1, nGridPosY+1); ++j) {
+            // mLineGrid[i][j] 存储的是落在该网格内的所有线段索引
+            localLineCount += (int)mLineGrid[i][j].size();
+        }
+    }
+
+    // 3. 动态步长分配逻辑（针对百叶窗优化）
+    // 设定阈值：假设一个 3x3 网格（约 60x60 像素）
+    
+    // 情况 A：超高密度（如百叶窗核心区）
+    if (localLineCount > 15) {
+        // 将步长显著放大（例如 5 倍），强行稀疏化高斯球
+        return mLineSampleStep * 5.0f; 
+    } 
+    // 情况 B：中高密度（如书架、密集格栏）
+    else if (localLineCount > 8) {
+        // 适度稀疏化
+        return mLineSampleStep * 2.5f;
+    }
+    // 情况 C：低密度（如普通墙角、桌面边缘）
+    else {
+        // 使用默认的高精度步长
+        return mLineSampleStep;
+    }
+}
+
+void Frame::ComputeAdaptiveSteps() {
+    if (NL <= 0) return; // 如果没有线段则直接跳过
+    
+    mvLineAdaptiveSteps.resize(NL); // 确保容器大小与线段总数一致
+    
+    for(int i = 0; i < NL; i++) {
+        const cv::line_descriptor::KeyLine &kl = mvKeyLinesUn[i];
+        int nGridPosX, nGridPosY;
+        
+        // 使用 kl.pt (中心点坐标) 定位它属于哪个网格
+        if(PosInGrid(cv::KeyPoint(kl.pt, 1.0f), nGridPosX, nGridPosY)) {
+            // 核心调用：计算该位置的自适应步长
+            mvLineAdaptiveSteps[i] = GetAdaptiveLineSampleStep(nGridPosX, nGridPosY);
+        } else {
+            // 如果点不在有效区域内，保守起见使用默认步长
+            mvLineAdaptiveSteps[i] = mLineSampleStep;
+        }
+    }
+}
 
 bool Frame::ProjectPointDistort(MapPoint* pMP, cv::Point2f &kp, float &u, float &v)
 {

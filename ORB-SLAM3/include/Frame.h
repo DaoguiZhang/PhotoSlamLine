@@ -319,6 +319,7 @@ public:
     // Vector of line keypoints (original and undistorted)
     std::vector<cv::line_descriptor::KeyLine> mvKeyLines, mvKeyLinesRight;
     std::vector<cv::line_descriptor::KeyLine> mvKeyLinesUn;
+    std::vector<float> mvLineAdaptiveSteps;
 
     // Corresponding stereo coordinate and depth for each keypoint.
     std::vector<MapPoint*> mvpMapPoints;
@@ -437,6 +438,9 @@ public:
     //--------------------------------------------------------------------------------------------
     float mLineSampleStep, mLineViewWeight, mLineSigma;
     int mLineTopK;
+
+    float GetAdaptiveLineSampleStep(int nGridPosX, int nGridPosY);
+    void ComputeAdaptiveSteps();
 
 #ifdef REGISTER_TIMES
     double mTimeORB_Ext;

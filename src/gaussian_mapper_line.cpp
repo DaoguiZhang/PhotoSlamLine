@@ -368,6 +368,7 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
     opt_params_.line_view_weight_ = settings_file["Optimization.line_view_weight"].isNone() ? 2.0f : settings_file["Optimization.line_view_weight"].operator float();
     opt_params_.line_sigma_ = settings_file["Optimization.line_sigma"].isNone() ? 3.0f : settings_file["Optimization.line_sigma"].operator float();
     opt_params_.line_top_k_ = settings_file["Optimization.line_top_k"].isNone() ? 3 : settings_file["Optimization.line_top_k"].operator int();
+    opt_params_.refined_gaussian_max_iter_num_ = settings_file["Optimization.refined_gaussian_max_iter_num"].isNone() ? 10000 : settings_file["Optimization.refined_gaussian_max_iter_num"].operator int();
 
     prune_big_point_after_iter_ =
         settings_file["Optimization.prune_big_point_after_iter"].operator int();
@@ -411,6 +412,11 @@ void GaussianMapperLine::run()
                 vpMPs = pMap->GetAllMapPoints();
                 vpMPLs = pMap->GetAllMapLines();
                 for (const auto& pMP : vpMPs){
+                    if (!pMP || pMP->isBad()) continue;
+                    // 🌟 新增过滤逻辑 A：观测帧数过滤
+                    // 刚初始化的地图点如果只被 2 帧看到，由于视差小，3D 位置极度不可靠
+                    if (pMP->Observations() < 3) continue;
+
                     Point3D point3D;
                     auto pos = pMP->GetWorldPos();
                     point3D.xyz_(0) = pos.x();
@@ -736,13 +742,24 @@ void GaussianMapperLine::run()
 
     // 【核心修改】强制增加全局优化次数，确保最后几帧完美收敛
     // 5000 次是一个非常安全的数值，大约需要多花几秒钟，但能挽救整个地图的边缘画质
-    int final_iters = 5000; 
+    int final_iters = opt_params_.refined_gaussian_max_iter_num_; 
     int target_stop_iter = getIteration() + final_iters;
 
     while (getIteration() < target_stop_iter || isKeepingTraining()) {
         try {
             // 高斯优化代码 Invoke training once
-            trainForOneIteration();
+            //trainForOneIteration();
+            trainForOneIterationErrorGuided();  //<--- 这里调用了新的训练函数
+
+            // // 🌟 在精修到一半（比如 2500 次）时，执行一次终极清理
+            // if (getIteration() == (target_stop_iter - 2500)) {
+            //     std::cerr << "[Gaussian Mapper] Applying Ultimate Cleanup..." << std::endl;
+            //     // 1. 重置透明度：让所有点重新竞争
+            //     gaussians_->resetOpacity(); 
+            //     // 2. 杀掉所有透明度低于 0.1 的点（非常暴力但有效）
+            //     auto final_prune_mask = (gaussians_->getOpacityActivation() < 0.1f).squeeze();
+            //     gaussians_->prunePointsWithLineAwareness(final_prune_mask);
+            // }
             
             // 进度汇报，让您在终端里看到它在努力优化
             if (getIteration() % 200 == 0) {
@@ -855,6 +872,292 @@ void GaussianMapperLine::trainColmap()
 
     signalStop();
 }
+
+// Error-guided training 加权随机采样（Roulette Wheel Selection / 轮盘赌算法），让 L1 Loss 更大（即 PSNR 更低）的图像拥有更大的概率被选中
+void GaussianMapperLine::trainForOneIterationErrorGuided()
+{
+    increaseIteration(1);
+    auto iter_start_timing = std::chrono::steady_clock::now();
+
+    // Pick a random Camera
+    std::shared_ptr<GaussianKeyframeLine> viewpoint_cam = useOneTrainingErrorSlidingWindowKeyframe();
+
+    if (!viewpoint_cam) {
+        increaseIteration(-1);
+        return;
+    }
+
+    writeKeyframeUsedTimes(result_dir_ / "used_times");
+
+    // if (isdoingInactiveGeoDensify() && !viewpoint_cam->done_inactive_geo_densify_)
+    //     increasePcdByKeyframeInactiveGeoDensify(viewpoint_cam);
+
+    int training_level = num_gaus_pyramid_sub_levels_;
+    int image_height, image_width;
+    torch::Tensor gt_image, mask;
+    if (isdoingGausPyramidTraining())
+        training_level = viewpoint_cam->getCurrentGausPyramidLevel();
+    if (training_level == num_gaus_pyramid_sub_levels_) {
+        image_height = viewpoint_cam->image_height_;
+        image_width = viewpoint_cam->image_width_;
+        gt_image = viewpoint_cam->original_image_.cuda();
+        mask = undistort_mask_[viewpoint_cam->camera_id_];
+    }
+    else {
+        image_height = viewpoint_cam->gaus_pyramid_height_[training_level];
+        image_width = viewpoint_cam->gaus_pyramid_width_[training_level];
+        gt_image = viewpoint_cam->gaus_pyramid_original_image_[training_level].cuda();
+        mask = scene_->cameras_.at(viewpoint_cam->camera_id_).gaus_pyramid_undistort_mask_[training_level];
+    }
+
+    // Mutex lock for usage of the gaussian model
+    std::unique_lock<std::mutex> lock_render(mutex_render_);
+
+    // Every 1000 its we increase the levels of SH up to a maximum degree
+    if (getIteration() % 1000 == 0 && default_sh_ < model_params_.sh_degree_)
+        default_sh_ += 1;
+    // if (isdoingGausPyramidTraining())
+    //     gaussians_->setShDegree(training_level);
+    // else
+        gaussians_->setShDegree(default_sh_);
+
+    // Update learning rate
+    if (pSLAM_) {
+        int used_times = kfs_used_times_[viewpoint_cam->fid_];
+        int step = (used_times <= opt_params_.position_lr_max_steps_ ? used_times : opt_params_.position_lr_max_steps_);
+        float position_lr = gaussians_->updateLearningRate(step);
+        setPositionLearningRateInit(position_lr);
+    }
+    else {
+        gaussians_->updateLearningRate(getIteration());
+    }
+
+    gaussians_->setFeatureLearningRate(featureLearningRate());
+    gaussians_->setOpacityLearningRate(opacityLearningRate());
+    gaussians_->setScalingLearningRate(scalingLearningRate());
+    gaussians_->setRotationLearningRate(rotationLearningRate());
+
+    // Render
+    auto render_pkg = GaussianRendererWithLine::renderWithLine(
+        viewpoint_cam,
+        image_height,
+        image_width,
+        gaussians_,
+        pipe_params_,
+        background_,
+        override_color_
+    );
+    
+    auto rendered_image = std::get<0>(render_pkg);
+    auto viewspace_point_tensor = std::get<1>(render_pkg);
+    auto visibility_filter = std::get<2>(render_pkg);
+    auto radii = std::get<3>(render_pkg);
+
+    // Get rid of black edges caused by undistortion
+    torch::Tensor masked_image = rendered_image * mask;
+
+    // Loss
+    auto Ll1 = loss_utils::l1_loss(masked_image, gt_image);
+    float lambda_dssim = lambdaDssim();
+    auto loss = (1.0 - lambda_dssim) * Ll1
+                + lambda_dssim * (1.0 - loss_utils::ssim(masked_image, gt_image, device_type_));
+    
+    ////added by zdg(同一个线段上的高斯中心（XYZ）应该落在该线段的轴线上)对于属于同一条线的点 Pi​，已知其线方向单位向量为 d，线段上的一点（例如质心）为 Pcenter​
+    //torch::Tensor loss_line = gaussians_->computeLineCoherenceLoss(0.1f); // 权重 0.1
+    //auto loss_line_shape = gaussians_->computeLineShapeConstraint(0.05f, 0.1f); // 形状约束
+    //loss = loss + loss_line + loss_line_shape;  //modified by zdg
+
+    // ==============================================================================
+    // 🌟 [新增] 各向异性惩罚 (Anisotropy Penalty)
+    // ==============================================================================
+    // 限制高斯球的最大缩放比例。通常对于 Line Gaussians 设为 500-1000 较安全。
+    // ==============================================================================
+    // 使用从配置文件读取的参数
+    float max_aniso_th = opt_params_.max_anisotropy_threshold_; 
+    float lambda_aniso = opt_params_.lambda_anisotropy_; 
+
+    // 1. 获取当前尺度 [N, 3]
+    torch::Tensor scaling = gaussians_->getScaling(); 
+    
+    // 2. 修正 max/min 的 tuple 访问方式
+    // torch::max 返回 std::tuple<Tensor, Tensor>，第 0 个是 values
+    auto max_res = torch::max(scaling, /*dim=*/1);
+    torch::Tensor max_s = std::get<0>(max_res);
+    
+    auto min_res = torch::min(scaling, /*dim=*/1);
+    torch::Tensor min_s = std::get<0>(min_res);
+    
+    // 3. 计算比值 Ratio = max / (min + eps)
+    torch::Tensor ratio = max_s / (min_s + 1e-6);
+    
+    // 4. 计算 L2 惩罚项
+    torch::Tensor loss_aniso = torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
+    
+    loss = loss + (lambda_aniso * loss_aniso);
+    // ==============================================================================
+
+    // ==============================================================================
+    // 🌟 核心改进：引入结构正则化 L_str (Equation 9 in your paper) 及其消融开关
+    // ==============================================================================
+    // 从配置文件中读取权重，而不是硬编码 0.1f 或 0.05f
+    // 如果权重为 0，则代表正在做 "关闭 L_str" 的消融实验 (Ablation Study)
+    float w_ori = opt_params_.weight_line_coherence_; // 论文中的 omega_1
+    float w_shape_ecc = opt_params_.weight_line_shape_ecc_;     // 论文中的 omega_2   ///lambda_ecc
+    float w_shape_ori = opt_params_.weight_line_shape_ori_;   // 论文中的 omega_3   ///lambda_shape
+
+    if (w_ori > 0.0f || w_shape_ecc > 0.0f) {
+        torch::Tensor loss_str = torch::zeros({1}, torch::dtype(torch::kFloat32).device(device_type_));
+        
+        // 方向一致性损失 L_ori
+        if (w_ori > 0.0f) {
+            // 建议：将权重乘法移到函数外部，让函数只返回纯粹的 Loss 标量，更符合 PyTorch 规范
+            //loss_str = loss_str +  gaussians_->computeLineCoherenceLoss(w_ori);
+            loss_str = loss_str +  gaussians_->computeVectorizedLineLoss(w_ori);
+        }
+        // 形状各向异性约束 L_ecc
+        if (w_shape_ecc > 0.0f && w_shape_ori > 0.0f) {
+            loss_str = loss_str + gaussians_->computeLineShapeConstraint(w_shape_ecc, w_shape_ori);
+        }
+        
+        loss = loss + loss_str;
+    }
+
+
+    loss.backward();
+
+    // ==============================================================================
+    // 🌟 性能改进：DEBUG 代码必须用宏或 Flag 包裹，否则严重拖慢帧率
+    // ==============================================================================
+    
+#ifdef DEBUG_LINE_GRADIENTS
+    // 【诊断代码】
+    if (getIteration() % 10 == 0) {
+        // 1. 检查 xyz 是否开启了梯度需求
+        bool req = gaussians_->getXYZ().requires_grad();
+    
+        // 2. 检查梯度是否计算出来了 (grad norm)
+        float grad_norm = 0.0f;
+        if (gaussians_->getXYZ().grad().defined()) {
+            grad_norm = gaussians_->getXYZ().grad().norm().item<float>();
+        }
+
+        // 3. 检查参数指针是否一致
+        // 获取优化器里存的参数指针
+        auto opt_param = gaussians_->optimizer_->param_groups()[0].params()[0]; 
+        // 获取模型里存的参数指针
+        auto model_param = gaussians_->getXYZ();
+        // 比较内存地址 (data_ptr)
+        bool ptr_match = (opt_param.data_ptr() == model_param.data_ptr());
+
+        std::cerr << "[DEBUG Grad] Iter:" << getIteration() 
+              << " | ReqGrad: " << req 
+              << " | GradNorm: " << grad_norm 
+              << " | PtrMatch: " << (ptr_match ? "YES" : "NO!!!") << std::endl;
+    }
+#endif
+
+    // 这一步同步是为了确保 backward 彻底完成，但如果在追求极致实时性时可考虑移除
+    torch::cuda::synchronize();
+
+    {
+        torch::NoGradGuard no_grad;
+        ema_loss_for_log_ = 0.4f * loss.item().toFloat() + 0.6 * ema_loss_for_log_;
+
+        // 🌟 2. 在这里读取 Ll1 的值！ 🌟 【新增代码】：记录当前帧的 L1 误差 (L1 越大，PSNR 越低)
+        // 此时 backward 已经下达，CPU 取这个值不会妨碍深度学习引擎的计算图展开
+        viewpoint_cam->tracking_error_ = Ll1.item().toFloat();
+
+        if (keyframe_record_interval_ &&
+            getIteration() % keyframe_record_interval_ == 0)
+            recordKeyframeRendered(masked_image, gt_image, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
+
+        // Densification
+        if (getIteration() < opt_params_.densify_until_iter_) {
+            // Keep track of max radii in image-space for pruning
+            gaussians_->max_radii2D_.index_put_(
+                {visibility_filter},
+                torch::max(gaussians_->max_radii2D_.index({visibility_filter}),
+                            radii.index({visibility_filter})));
+            // if (!isdoingGausPyramidTraining() || training_level < num_gaus_pyramid_sub_levels_)
+                gaussians_->addDensificationStats(viewspace_point_tensor, visibility_filter);
+
+            if ((getIteration() > opt_params_.densify_from_iter_) &&
+                (getIteration() % densifyInterval()== 0)) {
+                int size_threshold = (getIteration() > prune_big_point_after_iter_) ? 20 : 0;
+                //gaussians_->densifyAndPrune(
+                //    densifyGradThreshold(),
+                //    densify_min_opacity_,//0.005,//
+                //    scene_->cameras_extent_,
+                //    size_threshold
+                //);
+                gaussians_->densifyAndPruneWithLineAwareness(
+                    densifyGradThreshold(),
+                    densify_min_opacity_,//0.005,//
+                    scene_->cameras_extent_,
+                    size_threshold
+                );
+
+                // ==============================================================================
+                // 🌟 [新增] 强制剔除极致拉伸点 (Post-Pruning)
+                // ==============================================================================
+                // 在 densify 结束后，立即扫描并干掉由于梯度更新意外拉伸过长的“针”
+                if (getIteration() > opt_params_.densify_from_iter_) {
+                    // 使用从配置文件读取的参数
+                    float absolute_max_ratio = opt_params_.absolute_max_ratio_; // 物理极限，超过此比例必是伪影
+                    gaussians_->pruneExceedinglyAnisotropic(absolute_max_ratio);
+                }
+
+                // 🌟 手段 C：强制剔除“极小点” (Min-Scaling Pruning)
+                // 很多刺眼的点是因为 Scaling 极小但 Opacity 极高。
+                // 在这里调用一个自定义函数来清理它们（见下文）
+                gaussians_->pruneTinyGaussians(1e-6f);
+            }
+
+            if (opacityResetInterval()
+                && (getIteration() % opacityResetInterval() == 0
+                    ||(model_params_.white_background_ && getIteration() == opt_params_.densify_from_iter_)))
+                gaussians_->resetOpacity();
+        }
+
+        auto iter_end_timing = std::chrono::steady_clock::now();
+        auto iter_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        iter_end_timing - iter_start_timing).count();
+
+        // Log and save
+        if (training_report_interval_ && (getIteration() % training_report_interval_ == 0))
+            GaussianTrainerLine::trainingReport(
+                getIteration(),
+                opt_params_.iterations_,
+                Ll1,
+                loss,
+                ema_loss_for_log_,
+                loss_utils::l1_loss,
+                iter_time,
+                *gaussians_,
+                *scene_,
+                pipe_params_,
+                background_
+            );
+        if ((all_keyframes_record_interval_ && getIteration() % all_keyframes_record_interval_ == 0)
+            // || loop_closure_iteration_
+            )
+        {
+            renderAndRecordAllKeyframes();
+            savePly(result_dir_ / std::to_string(getIteration()) / "ply");
+        }
+
+        if (loop_closure_iteration_)
+            loop_closure_iteration_ = false;
+
+        // Optimizer step
+        if (getIteration() < opt_params_.iterations_) {
+            gaussians_->optimizer_->step();
+            gaussians_->optimizer_->zero_grad(true);
+        }
+    }
+}
+
+
 
 /**
  * @brief The training iteration body
@@ -1087,6 +1390,11 @@ void GaussianMapperLine::trainForOneIteration()
                     float absolute_max_ratio = opt_params_.absolute_max_ratio_; // 物理极限，超过此比例必是伪影
                     gaussians_->pruneExceedinglyAnisotropic(absolute_max_ratio);
                 }
+
+                // 🌟 手段 C：强制剔除“极小点” (Min-Scaling Pruning)
+                // 很多刺眼的点是因为 Scaling 极小但 Opacity 极高。
+                // 在这里调用一个自定义函数来清理它们（见下文）
+                gaussians_->pruneTinyGaussians(1e-6f);
             }
 
             if (opacityResetInterval()
@@ -1522,7 +1830,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         p.line_dir_(2) = l_dirs[i * 3 + 2];
                         
                         // Sample Step (可以使用默认值，或者如果在 Atlas 中存了也可以读取)
-                        p.sample_step_ = 0.1f; // 需与 LocalMapping 中的采样步长一致
+                        //p.sample_step_ = 0.1f; // 需与 LocalMapping 中的采样步长一致
+                        p.sample_step_ = opt_params_.line_sample_step_;
 
                         new_line_sample_points.push_back(p);
 
@@ -2247,6 +2556,61 @@ GaussianMapperLine::useOneRandomSlidingWindowKeyframe()
 // auto t21 = std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count();
 // std::cerr<<t21 <<" ns"<<std::endl;
     return viewpoint_cam;
+}
+
+std::shared_ptr<GaussianKeyframeLine>
+GaussianMapperLine::useOneTrainingErrorSlidingWindowKeyframe()
+{
+    if (scene_->keyframes().empty())
+        return nullptr;
+
+    float total_error = 0.0f;
+    std::vector<std::shared_ptr<GaussianKeyframeLine>> valid_kfs;
+
+    // 1. 收集所有还有“使用次数”的关键帧，并计算它们的总误差
+    for (auto& kfit : scene_->keyframes()) {
+        auto pkf = kfit.second;
+        if (pkf->remaining_times_of_use_ > 0) {
+            // 加上一个极小值 1e-5，防止 error 为 0 导致权重异常
+            total_error += (pkf->tracking_error_ + 1e-5f); 
+            valid_kfs.push_back(pkf);
+        }
+    }
+
+    // 2. 如果所有帧的 remaining_times_of_use_ 都用光了，给所有帧补充使用次数
+    if (valid_kfs.empty()) {
+        for (auto& kfit : scene_->keyframes()) {
+            auto pkf = kfit.second;
+            increaseKeyframeTimesOfUse(pkf, 1); // 补充1次
+            total_error += (pkf->tracking_error_ + 1e-5f);
+            valid_kfs.push_back(pkf);
+        }
+    }
+
+    // 3. 🌟 轮盘赌算法 (Roulette Wheel Selection)：基于误差分配选中概率
+    // 误差(tracking_error_)越大的帧，占据的“轮盘面积”越大，越容易被随机数击中
+    float random_val = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * total_error;
+    float accum = 0.0f;
+    std::shared_ptr<GaussianKeyframeLine> selected_kf = valid_kfs.back(); // 兜底选项
+
+    for (auto& pkf : valid_kfs) {
+        accum += (pkf->tracking_error_ + 1e-5f);
+        if (accum >= random_val) {
+            selected_kf = pkf;
+            break;
+        }
+    }
+
+    // 4. 更新使用次数统计
+    --(selected_kf->remaining_times_of_use_);
+
+    auto viewpoint_fid = selected_kf->fid_;
+    if (kfs_used_times_.find(viewpoint_fid) == kfs_used_times_.end())
+        kfs_used_times_[viewpoint_fid] = 1;
+    else
+        ++kfs_used_times_[viewpoint_fid];
+
+    return selected_kf;
 }
 
 std::shared_ptr<GaussianKeyframeLine>

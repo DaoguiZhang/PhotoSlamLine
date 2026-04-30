@@ -130,6 +130,8 @@ public:
     torch::Tensor full_proj_transform_;     ///< transform tensors
     torch::Tensor camera_center_;           ///< transform tensors
 
+    float tracking_error_ = 1.0f; // 初始误差设大一点，保证新帧被高优选中
+
     std::vector<Point2D> points2D_;
     std::vector<float> kps_pixel_;
     std::vector<float> kps_point_local_;

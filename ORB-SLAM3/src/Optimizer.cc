@@ -3905,7 +3905,8 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization(
         ORB_SLAM3::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
         MapPoint* pMP = vpMapPointEdgeMono[i];
         if (!pMP) continue;
-        if (e->chi2() > 5.991 || !e->isDepthPositive())
+        // Note: chi2 threshold for outlier detection can be tuned as needed: 5.991 is 95% quantile for 2D reprojection error, but you may want to be more strict or lenient.
+        if (e->chi2() > 9.0 || !e->isDepthPositive())
             vToErasePoints.emplace_back(vpEdgeKFMono[i], pMP);
     }
     for (size_t i = 0; i < vpEdgesBody.size(); ++i)
@@ -3921,6 +3922,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization(
         g2o::EdgeStereoSE3ProjectXYZ* e = vpEdgesStereo[i];
         MapPoint* pMP = vpMapPointEdgeStereo[i];
         if (!pMP) continue;
+        // Note: chi2 threshold for outlier detection can be tuned as needed: 7.815 is 95% quantile for 2D reprojection error, but you may want to be more strict or lenient.
         if (e->chi2() > 7.815 || !e->isDepthPositive())
             vToErasePoints.emplace_back(vpEdgeKFStereo[i], pMP);
     }
@@ -3932,7 +3934,8 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization(
         auto *e = vpEdgesLineMono[i];
         MapLine* pML = vpMapLineEdgeMono[i];
         if (!pML) continue;
-        if (e->chi2() > 2*3.84)
+        // Note: chi2 threshold for outlier detection can be tuned as needed: 2*3.84 is 95% quantile for 2D reprojection error, but you may want to be more strict or lenient.
+        if (e->chi2() > 15.0)
             vToEraseLines.emplace_back(vpEdgeKFLineMono[i], pML);
     }
     // --- 12. apply erasures under map mutex ---

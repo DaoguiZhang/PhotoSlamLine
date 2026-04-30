@@ -175,6 +175,8 @@ public:
 
     void loadPly(std::filesystem::path ply_path, std::filesystem::path camera_path = "");
 
+    void trainForOneIterationErrorGuided();
+
 protected:
     bool hasMetInitialMappingConditions();
     bool hasMetIncrementalMappingConditions();
@@ -208,6 +210,7 @@ protected:
 
     void generateKfidRandomShuffle();
     std::shared_ptr<GaussianKeyframeLine> useOneRandomSlidingWindowKeyframe();
+    std::shared_ptr<GaussianKeyframeLine> useOneTrainingErrorSlidingWindowKeyframe();   //ADDED by ZDG
     std::shared_ptr<GaussianKeyframeLine> useOneRandomKeyframe();
     void increaseKeyframeTimesOfUse(std::shared_ptr<GaussianKeyframeLine> pkf, int times);
     void cullKeyframes();

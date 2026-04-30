@@ -1354,11 +1354,22 @@ void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
         };
         std::vector<WeightedColor> candidates;
 
+        int visible_count = 0;
+
         // -------- 3. 多视角观测 --------
         for (auto& mit : obs)
         {
             KeyFrame* pKFi = mit.first;
             if (!pKFi || pKFi->isBad()) continue;
+
+            // ---- 🌟 防火墙 B 核心开始：深度一致性校验 🌟 ----
+            // 1. 计算 Pw 在当前相机坐标系下的深度 (z-depth)
+            // 获取相机位姿 Tcw
+            Sophus::SE3f Tcw = pKFi->GetPose();
+            Eigen::Vector3f Pc = Tcw * Pw; // 世界点转相机点
+            float reproj_depth = Pc.z();
+
+            if (reproj_depth <= 0) continue; // 在相机背面
 
             int idxLine = std::get<0>(mit.second);
             if (idxLine < 0 || idxLine >= (int)pKFi->mvKeyLines.size())
@@ -1375,8 +1386,24 @@ void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
             cv::Vec3b color_bgr = pKFi->GetColor(uv);
             if (color_bgr == cv::Vec3b(0,0,0)) continue;
 
-            // -------- 权重计算 --------
+            if(pKFi->HasDepth())
+            {
+                // 3. 获取深度图中的测量深度
+                // 假设 KeyFrame 有 GetDepth 接口，返回 float 类型的深度值
+                float measured_depth = pKFi->GetDepth(uv.x, uv.y); 
 
+                // 4. 深度合法性过滤 (0 表示无效深度)
+                if (measured_depth <= 0) continue; 
+
+                // 5. 校验：如果重投影深度与测量深度差值 > 10cm (可调参数)
+                // 这是一个非常强力的防火墙，能直接杀掉“悬空线”
+                float depth_diff = std::fabs(reproj_depth - measured_depth);
+                // 允许 5% 的深度误差
+                float depth_threshold = std::max(0.05f, measured_depth * 0.05f); 
+                if (depth_diff > depth_threshold) continue;
+            }
+
+            // -------- 权重计算 --------
             // (1) 深度 + 视角
             Eigen::Vector3f Cw = pKFi->GetCameraCenter();
             Eigen::Vector3f view_dir = (Cw - Pw);
@@ -1410,7 +1437,12 @@ void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
                 color_bgr[2], color_bgr[1], color_bgr[0]);
 
             candidates.push_back({weight, color_rgb});
+
+            visible_count++;
         }
+
+        // 如果这个 3D 采样点在少于 2 个视角中被“证实”，则不生成高斯
+        //if (visible_count < 2) continue;    //To test next...
 
         if (candidates.empty()) continue;
 
@@ -1451,6 +1483,60 @@ void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
     }
 }
 
+
+bool MapLine::IsValidLineMultiView(float pixel_thresh) {
+    auto observations = GetLineObservations();
+    if (observations.size() < 3) return false; // 观察帧数太少，置信度低
+
+    float total_error = 0;
+    int count = 0;
+
+    for (auto& obs : observations) {
+        KeyFrame* pKFi = obs.first;
+        int idx = std::get<0>(obs.second);
+        
+        // 获取该帧检测到的 2D 线 ABC 方程 (ax + by + c = 0)
+        float a, b, c;
+        const cv::line_descriptor::KeyLine& kl = pKFi->mvKeyLines[idx];
+        if (!ComputeLineABCFromKeyLine(kl, a, b, c)) continue;
+
+        // 将 3D 端点投影到该帧
+        cv::Point2f uv0, uv1;
+        if (!pKFi->ProjectPointToImage(mLsWorldPos, uv0) || 
+            !pKFi->ProjectPointToImage(mLeWorldPos, uv1)) continue;
+
+        // 计算 2D 投影点到 2D 检测线的距离
+        float d0 = std::fabs(a * uv0.x + b * uv0.y + c) / std::sqrt(a*a + b*b);
+        float d1 = std::fabs(a * uv1.x + b * uv1.y + c) / std::sqrt(a*a + b*b);
+
+        total_error += (d0 + d1);
+        count += 2;
+    }
+
+    if (count == 0) return false;
+    return (total_error / count) < pixel_thresh; // pixel_thresh 建议设为 1.5 - 2.0 像素
+}
+
+// 在采样循环前增加检查
+float MapLine::ComputeMaxParallaxAngle() {
+    auto observations = GetLineObservations();
+    Eigen::Vector3f mid_p = (mLsWorldPos + mLeWorldPos) * 0.5f;
+    float max_cos = -1.0f;
+
+    std::vector<Eigen::Vector3f> view_dirs;
+    for (auto& obs : observations) {
+        view_dirs.push_back((obs.first->GetCameraCenter() - mid_p).normalized());
+    }
+
+    float max_parallax = 0;
+    for(size_t i=0; i<view_dirs.size(); ++i) {
+        for(size_t j=i+1; j<view_dirs.size(); ++j) {
+            float cos_v = view_dirs[i].dot(view_dirs[j]);
+            max_parallax = std::max(max_parallax, std::acos(cos_v));
+        }
+    }
+    return max_parallax * 180.0f / M_PI; // 返回角度
+}
 
 cv::Vec3b MapLine::AverageColorIgnoreBlack(
     const std::vector<cv::Vec3b>& colors,

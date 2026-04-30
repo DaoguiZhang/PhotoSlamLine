@@ -287,6 +287,9 @@ public:
     std::vector<size_t> GetLinesInArea(const float &ls_x, const float  &ls_y, const float &le_x, const float &le_y, 
         const float  &r, const int minLevel=-1, const int maxLevel=-1, const bool bRight = false) const;
     //bool UnprojectStereoLine(int i, Eigen::Vector4f &line3D, Eigen::Vector3f &colorRGB);
+    bool HasDepth();
+    float GetDepth(float u, float v);
+
     bool UnprojectStereoLine(
         const int &i,
         std::pair<Eigen::Vector3f, Eigen::Vector3f> &xLine3D,
@@ -437,6 +440,7 @@ public:
     std::vector<std::pair<float, float> > mvLineDepthOpti;    //compute depth from local map boundle adjustment, Update while opti
     const cv::Mat mLineDescriptors, mLineDescriptorsRight;
     std::vector<Eigen::Vector3f> mvKeyLineFunctions; // Key lines functions in the keyframe
+    std::vector<float> mvLineAdaptiveSteps;
 
     //BoW
     DBoW2::BowVector mBowVec;
@@ -519,6 +523,7 @@ protected:
 
     // Grid over the image to speed up feature matching
     std::vector< std::vector <std::vector<size_t> > > mGrid;
+    
 
     std::map<KeyFrame*,int> mConnectedKeyFrameWeights;
     std::vector<KeyFrame*> mvpOrderedConnectedKeyFrames;

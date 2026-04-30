@@ -105,5 +105,6 @@ public:
     float line_sample_step_= 0.2f;                 // 对应 lineSampleStep
     float line_view_weight_ = 2.0f;              // 对应 lineViewWeight
     float line_sigma_ = 3.0f;                        // 对应 lineSigma
-    int line_top_k_ = 3;                       // 对应 lineTopK
+    int line_top_k_ = 3;                              // 对应 lineTopK
+    int refined_gaussian_max_iter_num_ = 10000;     // 对应 refined_iter_num
 };

@@ -53,6 +53,7 @@ public:
     LSDextractor(float minLen = 15.0f, int levels = 1)
         : minLineLength(minLen), nlevels(levels)
     {
+       mGridSize = 50;
         mvImagePyramid.resize(levels);
         mvInvScaleFactor = std::vector<float>(levels);
         for (int i = 0; i < levels; ++i) {
@@ -60,6 +61,7 @@ public:
         }
         lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV);
         lld = cv::line_descriptor::BinaryDescriptor::createBinaryDescriptor();
+        
     }
 
     ~LSDextractor(){}
@@ -74,9 +76,16 @@ public:
     void SetMinLineLength(float length) {
         minLineLength = length;
     }
+    void SetGridSize(int size) {
+        mGridSize = size;
+    }
 
     float GetMinLineLength() const {
         return minLineLength;
+    }
+
+    float GetGridSize() const {
+        return mGridSize;
     }
 
     // int inline GetLevels(){
@@ -114,6 +123,7 @@ private:
     cv::Ptr<cv::LineSegmentDetector> lsd;
     cv::Ptr<cv::line_descriptor::BinaryDescriptor> lld;
     float minLineLength;
+    int mGridSize = 50; // 网格大小可以根据分辨率调整
 
     //void ComputePyramid(cv::Mat image);
     //void ComputeKeyLineOctTree(std::vector<std::vector<cv::line_descriptor::KeyLine> >& allKeylines);    

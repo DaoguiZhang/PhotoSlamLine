@@ -67,7 +67,7 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mpCamera(F.mpCamera), mpCamera2(F.mpCamera2),
     mvLeftToRightMatch(F.mvLeftToRightMatch),mvRightToLeftMatch(F.mvRightToLeftMatch), mTlr(F.GetRelativePoseTlr()),
     mvKeysRight(F.mvKeysRight), NLeft(F.Nleft), NRight(F.Nright), NLleft(F.NLleft), NLright(F.NLright), mTrl(F.GetRelativePoseTrl()), mnNumberOfOpt(0), mbHasVelocity(false),
-    mLineSampleStep(F.mLineSampleStep), mLineViewWeight(F.mLineViewWeight), mLineSigma(F.mLineSigma), mLineTopK(F.mLineTopK)
+    mLineSampleStep(F.mLineSampleStep), mLineViewWeight(F.mLineViewWeight), mLineSigma(F.mLineSigma), mLineTopK(F.mLineTopK), mvLineAdaptiveSteps(F.mvLineAdaptiveSteps)
 {
     mnId=nNextId++;
 
@@ -959,6 +959,43 @@ std::vector<size_t> KeyFrame::GetLinesInArea(
     }
 
     return vIndices;
+}
+
+bool KeyFrame::HasDepth()
+{
+    unique_lock<mutex> lock(mMutexMap);
+    return !imgAuxiliary.empty();
+}
+
+float KeyFrame::GetDepth(float u, float v)
+{
+    if (imgAuxiliary.empty())
+        return -1.0f;
+
+    // 1. 锁定图像，防止多线程冲突
+    unique_lock<mutex> lock(mMutexMap);
+
+    // 2. 边界检查
+    int iu = static_cast<int>(u);
+    int iv = static_cast<int>(v);
+    if (iu < 0 || iu >= imgAuxiliary.cols || iv < 0 || iv >= imgAuxiliary.rows)
+        return -1.0f;
+
+    // 3. 根据图像类型提取深度
+    // 在 RGB-D 模式下，imgAuxiliary 通常存储的是原始深度
+    if (imgAuxiliary.type() == CV_32F) {
+        return imgAuxiliary.at<float>(iv, iu);
+    } 
+    else if (imgAuxiliary.type() == CV_16U) {
+        // 如果是 16位无符号整型（如毫米单位），通常需要除以一个缩放因子（mbf 在此处常指代 baseline*fx，需注意）
+        // 这里的 mDepthQuo 通常在 Frame 或设定文件中定义，一般为 1000.0f 或 5000.0f
+        // 如果没有定义 mDepthQuo，可以尝试直接返回 float
+        float d = imgAuxiliary.at<unsigned short>(iv, iu);
+        if (d > 0)
+            return d / 1000.0f; // 假设单位是 mm，转换为 m
+    }
+
+    return -1.0f;
 }
 
 bool KeyFrame::UnprojectStereoLine(

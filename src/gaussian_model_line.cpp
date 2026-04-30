@@ -14,6 +14,7 @@
  */
 
 #include "include/gaussian_model_line.h"
+#include <torch/torch.h>
 
 
 // 由 CUDA 逻辑反推：保证 my_radius>=1 的最小 world scale 近似：scale >= z/(3f)
@@ -1512,6 +1513,49 @@ void GaussianModelLine::pruneExceedinglyAnisotropic(float threshold)
         this->prunePointsWithLineAwareness(cull_mask);
     }
 }
+
+void GaussianModelLine::pruneTinyGaussians(float min_scale) {
+    torch::NoGradGuard no_grad;
+    // 获取 Scaling [N, 3]，计算其最大轴
+    auto s = torch::exp(this->scaling_); 
+    auto max_s = std::get<0>(torch::max(s, 1));
+    
+    // 如果三个轴都非常小，说明是这种无意义的刺眼碎点
+    auto tiny_mask = max_s < min_scale; 
+    
+    if (tiny_mask.any().item<bool>()) {
+        this->prunePointsWithLineAwareness(tiny_mask);
+    }
+}
+
+// void GaussianModelLine::pruneIsolatedGaussians(float radius, int min_neighbors) {
+//     torch::NoGradGuard no_grad;
+//     torch::Tensor points = this->xyz_.detach();
+//     if (points.size(0) == 0) return;
+//     auto coords = torch::floor(points / radius).to(torch::kInt64);
+//     auto hashes = coords.select(1, 0) * 1000000L + 
+//                  coords.select(1, 1) * 1000L + 
+//                  coords.select(1, 2);
+//     // 🌟 修正：直接在 hashes 张量上调用 unique
+//     auto unique_res = hashes._unique2(true, true, true);
+//     // std::get 获取 std::tuple 的成员
+//     torch::Tensor unique_vals = std::get<0>(unique_res);
+//     torch::Tensor inverse_indices = std::get<1>(unique_res);
+//     torch::Tensor counts = std::get<2>(unique_res);
+//     // 映射回原始点云密度
+//     auto point_voxel_counts = counts.index({inverse_indices});
+    
+//     // 生成掩码并清理
+//     torch::Tensor isolated_mask = point_voxel_counts < min_neighbors;
+    
+//     // 建议只针对非线特征点清理，保护百叶窗结构
+//     auto final_prune_mask = torch::logical_and(isolated_mask, ~this->is_line_);
+
+//     if (final_prune_mask.any().item<bool>()) {
+//         this->prunePointsWithLineAwareness(final_prune_mask);
+//     }
+// }
+
 
 #if 0
 void GaussianModelLine::densificationPostfixWithLineAwareness(

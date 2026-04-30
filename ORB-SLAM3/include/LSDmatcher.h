@@ -82,6 +82,7 @@ namespace ORB_SLAM3
         int SearchForTriangulationLinesRobust(KeyFrame *pKF1, KeyFrame *pKF2,std::vector<std::pair<int,int>> &vMatchedPairs,int K_neighbors = 5, int keepCandidatesPerQuery = 3);
         void DebugShowTriangulationMatchesKF(KeyFrame *pKF1,KeyFrame *pKF2,const std::vector<std::pair<int,int>> &vMatchedIdx);
         int SearchForTriangulationFused(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<int, int>> &vMatchedPairs);
+        int SearchByProjectionDisplacement(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th);
 
         // Project MapLines into KeyFrame and search for duplicated MapLines
         int FuseOld(KeyFrame* pKF, const std::vector<MapLine *> &vpMapLines, const float th=3.0);

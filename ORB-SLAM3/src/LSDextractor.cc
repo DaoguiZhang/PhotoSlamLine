@@ -10,7 +10,8 @@ namespace ORB_SLAM3
     {
         cv::Mat img = _image.getMat();
         ComputeImagePyramid(img);   //compute image pyramid, to do next...
-        detectAndCompute(img, keylines, _descriptors.getMatRef());
+        //detectAndCompute(img, keylines, _descriptors.getMatRef());
+        detectAndComputeFiltered(img, keylines, _descriptors.getMatRef());  // 使用过滤后的检测
         int line_number = static_cast<int>(keylines.size());
         return line_number;
     }
@@ -81,7 +82,7 @@ namespace ORB_SLAM3
 
         // 2. 针对百叶窗：执行基于网格的非极大值抑制 (NMS)
         // 目的：在局部密集区域只保留最具有代表性的长线段
-        const int gridSize = 50; // 网格大小可以根据分辨率调整
+        int gridSize = mGridSize; // 网格大小可以根据分辨率调整
         int nCols = gray_u.cols / gridSize + 1;
         int nRows = gray_u.rows / gridSize + 1;
     

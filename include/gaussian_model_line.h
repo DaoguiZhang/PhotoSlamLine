@@ -186,7 +186,11 @@ public:
         float min_opacity,
         float extent,
         int max_screen_size);
-    
+
+    void pruneTinyGaussians(float min_scale);
+
+    void pruneIsolatedGaussians(float radius, int min_neighbors);
+
     torch::Tensor computeLineLevelPruneMask(
         const torch::Tensor& base_prune_mask,
         float dir_thresh_deg,

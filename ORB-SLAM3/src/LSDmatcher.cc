@@ -1154,6 +1154,105 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    //收集所有的初步匹配对，计算它们的像素位移，然后剔除偏离中位数的“离群值”
+    int LSDmatcher::SearchByProjectionDisplacement(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th)
+    {
+        int nmatches = 0;
+        const bool bFactor = (th != 1.0f);
+
+        // 🌟 新增：记录匹配对及其像素位移，用于一致性检查
+        struct MatchCandidate {
+            size_t frameLineIdx;
+            MapLine* pMapLine;
+            float displacementX;
+            float displacementY;
+        };
+        std::vector<MatchCandidate> vCandidates;
+
+        for (auto pML : vpMapLines)
+        {
+            if (!pML || pML->isBad() || !pML->mbLineTrackInView)
+                continue;
+
+            const int nPredictLevel = pML->mnLineTrackScaleLevel;
+            float r = RadiusByViewingCos(pML->mLineTrackViewCos);
+            if (bFactor) r *= th;
+
+            const float u_mean_proj = 0.5f * (pML->mLsTrackProjX + pML->mLeTrackProjX);
+            const float v_mean_proj = 0.5f * (pML->mLsTrackProjY + pML->mLeTrackProjY);
+
+            const int minLevel = std::max(0, nPredictLevel - 1);
+            const int maxLevel = std::min(nPredictLevel + 1, F.mnScaleLevels - 1);
+
+            // 这里的半径适当加大以捕捉可能的位移
+            std::vector<size_t> vIndices = F.GetLinesInAreaMean(u_mean_proj, v_mean_proj, 
+                                        r * F.mvScaleFactors[nPredictLevel] * 2, minLevel, maxLevel);
+
+            if (vIndices.empty()) continue;
+
+            const cv::Mat MLdescriptor = pML->GetLineDescriptor();
+            int bestDist = 256;
+            int bestIdx = -1;
+
+            for (size_t idx : vIndices) {
+                if (F.mvpMapLines[idx]) continue;
+                const cv::Mat &d = F.mLineDescriptors.row(idx);
+                const int dist = DescriptorDistance(MLdescriptor, d);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestIdx = idx;
+                }
+            }
+
+            // 初步筛选
+            if (bestDist <= TH_HIGH) {
+                const auto &kl = F.mvKeyLinesUn[bestIdx];
+                float u_mean_det = 0.5f * (kl.startPointX + kl.endPointX);
+                float v_mean_det = 0.5f * (kl.startPointY + kl.endPointY);
+
+                // 🌟 记录该匹配的“预测位置”与“观测位置”的像素偏移
+                vCandidates.push_back({
+                    (size_t)bestIdx, 
+                    pML, 
+                    u_mean_det - u_mean_proj, 
+                    v_mean_det - v_mean_proj
+                });
+            }
+        }
+
+        if (vCandidates.empty()) return 0;
+
+        // 🌟 核心策略：全局偏移一致性检查 (Global Displacement Consistency)
+        // 百叶窗错行匹配的偏移量通常会比正常匹配大几十个像素
+    
+        // 1. 计算位移的中位数（中位数对错行匹配非常鲁棒）
+        std::vector<float> vDX, vDY;
+        for(auto &c : vCandidates) {
+            vDX.push_back(c.displacementX);
+            vDY.push_back(c.displacementY);
+        }
+        std::sort(vDX.begin(), vDX.end());
+        std::sort(vDY.begin(), vDY.end());
+        float medianDX = vDX[vDX.size()/2];
+        float medianDY = vDY[vDY.size()/2];
+
+        // 2. 剔除偏离中位数过大的匹配对
+        const float thConsistency = 20.0f; // 阈值设为 20 像素，百叶窗错行通常 > 40px
+        for (auto &c : vCandidates) {
+            float dev = std::sqrt(std::pow(c.displacementX - medianDX, 2) + 
+                              std::pow(c.displacementY - medianDY, 2));
+        
+            if (dev < thConsistency) {
+                // 只有偏移方向符合大部队的才真正记录为匹配
+                F.mvpMapLines[c.frameLineIdx] = c.pMapLine;
+                c.pMapLine->IncreaseFound();
+                nmatches++;
+            }
+        }
+
+        return nmatches;
+    }
+
     void LSDmatcher::DebugSearchByProjectionLinesMatch(
         Frame &F,
         std::vector<MapLine*> &vpMapLines,
