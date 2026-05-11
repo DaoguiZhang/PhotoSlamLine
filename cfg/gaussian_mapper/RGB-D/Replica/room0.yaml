@@ -64,33 +64,35 @@ Optimization.rotation_lr: 0.001 #0.001
 
 # Densification
 Optimization.percent_dense: 0.01
-Optimization.lambda_dssim: 0.2
+Optimization.lambda_dssim: 0.2 #0.2
 Optimization.densification_interval: 100
 Optimization.opacity_reset_interval: 0  # 0:never, 1:always, others:periodically
 Optimization.prune_big_point_after_iter: 30000
 Optimization.densify_min_opacity: 0.02 #0.005
 Optimization.densify_from_iter: 600
-Optimization.densify_until_iter: 15000
-Optimization.densify_grad_threshold: 0.0004 #0.001
+Optimization.densify_until_iter: 10000 #15000
+Optimization.densify_grad_threshold: 0.001 #0.001,0.0004
+#Optimization.prune_point_min_scale: 0.00001
+Optimization.refined_max_iter_num: 10000
 
 #Line Weight Setting
 Optimization.weight_line_coherence: 0.008
 Optimization.weight_line_shape_ecc: 0.002
 Optimization.weight_line_shape_ori: 0.005
 max_anisotropy_threshold: 100.0
-lambda_anisotropy: 0.01
-absolute_max_ratio: 500.0
+lambda_anisotropy: 0.001
+absolute_max_ratio: 100.0
 
 #--------------------------------------------------------------------------------------------
 # Line Segment Sampling Parameters (For Photo-SLAM-L Refinement)
 #--------------------------------------------------------------------------------------------
-Line.SampleStep: 0.15      # sample point (meter)
+Line.SampleStep: 0.02      # sample point (meter)
 Line.ViewWeight: 2.0      # 视角权重因子
 Line.Sigma: 3.0           # 像素一致性标准差
 Line.TopK: 3              # 选取前K个最佳视角进行融合
 
 #line point voxel
-Optimization.voxel_size: 0.10
+Optimization.voxel_size: 0.02
 
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters

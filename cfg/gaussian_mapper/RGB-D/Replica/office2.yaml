@@ -72,14 +72,15 @@ Optimization.densify_min_opacity: 0.02 #0.005
 Optimization.densify_from_iter: 600
 Optimization.densify_until_iter: 15000
 Optimization.densify_grad_threshold: 0.0004 # 0.001
+Optimization.refined_max_iter_num: 10000
 
 #Line Weight Setting
-Optimization.weight_line_coherence: 0.008
+Optimization.weight_line_coherence: 0.001
 Optimization.weight_line_shape_ecc: 0.002
 Optimization.weight_line_shape_ori: 0.005
 max_anisotropy_threshold: 100.0
 lambda_anisotropy: 0.01
-absolute_max_ratio: 500.0
+absolute_max_ratio: 100.0
 
 #--------------------------------------------------------------------------------------------
 # Line Segment Sampling Parameters (For Photo-SLAM-L Refinement)
