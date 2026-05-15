@@ -62,6 +62,8 @@ public:
     // Main function
     void Run();
 
+    void RunWithLine();
+
     void InsertKeyFrame(KeyFrame *pKF);
 
     void RequestReset();
@@ -125,24 +127,57 @@ protected:
 
     //Methods to implement the new place recognition algorithm
     bool NewDetectCommonRegions();
+
+    bool NewDetectCommonRegionsWithLine();
+
     bool DetectAndReffineSim3FromLastKF(KeyFrame* pCurrentKF, KeyFrame* pMatchedKF, g2o::Sim3 &gScw, int &nNumProjMatches,
                                         std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs);
+
+    bool DetectAndReffineSim3FromLastKFWithLines(KeyFrame* pCurrentKF, KeyFrame* pMatchedKF, g2o::Sim3 &gScw, int &nNumProjMatches,
+                                             std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs,
+                                             std::vector<MapLine*> &vpMLs, std::vector<MapLine*> &vpMatchedMLs);
+    
     bool DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, KeyFrame* &pMatchedKF, KeyFrame* &pLastCurrentKF, g2o::Sim3 &g2oScw,
                                      int &nNumCoincidences, std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs);
+
+    bool DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vpBowCand, KeyFrame* &pMatchedKF, KeyFrame* &pLastCurrentKF, g2o::Sim3 &g2oScw,
+                                     int &nNumCoincidences, std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs,
+                                     std::vector<MapLine*> &vpMLs, std::vector<MapLine*> &vpMatchedMLs); // 🌟 新增线特征参数
+
     bool DetectCommonRegionsFromLastKF(KeyFrame* pCurrentKF, KeyFrame* pMatchedKF, g2o::Sim3 &gScw, int &nNumProjMatches,
                                             std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs);
+
+    bool DetectCommonRegionsFromLastKFWithLines(KeyFrame* pCurrentKF, KeyFrame* pMatchedKF, g2o::Sim3 &gScw, int &nNumProjMatches,
+                                            std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs,
+                                            std::vector<MapLine*> &vpMLs, std::vector<MapLine*> &vpMatchedMLs);
+
     int FindMatchesByProjection(KeyFrame* pCurrentKF, KeyFrame* pMatchedKFw, g2o::Sim3 &g2oScw,
                                 set<MapPoint*> &spMatchedMPinOrigin, vector<MapPoint*> &vpMapPoints,
                                 vector<MapPoint*> &vpMatchedMapPoints);
-
+    
+    // 🌟 新增带线特征的投影匹配声明
+    int FindMatchesByProjectionWithLines(KeyFrame* pCurrentKF, KeyFrame* pMatchedKFw, g2o::Sim3 &g2oScw,
+                                         set<MapPoint*> &spMatchedMPinOrigin, vector<MapPoint*> &vpMapPoints,
+                                         vector<MapPoint*> &vpMatchedMapPoints,
+                                         set<MapLine*> &spMatchedMLinOrigin, vector<MapLine*> &vpMapLines,
+                                         vector<MapLine*> &vpMatchedMapLines);
+    
+    void RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned long nLoopKF);
 
     void SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap, vector<MapPoint*> &vpMapPoints);
     void SearchAndFuse(const vector<KeyFrame*> &vConectedKFs, vector<MapPoint*> &vpMapPoints);
 
+    // 🌟 在 LoopClosing.h 中更新函数声明
+    void SearchAndFuseWithLine(const KeyFrameAndPose &CorrectedPosesMap, vector<MapPoint*> &vpMapPoints, vector<MapLine*> &vpMapLines);
+    void SearchAndFuseWithLine(const vector<KeyFrame*> &vConectedKFs, vector<MapPoint*> &vpMapPoints, vector<MapLine*> &vpMapLines);
+
     void CorrectLoop();
+    void CorrectLoopWithLine();
 
     void MergeLocal();
     void MergeLocal2();
+
+    void MergeLocalWithLine();
 
     void CheckObservations(set<KeyFrame*> &spKFsMap1, set<KeyFrame*> &spKFsMap2);
 
@@ -182,10 +217,15 @@ protected:
     std::vector<KeyFrame*> mvpCurrentConnectedKFs;
     std::vector<MapPoint*> mvpCurrentMatchedPoints;
     std::vector<MapPoint*> mvpLoopMapPoints;
+    std::vector<MapLine*> mvpCurrentMatchedLines;
+    std::vector<MapLine*> mvpLoopMapLines;
     cv::Mat mScw;
     g2o::Sim3 mg2oScw;
 
-    //-------
+    std::vector<MapLine*> mvpMergeLines;
+    std::vector<MapLine*> mvpMergeMatchedLines;
+
+    //------- Loop Fusion -------
     Map* mpLastMap;
 
     bool mbLoopDetected;
@@ -197,6 +237,8 @@ protected:
     KeyFrame* mpLoopMatchedKF;
     std::vector<MapPoint*> mvpLoopMPs;
     std::vector<MapPoint*> mvpLoopMatchedMPs;
+    std::vector<MapLine*> mvpLoopLines;
+    std::vector<MapLine*> mvpLoopMatchedLines;
     bool mbMergeDetected;
     int mnMergeNumCoincidences;
     int mnMergeNumNotFound;

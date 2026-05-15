@@ -2419,6 +2419,29 @@ private:
 };
 
 
+// ========================================================================
+// 🌟 [新增] 安全的 3D 点一元先验边，用于限制线段端点防止乱飞，同时避免 g2o 崩溃
+// ========================================================================
+class EdgePointPriorXYZ : public g2o::BaseUnaryEdge<3, Eigen::Vector3d, g2o::VertexSBAPointXYZ>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EdgePointPriorXYZ() {}
+    
+    bool read(std::istream& is) override { return true; }
+    bool write(std::ostream& os) const override { return true; }
+    
+    void computeError() override {
+        const g2o::VertexSBAPointXYZ* v = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        _error = v->estimate() - _measurement; // _measurement 就是该端点的初始 3D 坐标
+    }
+    
+    void linearizeOplus() override {
+        _jacobianOplusXi = Eigen::Matrix3d::Identity();
+    }
+};
+
+
 // 4 residuals: 加入了正则化项 长度保持（Length Regularization） 和 方向保持（Direction Regularization）
 // Residuals:
 //   Given observed 2D line (a,b,c): a*u + b*v + c = 0 

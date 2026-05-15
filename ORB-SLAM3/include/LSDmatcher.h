@@ -72,7 +72,7 @@ namespace ORB_SLAM3
         int SearchByProjection(Frame &F, const std::vector<MapLine*> &vpMapLines, const float th=3);
         void DebugLineMatchSearchbyProjection(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th);
         void DebugLineProjectionNew(Frame &F, const std::vector<MapLine*> &vpMapLines, const std::string &winName = "Line Projection Debug");
-        int SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const std::vector<MapLine*> &vpLines, std::vector<MapLine*> &vpMatched, int th);
+        //int SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const std::vector<MapLine *> &vpLines, std::vector<MapLine *> &vpMatched, int th);
         int SearchBySim3(KeyFrame* pKF1, KeyFrame* pKF2, std::vector<MapLine *> &vpMatches12, const float &s12, const cv::Mat &R12, const cv::Mat &t12, const float th);
         int SerachForInitialize(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int,int>> &LineMatches);
         int SerachForInitializeCV(Frame &InitialFrame, Frame &CurrentFrame, std::vector<std::pair<int, int>> &LineMatches); //use OpenCV functions
@@ -83,6 +83,11 @@ namespace ORB_SLAM3
         void DebugShowTriangulationMatchesKF(KeyFrame *pKF1,KeyFrame *pKF2,const std::vector<std::pair<int,int>> &vMatchedIdx);
         int SearchForTriangulationFused(KeyFrame *pKF1, KeyFrame *pKF2, std::vector<std::pair<int, int>> &vMatchedPairs);
         int SearchByProjectionDisplacement(Frame &F, const std::vector<MapLine *> &vpMapLines, const float th);
+
+        int SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector<MapLine *> &vpLines, std::vector<MapLine *> &vpMatched, float th);
+
+        //int SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector<MapLine *> &vpLines, std::vector<MapLine *> &vpMatched, int th);
+        
 
         // Project MapLines into KeyFrame and search for duplicated MapLines
         int FuseOld(KeyFrame* pKF, const std::vector<MapLine *> &vpMapLines, const float th=3.0);

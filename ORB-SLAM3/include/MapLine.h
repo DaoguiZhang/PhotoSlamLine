@@ -317,6 +317,7 @@ public:
     long unsigned int mnCorrectedByKF;
     long unsigned int mnCorrectedReference;    
     Eigen::Vector3f mPosGBA;
+    Eigen::Vector3f mPos1GBA, mPos2GBA; // 用于全局BA的线段端点
     long unsigned int mnBAGlobalForKF;
     long unsigned int mnBALocalForMerge;
 

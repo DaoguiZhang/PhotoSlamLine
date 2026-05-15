@@ -786,6 +786,27 @@ void GaussianMapperLine::run()
     savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
     writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
 
+    // ==========================================================
+    // 🌟 [新增代码]：输出最终统计时间
+    // ==========================================================
+    double total_time_seconds = total_training_time_ms_ / 1000.0;
+    double total_time_minutes = total_time_seconds / 60.0;
+    
+    std::cerr << "=====================================================" << std::endl;
+    std::cerr << "[Gaussian Mapper] Total Mapping Time: " << total_time_seconds << " s (" 
+              << total_time_minutes << " mins)" << std::endl;
+    std::cerr << "[Gaussian Mapper] Total Iterations: " << getIteration() << std::endl;
+    std::cerr << "=====================================================" << std::endl;
+
+    // (可选) 将时间写入 txt 文件，方便后续跑批量实验时写 Python 脚本自动提取
+    std::ofstream time_log(result_dir_ / "total_mapping_time.txt");
+    if (time_log.is_open()) {
+        time_log << "Total_Time_Seconds: " << total_time_seconds << "\n";
+        time_log << "Total_Time_Minutes: " << total_time_minutes << "\n";
+        time_log << "Total_Iterations: " << getIteration() << "\n";
+        time_log.close();
+    }
+
     signalStop();
 }
 
@@ -1119,12 +1140,18 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
                 gaussians_->resetOpacity();
         }
 
+        // ==========================================================
+        // 🌟 [新增代码]：补全时间结算与进度报告
+        // ==========================================================
         auto iter_end_timing = std::chrono::steady_clock::now();
         auto iter_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                         iter_end_timing - iter_start_timing).count();
 
+        total_training_time_ms_ += iter_time;
+
         // Log and save
         if (training_report_interval_ && (getIteration() % training_report_interval_ == 0))
+        {
             GaussianTrainerLine::trainingReport(
                 getIteration(),
                 opt_params_.iterations_,
@@ -1138,6 +1165,9 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
                 pipe_params_,
                 background_
             );
+
+            writeTrainingLog(iter_time, ema_loss_for_log_, gaussians_->xyz_.size(0));
+        }
         if ((all_keyframes_record_interval_ && getIteration() % all_keyframes_record_interval_ == 0)
             // || loop_closure_iteration_
             )
@@ -1407,8 +1437,12 @@ void GaussianMapperLine::trainForOneIteration()
         auto iter_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                         iter_end_timing - iter_start_timing).count();
 
+        // 统计总耗时
+        total_training_time_ms_ += iter_time;
+
         // Log and save
-        if (training_report_interval_ && (getIteration() % training_report_interval_ == 0))
+        if (training_report_interval_ && (getIteration() % training_report_interval_ == 0)) 
+        {
             GaussianTrainerLine::trainingReport(
                 getIteration(),
                 opt_params_.iterations_,
@@ -1422,6 +1456,9 @@ void GaussianMapperLine::trainForOneIteration()
                 pipe_params_,
                 background_
             );
+            writeTrainingLog(iter_time, ema_loss_for_log_, gaussians_->xyz_.size(0));
+        }
+            
         if ((all_keyframes_record_interval_ && getIteration() % all_keyframes_record_interval_ == 0)
             // || loop_closure_iteration_
             )
@@ -3263,6 +3300,36 @@ void GaussianMapperLine::writeKeyframeUsedTimes(std::filesystem::path result_dir
 
     out_stream.close();
 }
+
+
+void GaussianMapperLine::writeTrainingLog(int64_t iter_time, float ema_loss, int64_t num_points)
+{
+    // 确保目录存在
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS_LINE(result_dir_)
+
+    std::filesystem::path log_path = result_dir_ / "gaussian_training_log.txt";
+    bool file_exists = std::filesystem::exists(log_path);
+    
+    std::ofstream out_stream;
+    out_stream.open(log_path, std::ios::app); // 以追加模式打开
+    
+    if (!out_stream.is_open())
+        throw std::runtime_error("Cannot open log file at " + log_path.string());
+
+    // 如果文件是新建的，写入表头
+    if (!file_exists) {
+        out_stream << "Iteration Time(ms) EMA_Loss Num_Points\n";
+    }
+
+    // 写入当前迭代的数据
+    out_stream << getIteration() << " "
+               << iter_time << " "
+               << ema_loss << " "
+               << num_points << "\n";
+
+    out_stream.close();
+}
+
 
 int GaussianMapperLine::getIteration()
 {

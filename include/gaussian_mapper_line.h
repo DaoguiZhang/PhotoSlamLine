@@ -247,6 +247,9 @@ protected:
     void saveModelParams(std::filesystem::path result_dir);
     void writeKeyframeUsedTimes(std::filesystem::path result_dir, std::string name_suffix = "");
 
+    // 🌟 新增：专门用于保存训练日志的函数
+    void writeTrainingLog(int64_t iter_time, float ema_loss, int64_t num_points);
+
     void saveDebugMapToObj(const std::filesystem::path& path,
                             const std::vector<ORB_SLAM3::MapPoint*>& vpMPs,
                             const std::vector<ORB_SLAM3::MapLine*>& vpMPLs);
@@ -278,6 +281,10 @@ public:
     float z_far_ = 100.0f;
     float max_aniso_threshold_ = 1500.0f; // 线高斯的 anisotropic scale 不宜过大，过大会导致训练不稳定（尤其 early stage）
     float voxel_size_ = 0.25f;
+
+    // 用于统计高斯建图的总耗时
+    double total_training_time_ms_ = 0.0;
+    //int training_global_refined_iters_ = 0;
 
     // Data
     bool kfid_shuffled_ = false;

@@ -2528,6 +2528,136 @@ int LSDmatcher::SearchForTriangulationLinesRobust(
     //     return nFused;
     // }
 
+    int LSDmatcher::Fuse(KeyFrame *pKF, cv::Mat Scw, const vector<MapLine *> &vpLines, float th, vector<MapLine *> &vpReplaceLine)
+{
+    // =========================================================
+    // 1. 安全地从 cv::Mat (CV_32F) 提取 Sim3，并转为 Eigen 矩阵
+    // =========================================================
+    Eigen::Matrix4f mScw;
+    for(int i=0; i<4; i++) {
+        for(int j=0; j<4; j++) {
+            mScw(i,j) = Scw.at<float>(i,j);
+        }
+    }
+    
+    // 提取旋转、平移和尺度
+    Eigen::Matrix3f sRcw = mScw.block<3,3>(0,0);
+    float s = sRcw.col(0).norm();
+    Eigen::Matrix3f Rcw = sRcw / s;
+    Eigen::Vector3f tcw = mScw.block<3,1>(0,3) / s;
+    Eigen::Vector3f Ow = -Rcw.transpose() * tcw;
+
+    const float fx = pKF->fx;
+    const float fy = pKF->fy;
+    const float cx = pKF->cx;
+    const float cy = pKF->cy;
+
+    int nFused = 0;
+    const int nLines = vpLines.size();
+
+    // =========================================================
+    // 2. 获取当前帧已有的 MapLine 集合，防止重复匹配
+    // =========================================================
+    std::vector<MapLine*> vpKFMapLines = pKF->GetMapLineMatches();
+    std::unordered_set<MapLine*> spAlreadyFound(vpKFMapLines.begin(), vpKFMapLines.end());
+    spAlreadyFound.erase(nullptr);
+
+    // =========================================================
+    // 3. 遍历候选 MapLine，投影到该关键帧寻找融合目标
+    // =========================================================
+    for(int iML = 0; iML < nLines; iML++)
+    {
+        MapLine* pML = vpLines[iML];
+
+        // 丢弃坏线，或是当前帧已经看到过的线
+        if(!pML || pML->isBad() || spAlreadyFound.count(pML))
+            continue;
+
+        auto endpoints = pML->GetLineWorldPos();
+        Eigen::Vector3f SP = endpoints.first;
+        Eigen::Vector3f EP = endpoints.second;
+
+        // 投影到相机坐标系 (注意使用提取出的 Rcw, tcw)
+        Eigen::Vector3f SPc = Rcw * SP + tcw;
+        Eigen::Vector3f EPc = Rcw * EP + tcw;
+
+        // 深度检查：如果端点在相机后方，跳过该线段
+        if (SPc(2) <= 0.0f || EPc(2) <= 0.0f)
+            continue;
+
+        // 投影到像素坐标
+        float u1 = fx * SPc(0) / SPc(2) + cx;
+        float v1 = fy * SPc(1) / SPc(2) + cy;
+        float u2 = fx * EPc(0) / EPc(2) + cx;
+        float v2 = fy * EPc(1) / EPc(2) + cy;
+
+        // 检查是否在图像范围内
+        if (u1 < pKF->mnMinX || u1 > pKF->mnMaxX || v1 < pKF->mnMinY || v1 > pKF->mnMaxY)
+            continue;
+        if (u2 < pKF->mnMinX || u2 > pKF->mnMaxX || v2 < pKF->mnMinY || v2 > pKF->mnMaxY)
+            continue;
+
+        // 计算线段到相机中心的距离，用于预测金字塔层级
+        float dist = (0.5f * (SP + EP) - Ow).norm();
+        int nPredictedLevel = pML->PredictScale(dist, pKF); 
+
+        // 搜索半径
+        float radius = th * pKF->mvScaleFactors[nPredictedLevel];
+
+        // 区域搜索该投影位置附近的线段
+        vector<size_t> vIndices = pKF->GetLinesInArea(u1, v1, u2, v2, radius);
+        if(vIndices.empty())
+            continue;
+
+        cv::Mat dML = pML->GetLineDescriptor();
+
+        int bestDist = 256; 
+        int bestIdx = -1;
+
+        // 遍历附近提取到的候选线特征，计算描述子距离
+        for(size_t idx : vIndices)
+        {
+            int klLevel = pKF->mvKeyLines[idx].octave;
+
+            if(klLevel < nPredictedLevel - 1 || klLevel > nPredictedLevel)
+                continue;
+
+            const cv::Mat &dKF = pKF->mLineDescriptors.row(idx);
+            int distDesc = DescriptorDistance(dML, dKF);
+
+            if(distDesc < bestDist)
+            {
+                bestDist = distDesc;
+                bestIdx = idx;
+            }
+        }
+
+        // 判定匹配成功 (TH_LOW 通常是 50)
+        if(bestDist <= TH_LOW)
+        {
+            MapLine* pMLinKF = pKF->GetMapLine(bestIdx);
+            if(pMLinKF)
+            {
+                // 目标特征已经绑定了一个 MapLine，说明我们找到了物理世界中的同一根线！
+                // 把当前帧本地的线特征记录在 vpReplaceLine 数组中
+                if(!pMLinKF->isBad())
+                {
+                    vpReplaceLine[iML] = pMLinKF;
+                }
+            }
+            else
+            {
+                // 当前帧的这个线特征还没有关联地图线段，直接赋予它
+                pML->AddLineObservation(pKF, bestIdx);
+                pKF->AddMapLine(pML, bestIdx);
+            }
+            nFused++;
+        }
+    }
+
+    return nFused;
+}
+
     int LSDmatcher::Fuse(KeyFrame *pKF, const std::vector<MapLine *> &vpMapLines, const float th)
     {
         Eigen::Matrix3f Rcw = pKF->GetRotation();
@@ -2749,6 +2879,126 @@ int LSDmatcher::SearchForTriangulationLinesRobust(
         ind2 = hist[1].second;
         ind3 = hist[2].second;
     }
+
+
+
+// 🌟 确保这段代码放在 #if 0 上方，使其能被正常编译！
+int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector<MapLine *> &vpLines, std::vector<MapLine *> &vpMatched, float th)
+{
+    // =========================================================
+    // 1. 安全地从 cv::Mat (CV_32F) 提取 Sim3，并转为 Eigen 矩阵
+    // =========================================================
+    Eigen::Matrix4f mScw;
+    for(int i=0; i<4; i++) {
+        for(int j=0; j<4; j++) {
+            mScw(i,j) = Scw.at<float>(i,j);
+        }
+    }
+    
+    // 提取旋转、平移和尺度
+    Eigen::Matrix3f sRcw = mScw.block<3,3>(0,0);
+    float s = sRcw.col(0).norm();
+    Eigen::Matrix3f Rcw = sRcw / s;
+    Eigen::Vector3f tcw = mScw.block<3,1>(0,3) / s;
+    Eigen::Vector3f Ow = -Rcw.transpose() * tcw;
+
+    const float fx = pKF->fx;
+    const float fy = pKF->fy;
+    const float cx = pKF->cx;
+    const float cy = pKF->cy;
+
+    // 记录已经匹配过的线段，防止重复匹配
+    std::unordered_set<MapLine*> spAlreadyFound(vpMatched.begin(), vpMatched.end());
+    spAlreadyFound.erase(nullptr);
+
+    int nmatches = 0;
+    const int nLines = vpLines.size();
+
+    // =========================================================
+    // 2. 遍历候选 MapLine，投影到当前关键帧进行匹配
+    // =========================================================
+    for(int iML = 0; iML < nLines; iML++)
+    {
+        MapLine* pML = vpLines[iML];
+
+        // 丢弃坏线和已经匹配的线
+        if(!pML || pML->isBad() || spAlreadyFound.count(pML))
+            continue;
+
+        auto endpoints = pML->GetLineWorldPos();
+        Eigen::Vector3f SP = endpoints.first;
+        Eigen::Vector3f EP = endpoints.second;
+
+        // 投影到相机坐标系
+        Eigen::Vector3f SPc = Rcw * SP + tcw;
+        Eigen::Vector3f EPc = Rcw * EP + tcw;
+
+        // 剔除在相机后方的线段
+        if (SPc(2) <= 0.0f || EPc(2) <= 0.0f)
+            continue;
+
+        // 投影到像素坐标
+        float u1 = fx * SPc(0) / SPc(2) + cx;
+        float v1 = fy * SPc(1) / SPc(2) + cy;
+        float u2 = fx * EPc(0) / EPc(2) + cx;
+        float v2 = fy * EPc(1) / EPc(2) + cy;
+
+        // 图像边界检查
+        if (u1 < pKF->mnMinX || u1 > pKF->mnMaxX || v1 < pKF->mnMinY || v1 > pKF->mnMaxY)
+            continue;
+        if (u2 < pKF->mnMinX || u2 > pKF->mnMaxX || v2 < pKF->mnMinY || v2 > pKF->mnMaxY)
+            continue;
+
+        // 计算线段到相机中心的距离，用于预测金字塔层级
+        float dist = (0.5f * (SP + EP) - Ow).norm();
+        int nPredictedLevel = pML->PredictScale(dist, pKF);
+
+        // 搜索半径
+        float radius = th * pKF->mvScaleFactors[nPredictedLevel];
+
+        // 在投影区域内获取候选线段索引
+        std::vector<size_t> vIndices = pKF->GetLinesInArea(u1, v1, u2, v2, radius);
+        if(vIndices.empty())
+            continue;
+
+        cv::Mat dML = pML->GetLineDescriptor();
+
+        int bestDist = 256;
+        int bestIdx = -1;
+
+        // 遍历附近提取到的候选线特征，计算描述子距离
+        for(size_t idx : vIndices)
+        {
+            if(vpMatched[idx]) // 如果该检测线段已被其他 MapLine 认领，跳过
+                continue;
+
+            int klLevel = pKF->mvKeyLines[idx].octave;
+
+            if(klLevel < nPredictedLevel - 1 || klLevel > nPredictedLevel)
+                continue;
+
+            const cv::Mat &dKF = pKF->mLineDescriptors.row(idx);
+            int distDesc = DescriptorDistance(dML, dKF);
+
+            if(distDesc < bestDist)
+            {
+                bestDist = distDesc;
+                bestIdx = idx;
+            }
+        }
+
+        // 判断是否匹配成功 (TH_LOW 一般是 50)
+        if(bestDist <= TH_LOW)
+        {
+            vpMatched[bestIdx] = pML;
+            nmatches++;
+        }
+    }
+
+    return nmatches;
+}
+
+
 
 #if 0   //to do next...
 

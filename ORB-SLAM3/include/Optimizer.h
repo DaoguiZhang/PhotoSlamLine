@@ -187,6 +187,18 @@ public:
     void static OptimizeEssentialGraph(KeyFrame* pCurKF, vector<KeyFrame*> &vpFixedKFs, vector<KeyFrame*> &vpFixedCorrectedKFs,
                                        vector<KeyFrame*> &vpNonFixedKFs, vector<MapPoint*> &vpNonCorrectedMPs);
 
+     // if bFixScale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)
+    void static OptimizeEssentialGraphWithLine(Map* pMap, KeyFrame* pLoopKF, KeyFrame* pCurKF,
+                                       const LoopClosing::KeyFrameAndPose &NonCorrectedSim3,
+                                       const LoopClosing::KeyFrameAndPose &CorrectedSim3,
+                                       const map<KeyFrame *, set<KeyFrame *> > &LoopConnections,
+                                       const bool &bFixScale,
+                                       MappingOperation &opr,
+                                       const std::unordered_set<unsigned long> &LoopKeyFrameIds);
+                                       
+    void static OptimizeEssentialGraphWithLine(KeyFrame* pCurKF, vector<KeyFrame*> &vpFixedKFs, vector<KeyFrame*> &vpFixedCorrectedKFs,
+                                       vector<KeyFrame*> &vpNonFixedKFs, vector<MapPoint*> &vpNonCorrectedMPs, vector<MapLine*> &vpNonCorrectedMLs);
+
     // For inertial loopclosing
     void static OptimizeEssentialGraph4DoF(Map* pMap, KeyFrame* pLoopKF, KeyFrame* pCurKF,
                                        const LoopClosing::KeyFrameAndPose &NonCorrectedSim3,
