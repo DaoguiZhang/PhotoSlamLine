@@ -938,6 +938,31 @@ bool MapLine::HasCachedWorldObservationLineEndPoints()
     return false;   //TO do Next
 }
 
+// void MapLine::SetPluckerLineNormalized(Eigen::Matrix<double, 6, 1> Lw, const Eigen::Vector3f& camCenter)
+// {
+//     Eigen::Vector3f n = Lw.head<3>().cast<float>();
+//     Eigen::Vector3f v = Lw.tail<3>().cast<float>();
+//     // 1. 基础归一化：保证方向向量 v 的模长
+//     float v_norm = v.norm();
+//     if (v_norm < 1e-6) return;
+//     v /= v_norm;
+//     n /= v_norm;
+//     // 2. 核心惯例约束：
+//     // 使用“相机中心到直线的投影向量”与 v 做点积，
+//     // 强制 v 的方向使得“投影点”在直线上有正向参数
+//     // 计算点到直线最近点：p_line = (v x n)
+//     Eigen::Vector3f p_on_line = v.cross(n);
+//     // 强制 v 与 (p_on_line - camCenter) 夹角为锐角（或者其他你定义的惯例）
+//     // 这样能保证 Plücker 表示在物理空间中具有确定性方向
+//     if (v.dot(p_on_line - camCenter) < 0) {
+//         v = -v;
+//         n = -n;
+//     }
+//     // 3. 存入标准化的 Plücker
+//     unique_lock<mutex> lock(mMutexPos);
+//     mWorldPlucker << n.cast<double>(), v.cast<double>();
+// }
+
 void MapLine::UpdateFromPluckerLine()
 {
     // ---- 1) 获取 Plücker 参数（优化后） ----
@@ -998,6 +1023,283 @@ void MapLine::UpdateFromPluckerLine()
     }
 }
 
+/*
+void MapLine::UpdateFromPluckerLineNew()
+{
+    // ---- 1) 安全获取 Plücker 参数 ----
+    Eigen::Matrix<double,6,1> Lw;
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        Lw = mWorldPlucker;
+    }
+
+    // 转化为直线上一点 p0 和方向 dir (单位向量)
+    Eigen::Vector3f p0_line_world, dir_world;
+    PluckerToPointAndDir(Lw, p0_line_world, dir_world);
+
+    // ---- 2) 安全获取所有观测 ----
+    std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int>> observations;
+    {
+        unique_lock<mutex> lock(mMutexFeatures);
+        observations = mLineObservations;
+    }
+
+    if (observations.empty()) return;
+
+    std::vector<float> t_values;
+    t_values.reserve(observations.size() * 2);
+
+    // ---- 3) 遍历观测进行射线交点计算 ----
+    for(auto kv : observations)
+    {
+        KeyFrame* pKF = kv.first;
+        if(!pKF || pKF->isBad()) continue;
+
+        int idx = get<0>(kv.second);
+        if(idx < 0) continue;
+
+        // 🌟 修复 1：使用你确定有数据的 Eigen 接口！
+        Eigen::Vector2f sl, el;
+        if(!pKF->GetLineEndPointEigen(idx, sl, el)) {
+            continue;
+        }
+
+        cv::Point2f s2d(sl[0], sl[1]);
+        cv::Point2f e2d(el[0], el[1]);
+
+        // --- 反投影两个像素端点到 3D 射线 ---
+        Eigen::Vector3f o1, d1, o2, d2;
+        BackprojectPixelToWorldRay(pKF, s2d, o1, d1);
+        BackprojectPixelToWorldRay(pKF, e2d, o2, d2);
+
+        d1.normalize();
+        d2.normalize();
+
+        float s, t; 
+        Eigen::Vector3f p_ray, p_line;
+
+        // 🌟 修复 2：加入严格的 std::isfinite 校验，拒绝 NaN 和 Inf
+        ClosestPointsBetweenLines(o1, d1, p0_line_world, dir_world, s, t, p_ray, p_line);
+        if (s > 0 && std::isfinite(t)) t_values.push_back(t);
+
+        ClosestPointsBetweenLines(o2, d2, p0_line_world, dir_world, s, t, p_ray, p_line);
+        if (s > 0 && std::isfinite(t)) t_values.push_back(t);
+    }
+
+    // 🌟 雷达 1：检查是否所有的点都被过滤掉了
+    if(t_values.size() < 2) {
+        std::cerr << "[DEBUG ML " << mnId << "] t_values size < 2, failed to update endpoints.\n";
+        return;
+    }
+
+    // ---- 4) 稳健地提取线段两端 (分位数截断) ----
+    std::sort(t_values.begin(), t_values.end());
+
+    float t_min = t_values.front();
+    float t_max = t_values.back();
+
+    if (t_values.size() >= 4) {
+        int min_idx = static_cast<int>(t_values.size() * 0.05);
+        int max_idx = static_cast<int>(t_values.size() * 0.95);
+        max_idx = std::min(max_idx, (int)t_values.size() - 1);
+        
+        t_min = t_values[min_idx];
+        t_max = t_values[max_idx];
+    }
+
+    if (t_max < t_min) std::swap(t_min, t_max);
+
+    // ---- 5) 长度异常拦截 (防御性编程) ----
+    float line_length = t_max - t_min;
+    
+    // 🌟 雷达 2：检查线段是否被异常拉伸
+    if (!std::isfinite(line_length) || line_length > 15.0f || line_length < 0.01f) {
+        std::cerr << "[DEBUG ML " << mnId << "] Rejected due to abnormal length: " << line_length << "m\n";
+        return; 
+    }
+
+    // ---- 6) 重建最终的 3D 端点并写回 ----
+    Eigen::Vector3f P1 = p0_line_world + t_min * dir_world;
+    Eigen::Vector3f P2 = p0_line_world + t_max * dir_world;
+
+    SetLineWorldPos(P1, P2);
+}
+*/
+
+
+/*
+void MapLine::UpdateFromPluckerLineNew()
+{
+    // ---- 1) 安全获取 Plücker 参数 ----
+    Eigen::Matrix<double,6,1> Lw;
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        Lw = mWorldPlucker;
+    }
+
+    // 转化为直线上一点 p0 和方向 dir (单位向量)
+    Eigen::Vector3f p0_line_world, dir_world;
+    PluckerToPointAndDir(Lw, p0_line_world, dir_world);
+
+    // ---- 2) 安全获取所有观测 ----
+    std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int>> observations;
+    {
+        unique_lock<mutex> lock(mMutexFeatures);
+        observations = mLineObservations;
+    }
+
+    // 🔬 [DEBUG] 打印总观测帧数
+    std::cout << "\n======================================================\n";
+    std::cout << "[DEBUG LINE " << mnId << "] Start UpdateFromPluckerLineNew\n";
+    std::cout << "  - Total Observations KeyFrames: " << observations.size() << "\n";
+    std::cout << "  - Plucker Base Point p0: " << p0_line_world.transpose() << "\n";
+    std::cout << "  - Plucker Direction dir: " << dir_world.transpose() << "\n";
+
+    if (observations.empty()) {
+        std::cout << "  - [TERMINATE] observations is empty!\n";
+        return;
+    }
+
+    std::vector<float> t_values;
+    t_values.reserve(observations.size() * 4);
+
+    int total_processed_lines = 0;
+    int failed_by_endpoint_api = 0;
+    int failed_by_negative_depth = 0;
+    int failed_by_nan_inf = 0;
+
+    // ---- 3) 遍历观测进行射线交点计算 ----
+    for(auto kv : observations)
+    {
+        KeyFrame* pKF = kv.first;
+        if(!pKF || pKF->isBad()) continue;
+
+        int idxLeft = get<0>(kv.second);
+        int idxRight = get<1>(kv.second);
+
+        // 收集该帧有效的 2D 观测
+        std::vector<std::pair<int, bool>> index_pairs; // <idx, isRight>
+        if (idxLeft >= 0)  index_pairs.push_back({idxLeft, false});
+        if (idxRight >= 0) index_pairs.push_back({idxRight, true});
+
+        for (auto& ip : index_pairs)
+        {
+            int idx = ip.first;
+            bool isRight = ip.second;
+            total_processed_lines++;
+
+            // 🌟 核心排查点 1：检查 GetLineEndPointEigen 这个 API 能不能读到 2D 像素坐标
+            Eigen::Vector2f sl, el;
+            if(!pKF->GetLineEndPointEigen(idx, sl, el)) {
+                failed_by_endpoint_api++;
+                continue;
+            }
+
+            cv::Point2f s2d(sl[0], sl[1]);
+            cv::Point2f e2d(sl[2], sl[3]); // 注意：检查你的接口返回的是 4 维还是 2 维！为了保险，下面直接调底层的 mvKeyLines
+
+            // 🌟 绝对安全策略：既然在 Debug，我们直接打印并使用底层数据对比
+            if (idx >= 0 && idx < (int)pKF->mvKeyLines.size()) {
+                const cv::line_descriptor::KeyLine& kl = pKF->mvKeyLines[idx];
+                s2d = cv::Point2f(kl.startPointX, kl.startPointY);
+                e2d = cv::Point2f(kl.endPointX, kl.endPointY);
+            } else {
+                failed_by_endpoint_api++;
+                continue;
+            }
+
+            // --- 反投影两个像素端点到 3D 射线 ---
+            // 🌟 核心排查点 2：这里放弃你原来的 Backproject 查表函数，直接用最新校正的刚体外参反投影，确保不踩深度表的坑
+            Sophus::SE3f Twc = isRight ? (pKF->GetPoseInverse() * pKF->GetRelativePoseTlr()) : pKF->GetPose().inverse();
+            Eigen::Vector3f camCenter_world = Twc.translation();
+            Eigen::Matrix3f Rwc = Twc.rotationMatrix();
+
+            float fx = pKF->fx; float fy = pKF->fy; float cx = pKF->cx; float cy = pKF->cy;
+
+            Eigen::Vector3f p_cam1((s2d.x - cx) / fx, (s2d.y - cy) / fy, 1.0f);
+            Eigen::Vector3f d1 = (Rwc * p_cam1).normalized();
+
+            Eigen::Vector3f p_cam2((e2d.x - cx) / fx, (e2d.y - cy) / fy, 1.0f);
+            Eigen::Vector3f d2 = (Rwc * p_cam2).normalized();
+
+            float s, t; 
+            Eigen::Vector3f p_ray, p_line;
+
+            // 端点1 的射线与直线的最近交点
+            ClosestPointsBetweenLines(camCenter_world, d1, p0_line_world, dir_world, s, t, p_ray, p_line);
+            if (s <= 0.1f) {
+                failed_by_negative_depth++;
+            } else if (!std::isfinite(t)) {
+                failed_by_nan_inf++;
+            } else {
+                t_values.push_back(t);
+            }
+
+            // 端点2 的射线与直线的最近交点
+            ClosestPointsBetweenLines(camCenter_world, d2, p0_line_world, dir_world, s, t, p_ray, p_line);
+            if (s <= 0.1f) {
+                failed_by_negative_depth++;
+            } else if (!std::isfinite(t)) {
+                failed_by_nan_inf++;
+            } else {
+                t_values.push_back(t);
+            }
+        }
+    }
+
+    std::cout << "  - Processed 2D Line Observations: " << total_processed_lines << "\n";
+    std::cout << "  - Failed by Endpoint API / Vector Out of Bounds: " << failed_by_endpoint_api << "\n";
+    std::cout << "  - Failed by Negative Depth (s <= 0.1, Behind Camera): " << failed_by_negative_depth << "\n";
+    std::cout << "  - Failed by NaN/Inf numerical errors: " << failed_by_nan_inf << "\n";
+    std::cout << "  - Valid t_values collected size: " << t_values.size() << "\n";
+
+    // 🌟 雷达 1：检查是否所有的点都被过滤掉了
+    if(t_values.size() < 2) {
+        std::cerr << "  - [TERMINATE] t_values size < 2, failed to update endpoints.\n";
+        return;
+    }
+
+    // ---- 4) 稳健地提取线段两端 (分位数截断) ----
+    std::sort(t_values.begin(), t_values.end());
+
+    float t_min = t_values.front();
+    float t_max = t_values.back();
+
+    if (t_values.size() >= 4) {
+        int min_idx = static_cast<int>(t_values.size() * 0.05);
+        int max_idx = static_cast<int>(t_values.size() * 0.95);
+        max_idx = std::min(max_idx, (int)t_values.size() - 1);
+        
+        t_min = t_values[min_idx];
+        t_max = t_values[max_idx];
+    }
+
+    if (t_max < t_min) std::swap(t_min, t_max);
+
+    // ---- 5) 长度异常拦截 (防御性编程) ----
+    float line_length = t_max - t_min;
+    std::cout << "  - Truncated t_range: [" << t_min << ", " << t_max << "], Computed Line Length: " << line_length << "m\n";
+    
+    // 🌟 雷达 2：检查线段是否被异常拉伸
+    if (!std::isfinite(line_length) || line_length > 15.0f || line_length < 0.01f) {
+        std::cerr << "  - [TERMINATE] Rejected due to abnormal length filter! (Length constraint: 0.01m ~ 15m)\n";
+        return; 
+    }
+
+    // ---- 6) 重建最终的 3D 端点并写回 ----
+    Eigen::Vector3f P1 = p0_line_world + t_min * dir_world;
+    Eigen::Vector3f P2 = p0_line_world + t_max * dir_world;
+
+    std::cout << "  - [🎉 SUCCESS] Writing new 3D Endpoints!\n";
+    std::cout << "    P1: " << P1.transpose() << "\n";
+    std::cout << "    P2: " << P2.transpose() << "\n";
+
+    SetLineWorldPos(P1, P2);
+}
+*/
+
+
+/*  这是旧的版本
 void MapLine::UpdateWorldEndpointsFromObservationLineDepth()
 {
     // --- Validate whole MapLine with PCA using all back-projected points ---
@@ -1021,8 +1323,33 @@ void MapLine::UpdateWorldEndpointsFromObservationLineDepth()
     }
     // high confidence: recompute Plucker using more stable world points and commit endpoints
     Eigen::Matrix<double,6,1> Lw = Converter::FitPluckerLineFromPoints(all_pts);
+
     if(Lw.allFinite())
     {
+        // 🌟 【关键修复】在此处进行方向对齐！
+        // 我们取一个观测帧的相机中心作为参考，确保 Plucker 的方向指向一致
+        const auto& obs = GetLineObservations();
+        if(!obs.empty())
+        {
+            KeyFrame* pRefKF = obs.begin()->first;
+            Eigen::Vector3f camCenter = pRefKF->GetCameraCenter(); // 世界系相机中心
+            
+            // 提取 Plucker 的方向 v 和矩量 n
+            Eigen::Vector3d n = Lw.head<3>();
+            Eigen::Vector3d v = Lw.tail<3>();
+            
+            // 计算直线上的最近点 P0 = (v x n) / ||v||^2
+            Eigen::Vector3d P0 = n.cross(v) / v.squaredNorm();
+            
+            // 🌟 强制对齐逻辑：
+            // 如果 v 与 (P0 - camCenter) 的投影方向相反，则翻转 v 和 n
+            // 这样保证了直线的“正向”始终是远离相机中心，或者满足右手定则
+            if (v.dot(P0 - camCenter.cast<double>()) < 0)
+            {
+                Lw.head<3>() = -Lw.head<3>();
+                Lw.tail<3>() = -Lw.tail<3>();
+            }
+        }
         SetPluckerLine(Lw); // commit improved plucker
         // Optionally update endpoints (two extreme projections along line)
         UpdateWorldEndpointsFromObservationPntsAndPluckerLine(Lw, all_pts); //use the all points
@@ -1093,6 +1420,391 @@ void MapLine::UpdateWorldEndpointsFromObservationPntsAndPluckerLine(const Eigen:
     mLineWorldPos.tail<3>() = mLeWorldPos;
 }
 
+*/
+
+
+void MapLine::UpdateWorldEndpointsFromObservationLineDepth()
+{
+
+    // 自动判定当前所在的传感器模式：
+    // 如果是纯单目，或者当前帧深度图里没有任何有效的深度计数，直接分流到单目面交裁剪算法！
+    bool has_depth_observations = false;
+    
+    // 预扫描是否有有效深度
+    for(const auto &obs : this->GetLineObservations())
+    {
+        KeyFrame* pKFi = obs.first; int idx = std::get<0>(obs.second);
+        if(!pKFi || pKFi->isBad()) continue;
+        if(GetObservationDepth0(pKFi, idx) > 0.01f && GetObservationDepth1(pKFi, idx) > 0.01f)
+        {
+            has_depth_observations = true;
+            break;
+        }
+    }
+
+    if (!has_depth_observations)
+    {
+        // 🚀 激活单目保底纯几何三角化闭环管道！
+        UpdateWorldEndpointsMonoFallback();
+        return;
+    }
+
+    // 用于控制深度有效性的配置阈值（根据你的系统实际需求调整，例如室内常设 0.1 ~ 10.0 米）
+    //const double MIN_DEPTH_V = 0.1;
+    //const double MAX_DEPTH_V = 15.0;
+
+    // ---- 1) 收集所有观测关键帧的反投影 3D 点云 ----
+    std::vector<Eigen::Vector3d> all_pts;
+    
+    // 获取多视角观测句柄
+    std::map<KeyFrame*, std::tuple<int, int>> obs_map;
+    {
+        unique_lock<mutex> lock(mMutexFeatures);
+        obs_map = mLineObservations;
+    }
+
+    for(const auto &obs : obs_map)
+    {
+        KeyFrame* pKFi = obs.first; 
+        if(!pKFi || pKFi->isBad()) continue;
+
+        int idx = std::get<0>(obs.second);
+        if (idx < 0) continue; // 如果当前左目索引非法，跳过
+
+        // 获取该帧上当前线段两端点被记录的优化深度
+        float newd0 = GetObservationDepth0(pKFi, idx);
+        float newd1 = GetObservationDepth1(pKFi, idx);
+
+        // 提取 2D 像素端点坐标
+        Eigen::Vector2f sl, el; 
+        if(!pKFi->GetLineEndPointEigen(idx, sl, el)) continue;
+
+        // 严格的深度防火墙拦截
+        if(!(newd0 > MIN_DEPTH_V && newd0 < MAX_DEPTH_V && newd1 > MIN_DEPTH_V && newd1 < MAX_DEPTH_V)) continue;
+
+        // 将 2D 像素坐标反投影至归一化平面 (已包含光心 cx, cy 修正)
+        Eigen::Vector3d r0 = pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(sl[0], sl[1]));
+        Eigen::Vector3d r1 = pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(el[0], el[1]));
+
+        // 现场恢复当前关键帧最新的刚体变换矩阵（世界系与相机系对齐）
+        Sophus::SE3f Tcw_sophus = pKFi->GetPose();
+        Eigen::Matrix3d Rwc = Tcw_sophus.inverse().rotationMatrix().cast<double>();
+        Eigen::Vector3d twc = Tcw_sophus.inverse().translation().cast<double>();
+
+        // 纯正的空间刚体反投影变换：P_world = Rwc * (depth * r_norm) + t_world
+        Eigen::Vector3d pw0 = Rwc * (double(newd0) * r0) + twc;
+        Eigen::Vector3d pw1 = Rwc * (double(newd1) * r1) + twc;
+
+        all_pts.push_back(pw0); 
+        all_pts.push_back(pw1);
+    }
+
+    // 防御雷达：如果有效的空间点不足以构成线段拟合，直接拦截退出
+    if (all_pts.size() < 2) return;
+
+    // ---- 2) 高置信度环节：利用多视角 3D 点云通过 PCA 拟合最优 Plücker 骨架 ----
+    Eigen::Matrix<double,6,1> Lw = Converter::FitPluckerLineFromPoints(all_pts);
+
+    if(Lw.allFinite())
+    {
+        // ---- 3) 核心工业级修复：强制几何惯例方向对齐 ----
+        // 提取拟合直线的矩量 n 和方向向量 v
+        Eigen::Vector3d n = Lw.head<3>();
+        Eigen::Vector3d v = Lw.tail<3>();
+        double v_norm = v.norm();
+        
+        if (v_norm > 1e-6)
+        {
+            v /= v_norm;
+            n /= v_norm;
+
+            // 计算该无穷直线上距离世界系原点最近的参考基准点 P0
+            Eigen::Vector3d P0 = n.cross(v);
+
+            // 引入第一帧主观测关键帧的相机中心作为物理方向参照基准
+            if(!obs_map.empty())
+            {
+                KeyFrame* pRefKF = obs_map.begin()->first;
+                Eigen::Vector3f camCenter_world = pRefKF->GetCameraCenter();
+
+                // 🌟 强健对齐规范：确保方向向量 v 的物理指向与相机视线向量点积为正
+                // 彻底拔除由于 SVD 分解符号随机性导致的“正负交点符号横跳、后脑勺倒影”地雷
+                if (v.dot(P0 - camCenter_world.cast<double>()) < 0)
+                {
+                    n = -n;
+                    v = -v;
+                }
+            }
+            
+            // 规范化写回临时的 Plücker 参数块
+            Lw.head<3>() = n;
+            Lw.tail<3>() = v;
+        }
+
+        // 提交多视角全局几何对齐后的完好 Plücker 直线状态
+        SetPluckerLine(Lw); 
+
+        // ---- 4) 闭环重投影截断：基于全局最优直线，重新裁切高精度 3D 物理短端点 ----
+        // 传入 0.05 和 0.95 的分位数进行双向噪声剥离截断
+        UpdateWorldEndpointsFromObservationPntsAndPluckerLine(Lw, all_pts, 0.05, 0.95);
+    }
+}
+
+void MapLine::UpdateWorldEndpointsFromObservationPntsAndPluckerLine(
+    const Eigen::Matrix<double,6,1>& Lw,
+    const std::vector<Eigen::Vector3d>& pnts_3d,
+    double lower_q,
+    double upper_q)
+{
+    if (pnts_3d.size() < 2) return;
+
+    // ---- 1) 提取对齐后的 Plücker 分量 ----
+    Eigen::Vector3d n = Lw.head<3>();
+    Eigen::Vector3d v = Lw.tail<3>();
+    
+    double v2 = v.squaredNorm();
+    if (v2 < 1e-10) return; // 规避退化直线零除风险
+    
+    Eigen::Vector3d v_norm = v.normalized();
+
+    // ---- 2) 定位无穷直线上的足点 P0 ----
+    Eigen::Vector3d P0 = n.cross(v) / v2;
+
+    // ---- 3) 一致性映射：将所有离散观测空间点投影到该理想直线上，计算标量 t 分量 ----
+    std::vector<double> ts;
+    ts.reserve(pnts_3d.size());
+    for (const auto& p : pnts_3d)
+    {
+        // 🌟 核心公式：t = (P_space - P0) · v_dir
+        ts.push_back((p - P0).dot(v_norm));
+    }
+
+    if (ts.size() < 2) return;
+
+    // ---- 4) 强健的鲁棒性分位数截断 (百分比过滤) ----
+    std::sort(ts.begin(), ts.end());
+    
+    auto get_percentile = [&](double q) -> double
+    {
+        if (ts.empty()) return 0.0;
+        double idx = q * (ts.size() - 1);
+        size_t lo = static_cast<size_t>(std::floor(idx));
+        size_t hi = static_cast<size_t>(std::ceil(idx));
+        double t = ts[lo];
+        if (hi > lo)
+        {
+            t += (ts[hi] - ts[lo]) * (idx - lo); // 线性插值
+        }
+        return t;
+    };
+
+    double tmin = get_percentile(lower_q);  // 剥离低位边缘噪点
+    double tmax = get_percentile(upper_q);  // 剥离高位边缘噪点
+    
+    if (tmax < tmin) std::swap(tmin, tmax);
+
+    // ---- 5) 恢复物理端点并锁定在直线上 ----
+    Eigen::Vector3d p1 = P0 + tmin * v_norm;
+    Eigen::Vector3d p2 = P0 + tmax * v_norm;
+
+    // ---- 6) 原子操作：加锁同步写入 MapLine 核心显式成员，完成数据管道闭环 ----
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        
+        mLsWorldPos = p1.cast<float>();
+        mLeWorldPos = p2.cast<float>();
+        
+        mLineWorldPos.head<3>() = mLsWorldPos;
+        mLineWorldPos.tail<3>() = mLeWorldPos;
+    }
+}
+
+
+void MapLine::UpdateWorldEndpointsMonoFallback()
+{
+    // ---- 1) 安全获取所有多视观测 ----
+    std::map<KeyFrame*, std::tuple<int, int>> obs_map;
+    {
+        unique_lock<mutex> lock(mMutexFeatures);
+        obs_map = mLineObservations;
+    }
+
+    // 单目空间几何三角化至少需要 2 帧具有视差的关键帧
+    if (obs_map.size() < 2) return;
+
+    // ---- 2) 骨架更新：构建多视反投影平面，通过 SVD 求解空间交线 ----
+    // 每一个平面方程为 ax + by + cz + d = 0，用 Eigen::Vector4d (a,b,c,d) 表示
+    std::vector<Eigen::Vector4d> planes;
+    planes.reserve(obs_map.size());
+
+    for (const auto &obs : obs_map)
+    {
+        KeyFrame* pKFi = obs.first;
+        if (!pKFi || pKFi->isBad()) continue;
+
+        int idx = std::get<0>(obs.second);
+        if (idx < 0) continue;
+
+        // 提取 2D 像素端点
+        Eigen::Vector2f sl, el;
+        if (!pKFi->GetLineEndPointEigen(idx, sl, el)) continue;
+
+        // 将 2D 像素转化为相机坐标系下的归一化平面方向向量
+        Eigen::Vector3d r0 = pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(sl[0], sl[1]));
+        Eigen::Vector3d r1 = pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(el[0], el[1]));
+        
+        // 核心几何：在相机系下，光心 (0,0,0) 与 r0, r1 构成的平面的法向量为 n_cam = r0 × r1
+        Eigen::Vector3d n_cam = r0.cross(r1);
+        if (n_cam.norm() < 1e-6) continue; // 规避退化线段
+        n_cam.normalize();
+
+        // 将相机系下的平面方程参数变换到世界坐标系
+        // 相机系下平面方程为：n_cam · P_cam = 0
+        // 变换关系：P_cam = Rcw * P_world + tcw
+        // 展开得：(n_cam · Rcw) · P_world + (n_cam · tcw) = 0
+        Sophus::SE3f Tcw_sophus = pKFi->GetPose();
+        Eigen::Matrix3d Rcw = Tcw_sophus.rotationMatrix().cast<double>();
+        Eigen::Vector3d tcw = Tcw_sophus.translation().cast<double>();
+
+        Eigen::Vector3d n_world = Rcw.transpose() * n_cam; // 世界系下的平面法向量
+        double d_world = n_cam.dot(tcw);                  // 世界系下的平面方程常数项
+
+        Eigen::Vector4d plane_eq;
+        plane_eq << n_world, d_world;
+        planes.push_back(plane_eq);
+    }
+
+    if (planes.size() < 2) return;
+
+    // ---- 3) SVD 分解所有空间平面方程，拟合最优世界系 Plücker 直线 ----
+    // 构建系数矩阵 A (大小为 N x 4)
+    Eigen::MatrixXd A(planes.size(), 4);
+    for (size_t i = 0; i < planes.size(); ++i)
+    {
+        A.row(i) = planes[i].transpose();
+    }
+
+    // 对 A 进行 SVD 分解，最小奇异值对应的右奇异向量即为空间直线在齐次坐标下的对偶表示
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(A, Eigen::ComputeThinV);
+    Eigen::Vector4d V_fourth = svd.matrixV().col(3); // [x, y, z, w]
+
+    // 提取直线的方向向量 v_world (通过前三个平面的法向量交叉乘积的最小二乘解近似，或者直接通过 PCA 点云方向锁定)
+    // 为了极度健壮，我们直接对所有平面的法向量求 null space 来锁死方向 v_world
+    Eigen::MatrixXd A_matrix(planes.size(), 3);
+    for (size_t i = 0; i < planes.size(); ++i)
+    {
+        A_matrix.row(i) = planes[i].head<3>().transpose();
+    }
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd_dir(A_matrix, Eigen::ComputeThinV);
+    Eigen::Vector3d v_world = svd_dir.matrixV().col(2); // 最小奇异值对应的特征向量即为直线方向
+    v_world.normalize();
+
+    // 根据系数矩阵构建直线上的一个基础锚点 P0_world
+    // 最小二乘求解：对所有平面方程 Ax = -B
+    Eigen::VectorXd B_vec(planes.size());
+    for (size_t i = 0; i < planes.size(); ++i) B_vec(i) = -planes[i](3);
+    Eigen::Vector3d P0_world = A_matrix.colPivHouseholderQr().solve(B_vec);
+
+    // 将 P0 和 v 转换为标准的 6 维世界系 Plücker 坐标 Lw = [n; v]
+    // n = P0 × v
+    Eigen::Vector3d n_world = P0_world.cross(v_world);
+    
+    Eigen::Matrix<double,6,1> Lw;
+    Lw << n_world, v_world;
+
+    // ---- 4) 强制方向规范化对齐 ----
+    if (Lw.allFinite())
+    {
+        KeyFrame* pRefKF = obs_map.begin()->first;
+        Eigen::Vector3f camCenter_world = pRefKF->GetCameraCenter();
+        
+        // 确保 v 的方向使得其与“基准帧视线方向”夹角为锐角
+        if (v_world.dot(P0_world - camCenter_world.cast<double>()) < 0)
+        {
+            Lw.head<3>() = -Lw.head<3>();
+            Lw.tail<3>() = -Lw.tail<3>();
+        }
+        SetPluckerLine(Lw);
+    }
+    else
+    {
+        return;
+    }
+
+    // ---- 5) 边界更新：利用多视线截断裁切 3D 端点 ----
+    // 重新提取规范化后的参数
+    Eigen::Vector3f p0_plk, dir_plk;
+    PluckerToPointAndDir(Lw, p0_plk, dir_plk);
+
+    std::vector<double> ts;
+    ts.reserve(obs_map.size() * 2);
+
+    for (const auto &obs : obs_map)
+    {
+        KeyFrame* pKFi = obs.first;
+        if (!pKFi || pKFi->isBad()) continue;
+
+        int idx = std::get<0>(obs.second);
+        Eigen::Vector2f sl, el;
+        if (!pKFi->GetLineEndPointEigen(idx, sl, el)) continue;
+
+        Eigen::Vector3f camCenter_i = pKFi->GetCameraCenter();
+        Sophus::SE3f Tcw_i = pKFi->GetPose();
+        Eigen::Matrix3f Rwc_i = Tcw_i.inverse().rotationMatrix();
+
+        // 构造端点 1 和端点 2 在世界坐标系下的单目视线方向向量（Rays）
+        Eigen::Vector3f ray1 = (Rwc_i * pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(sl[0], sl[1])).cast<float>()).normalized();
+        Eigen::Vector3f ray2 = (Rwc_i * pKFi->UnprojectToNormalizedPlane(Eigen::Vector2d(el[0], el[1])).cast<float>()).normalized();
+
+        // 调用 ClosestPointsBetweenLines 计算每条视线与 Plücker 直线的最近交点
+        float s, t;
+        Eigen::Vector3f p_ray, p_line;
+
+        // 计算端点 1 视线交点并收集标量 t 轴坐标
+        ClosestPointsBetweenLines(camCenter_i, ray1, p0_plk, dir_plk, s, t, p_ray, p_line);
+        if (std::isfinite(t) && s > 0.0f) // 确保交点在相机前方
+            ts.push_back(static_cast<double>(t));
+
+        // 计算端点 2 视线交点并收集标量 t 轴坐标
+        ClosestPointsBetweenLines(camCenter_i, ray2, p0_plk, dir_plk, s, t, p_ray, p_line);
+        if (std::isfinite(t) && s > 0.0f)
+            ts.push_back(static_cast<double>(t));
+    }
+
+    if (ts.size() < 2) return;
+
+    // ---- 6) 鲁棒分位数过滤与端点更新 ----
+    std::sort(ts.begin(), ts.end());
+    
+    auto get_percentile = [&](double q) -> double
+    {
+        double idx = q * (ts.size() - 1);
+        size_t lo = static_cast<size_t>(std::floor(idx));
+        size_t hi = static_cast<size_t>(std::ceil(idx));
+        double t = ts[lo];
+        if (hi > lo) t += (ts[hi] - ts[lo]) * (idx - lo);
+        return t;
+    };
+
+    // 采用 5% 和 95% 分位数剥离单目误匹配拉伸的远端噪点
+    double tmin = get_percentile(0.05);
+    double tmax = get_percentile(0.95);
+    if (tmax < tmin) std::swap(tmin, tmax);
+
+    // 映射回最终的 3D 有限长端点
+    Eigen::Vector3f final_p1 = p0_plk + static_cast<float>(tmin) * dir_plk;
+    Eigen::Vector3f final_p2 = p0_plk + static_cast<float>(tmax) * dir_plk;
+
+    // 原子锁同步写入数据成员
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        mLsWorldPos = final_p1;
+        mLeWorldPos = final_p2;
+        mLineWorldPos.head<3>() = mLsWorldPos;
+        mLineWorldPos.tail<3>() = mLeWorldPos;
+    }
+}
+
 
 bool  MapLine::UpdatePluckerFromBackProjectLines()
 {
@@ -1100,6 +1812,87 @@ bool  MapLine::UpdatePluckerFromBackProjectLines()
     //std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int> > observations = GetLineObservations();
     return true;
 }
+
+
+void MapLine::UpdateFromPluckerLineNew()
+{
+    Eigen::Matrix<double,6,1> Lw;
+    { unique_lock<mutex> lock(mMutexPos); Lw = mWorldPlucker; }
+    Eigen::Vector3f p0_line_world, dir_world;
+    PluckerToPointAndDir(Lw, p0_line_world, dir_world);
+
+    std::map<ORB_SLAM3::KeyFrame*, std::tuple<int, int>> observations;
+    { unique_lock<mutex> lock(mMutexFeatures); observations = mLineObservations; }
+
+    if (observations.empty()) return;
+
+    std::vector<float> t_values;
+    // 🔬 [DEBUG] 打印 Plucker 状态
+    std::cout << "\n[DEBUG LINE " << mnId << "] P0: " << p0_line_world.transpose() 
+              << " | Dir: " << dir_world.transpose() << std::endl;
+
+    for(auto kv : observations)
+    {
+        KeyFrame* pKF = kv.first;
+        if(!pKF || pKF->isBad()) continue;
+
+        int idxLeft = get<0>(kv.second);
+        int idxRight = get<1>(kv.second);
+        std::vector<std::pair<int, bool>> index_pairs;
+        if (idxLeft >= 0)  index_pairs.push_back({idxLeft, false});
+        if (idxRight >= 0) index_pairs.push_back({idxRight, true});
+
+        for (auto& ip : index_pairs)
+        {
+            int idx = ip.first;
+            bool isRight = ip.second;
+
+            if (idx < 0 || idx >= (int)pKF->mvKeyLines.size()) continue;
+            const cv::line_descriptor::KeyLine& kl = pKF->mvKeyLines[idx];
+            
+            // 构建射线
+            Sophus::SE3f Twc = isRight ? (pKF->GetPoseInverse() * pKF->GetRelativePoseTlr()) : pKF->GetPose().inverse();
+            Eigen::Vector3f camCenter = Twc.translation();
+            Eigen::Matrix3f Rwc = Twc.rotationMatrix();
+            
+            // 射线方向
+            Eigen::Vector3f d_ray = (Rwc * Eigen::Vector3f((kl.startPointX - pKF->cx)/pKF->fx, (kl.startPointY - pKF->cy)/pKF->fy, 1.0f)).normalized();
+
+            float s, t; 
+            Eigen::Vector3f p_ray, p_line;
+            ClosestPointsBetweenLines(camCenter, d_ray, p0_line_world, dir_world, s, t, p_ray, p_line);
+
+            // 🔬 [DEBUG] 核心检测：打印每一个观测的几何关系
+            float dist_to_line = (p_ray - p_line).norm();
+            float alignment = d_ray.dot(dir_world);
+            
+            std::cout << "  KF " << pKF->mnId << " | s: " << s << " | t: " << t 
+                      << " | dist: " << dist_to_line << " | align: " << alignment << std::endl;
+
+            // 🌟 临时放宽限制：只要距离足够近，哪怕 s 为负也记录 t (观察是否为位姿方向定义问题)
+            if (dist_to_line < 0.5f && std::isfinite(t)) {
+                t_values.push_back(t);
+            }
+        }
+    }
+
+    if(t_values.size() < 2) {
+        std::cerr << "  - [TERMINATE] Valid t_values: " << t_values.size() << std::endl;
+        return;
+    }
+
+    std::sort(t_values.begin(), t_values.end());
+    float t_min = t_values.front();
+    float t_max = t_values.back();
+    
+    float line_length = t_max - t_min;
+    std::cout << "  - Computed Length: " << line_length << std::endl;
+
+    if (line_length > 0.001f && line_length < 20.0f) {
+        SetLineWorldPos(p0_line_world + t_min * dir_world, p0_line_world + t_max * dir_world);
+    }
+}
+
 
 void MapLine::SamplePointsAlongLinesWorld3D_old()
 {

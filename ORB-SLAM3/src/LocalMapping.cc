@@ -438,6 +438,7 @@ void LocalMapping::RunWithLine()
                         //std::cerr <<"------end test-------" << std::endl;
 
                         //Optimizer::TestEdgeSE3ProjectXYZOnlyPose(); //debug, 仅优化位姿的点投影误差边的雅可比矩阵测试函数
+                        //Optimizer::TestEdgeSE3ProjectLine4D_Jacobian(); //debug, 线段(end points)(4x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
 
                         //测试通过（只优化位姿和点+线只是用来约束）
                         //std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLine" << std::endl;
@@ -461,6 +462,11 @@ void LocalMapping::RunWithLine()
                         std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
                         Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
+
+                        //std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
+                        //Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        //std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
+
 
                         b_doneLBA = true;
 
@@ -789,7 +795,6 @@ void LocalMapping::ProcessNewKeyFrameWithLine()
     // Insert Keyframe in Map
     mpAtlas->AddKeyFrame(mpCurrentKeyFrame);
 }
-
 
 
 void LocalMapping::EmptyQueue()
@@ -2113,6 +2118,15 @@ void LocalMapping::SearchInNeighborsWithLine()
            pML->UpdateNormalAndDepth();
        }           
     }
+
+    // // 🌟 [新增保底刷新] 观测关系改变后，重新拉伸线段物理长度范围
+    // for(MapLine* pML : mpCurrentKeyFrame->GetMapLineMatches())
+    // {
+    //     if(pML && !pML->isBad())
+    //     {
+    //         pML->UpdateWorldEndpointsFromObservationLineDepth();
+    //     }
+    // }
 
     //if(mpAtlas->KeyFramesInMap()>2)
     //{

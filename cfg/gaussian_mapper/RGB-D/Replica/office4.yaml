@@ -44,7 +44,7 @@ Record.all_keyframes_record_interval: 0 # 0:never, 1:always, others:periodically
 Record.record_rendered_image: 1 # 0:false, 1 or other integer:true
 Record.record_ground_truth_image: 0 # 0:false, 1 or other integer:true
 Record.record_loss_image: 0 # 0:false, 1 or other integer:true
-Record.training_report_interval: 0 # 0:never, 1:always, others:periodically
+Record.training_report_interval: 1 # 0:never, 1:always, others:periodically
 Record.record_loop_ply: 0 # 0:false, 1 or other integer:true
 
 #--------------------------------------------------------------------------------------------

@@ -4573,6 +4573,216 @@ bool checkJacobian_zdg(g2o::BaseBinaryEdge<3, Eigen::Vector3d, g2o::VertexSE3Exp
 // };
 
 
+// ===================================================================
+// 🌟 1. 4-DoF 线段顶点 (Orthonormal Representation)
+// Estimate: 6维 Plücker 坐标 (n, v)
+// Update: 4维 (3维SO3更新U，1维SO2更新W)
+// ===================================================================
+class VertexLine4D : public g2o::BaseVertex<4, Eigen::Matrix<double, 6, 1>> {
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    VertexLine4D() {}
+    virtual bool read(std::istream& is) { return true; }
+    virtual bool write(std::ostream& os) const { return true; }
+    virtual void setToOriginImpl() { _estimate.setZero(); }
+
+    virtual void oplusImpl(const double* update) {
+        Eigen::Map<const Eigen::Vector4d> delta(update);
+        Eigen::Vector3d u_delta = delta.head<3>(); // 3-DoF for direction
+        double w_delta = delta(3);                 // 1-DoF for momentum
+
+        Eigen::Vector3d n = _estimate.head<3>();
+        Eigen::Vector3d v = _estimate.tail<3>();
+        double w1 = n.norm();
+        double w2 = v.norm();
+
+        if (w1 < 1e-9 || w2 < 1e-9) return;
+
+        Eigen::Matrix3d U;
+        U.col(0) = n / w1;
+        U.col(1) = v / w2;
+        U.col(2) = U.col(0).cross(U.col(1));
+
+        // SO(3) 旋转更新 (右乘)
+        Eigen::Matrix3d U_new = U * Sophus::SO3d::exp(u_delta).matrix();
+
+        // SO(2) 模长更新
+        double c = cos(w_delta);
+        double s = sin(w_delta);
+        double w1_new = w1 * c - w2 * s;
+        double w2_new = w1 * s + w2 * c;
+
+        Eigen::Matrix<double, 6, 1> L_new;
+        L_new.head<3>() = w1_new * U_new.col(0);
+        L_new.tail<3>() = w2_new * U_new.col(1);
+        _estimate = L_new;
+    }
+};
+
+// ===================================================================
+// 🌟 2. 相机到 4-DoF 线段的投影边 (解析求导解耦版)
+// ===================================================================
+class EdgeSE3ProjectLine4D : public g2o::BaseBinaryEdge<2, std::pair<Eigen::Vector2d, Eigen::Vector2d>, g2o::VertexSE3Expmap, VertexLine4D> {
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    EdgeSE3ProjectLine4D() {}
+
+    void SetCameraIntrinsics(double fx, double fy, double cx, double cy) {
+        fx_ = fx; fy_ = fy; cx_ = cx; cy_ = cy;
+        K_inv_ << 1.0 / fx, 0.0, -cx / fx,
+                  0.0, 1.0 / fy, -cy / fy,
+                  0.0, 0.0, 1.0;
+    }
+
+    virtual bool read(std::istream& is) { return true; }
+    virtual bool write(std::ostream& os) const { return true; }
+
+    virtual void computeError() {
+        const g2o::VertexSE3Expmap* vPose = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        const VertexLine4D* vLine = static_cast<const VertexLine4D*>(_vertices[1]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix<double, 6, 1> Lw = vLine->estimate();
+
+        Eigen::Matrix3d R = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d t = Tcw.translation();
+        Eigen::Vector3d nw = Lw.head<3>();
+        Eigen::Vector3d vw = Lw.tail<3>();
+
+        Eigen::Vector3d nc = R * nw + SkewSymmetric(t) * R * vw;
+        Eigen::Vector3d l_img = K_inv_.transpose() * nc;
+        
+        double norm_l = std::sqrt(l_img(0)*l_img(0) + l_img(1)*l_img(1));
+        if (norm_l < 1e-9) {
+            _error.setZero();
+            return;
+        }
+        l_img /= norm_l;
+
+        Eigen::Vector3d sp_homo(_measurement.first(0), _measurement.first(1), 1.0);
+        Eigen::Vector3d ep_homo(_measurement.second(0), _measurement.second(1), 1.0);
+
+        _error(0) = l_img.dot(sp_homo);
+        _error(1) = l_img.dot(ep_homo);
+    }
+
+    // 🌟 【独立纯数学函数】完全脱离 g2o 内存，绝对不会报段错误
+    void computeAnalyticJacobian(Eigen::Matrix<double, 2, 6>& J_pose, Eigen::Matrix<double, 2, 4>& J_line) {
+        const g2o::VertexSE3Expmap* vPose = static_cast<const g2o::VertexSE3Expmap*>(_vertices[0]);
+        const VertexLine4D* vLine = static_cast<const VertexLine4D*>(_vertices[1]);
+
+        g2o::SE3Quat Tcw = vPose->estimate();
+        Eigen::Matrix<double, 6, 1> Lw = vLine->estimate();
+
+        Eigen::Matrix3d R = Tcw.rotation().toRotationMatrix();
+        Eigen::Vector3d t = Tcw.translation();
+        Eigen::Vector3d nw = Lw.head<3>();
+        Eigen::Vector3d vw = Lw.tail<3>();
+
+        Eigen::Vector3d nc = R * nw + SkewSymmetric(t) * R * vw;
+        Eigen::Vector3d vc = R * vw;
+
+        Eigen::Vector3d l_prime = K_inv_.transpose() * nc;
+        double norm_l = std::sqrt(l_prime(0)*l_prime(0) + l_prime(1)*l_prime(1));
+
+        if (norm_l < 1e-9) {
+            J_pose.setZero();
+            J_line.setZero();
+            return;
+        }
+
+        Eigen::Vector3d l_img = l_prime / norm_l;
+
+        // 1. e 对 l_img (2x3)
+        Eigen::Matrix<double, 2, 3> de_dlimg;
+        Eigen::Vector3d sp_homo(_measurement.first(0), _measurement.first(1), 1.0);
+        Eigen::Vector3d ep_homo(_measurement.second(0), _measurement.second(1), 1.0);
+        de_dlimg.row(0) = sp_homo.transpose();
+        de_dlimg.row(1) = ep_homo.transpose();
+
+        // 2. l_img 对 l_prime (3x3)
+        Eigen::Matrix3d dlimg_dlprime = Eigen::Matrix3d::Identity() / norm_l;
+        dlimg_dlprime(0,0) -= l_img(0) * l_img(0) / norm_l;
+        dlimg_dlprime(0,1) -= l_img(0) * l_img(1) / norm_l;
+        dlimg_dlprime(1,0) -= l_img(1) * l_img(0) / norm_l;
+        dlimg_dlprime(1,1) -= l_img(1) * l_img(1) / norm_l;
+        dlimg_dlprime(2,0) -= l_img(2) * l_img(0) / norm_l;
+        dlimg_dlprime(2,1) -= l_img(2) * l_img(1) / norm_l;
+
+        // 3. l_prime 对 nc (3x3)
+        Eigen::Matrix3d dlprime_dnc = K_inv_.transpose();
+
+        Eigen::Matrix<double, 2, 3> de_dnc = de_dlimg * dlimg_dlprime * dlprime_dnc;
+
+        // 🌟 J_pose (2x6) : d(nc) / d(Pose)
+        Eigen::Matrix<double, 3, 6> dnc_dxi;
+        dnc_dxi.block<3,3>(0,0) = -SkewSymmetric(nc);
+        dnc_dxi.block<3,3>(0,3) = -SkewSymmetric(vc);
+        J_pose = de_dnc * dnc_dxi;
+
+        // 🌟 J_line (2x4) : d(nc) / d(delta)
+        double w1 = nw.norm();
+        double w2 = vw.norm();
+        Eigen::Matrix<double, 3, 4> dnc_ddelta;
+        
+        if (w1 > 1e-9 && w2 > 1e-9) {
+            Eigen::Matrix3d U;
+            U.col(0) = nw / w1;
+            U.col(1) = vw / w2;
+            U.col(2) = U.col(0).cross(U.col(1));
+
+            // 基于 U * exp(u_delta) 的严格推导：
+            // d(nw)/d(delta_u) = -w1 * U * Skew(e1)
+            // d(vw)/d(delta_u) = -w2 * U * Skew(e2)
+            // 其中 e1 = [1,0,0]^T, e2 = [0,1,0]^T
+
+            Eigen::Matrix3d dnw_du;
+            dnw_du.col(0) = Eigen::Vector3d::Zero();
+            dnw_du.col(1) =  w1 * U.col(2);
+            dnw_du.col(2) = -w1 * U.col(1);
+
+            Eigen::Matrix3d dvw_du;
+            dvw_du.col(0) = -w2 * U.col(2);
+            dvw_du.col(1) = Eigen::Vector3d::Zero();
+            dvw_du.col(2) =  w2 * U.col(0);
+
+            Eigen::Vector3d dnw_dw = -w2 * U.col(0);
+            Eigen::Vector3d dvw_dw =  w1 * U.col(1);
+
+            Eigen::Matrix3d txR = SkewSymmetric(t) * R;
+
+            // ⚠️ 重点修正符号：此处严格映射李代数扰动
+            dnc_ddelta.block<3,3>(0,0) = -(R * dnw_du + txR * dvw_du); // 加了负号对齐
+            dnc_ddelta.col(3) = R * dnw_dw + txR * dvw_dw;
+
+        } else {
+            dnc_ddelta.setZero();
+        }
+
+        J_line = de_dnc * dnc_ddelta;
+    }
+
+    // 🌟 g2o 引擎调用的接口：直接获取计算结果并安全赋值
+    virtual void linearizeOplus() override {
+        Eigen::Matrix<double, 2, 6> J_pose;
+        Eigen::Matrix<double, 2, 4> J_line;
+        computeAnalyticJacobian(J_pose, J_line);
+        _jacobianOplusXi = J_pose;
+        _jacobianOplusXj = J_line;
+    }
+
+private:
+    Eigen::Matrix3d SkewSymmetric(const Eigen::Vector3d& v) {
+        Eigen::Matrix3d S;
+        S << 0, -v(2), v(1), v(2), 0, -v(0), -v(1), v(0), 0;
+        return S;
+    }
+
+    double fx_, fy_, cx_, cy_;
+    Eigen::Matrix3d K_inv_;
+};
+
+
 }
 
 #endif //ORB_SLAM3_OPTIMIZABLETYPES_H

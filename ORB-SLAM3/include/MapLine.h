@@ -153,6 +153,8 @@ public:
     void ComputeDistinctiveDescriptors();
     void ComputePluckerLineFromWorldLine(); //initial, if world line end pnts exist
 
+    void UpdateWorldEndpointsMonoFallback();
+
     cv::Mat GetDescriptor();
     cv::Mat GetDescriptorAt(int i);
     cv::Mat GetLineDescriptor();
@@ -167,6 +169,7 @@ public:
     void SetObservationLineLeDepth(KeyFrame* pKf, int idx, float dv);
 
     void UpdateNormalAndDepth();
+    void UpdateFromPluckerLineNew();
 
     bool HasCachedWorldObservationLineEndPoints();
     //End Point
@@ -196,6 +199,8 @@ public:
     inline void SetPluckerLine(const Eigen::Matrix<double,6,1>& Plucker)
     {
         unique_lock<mutex> lock(mMutexPos);
+        // 检查方向向量 v 的模是否接近 0 (即直线退化为点)
+        if (Plucker.tail<3>().norm() < 1e-6) return;
         mWorldPlucker = Plucker;
     }
 

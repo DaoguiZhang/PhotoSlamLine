@@ -154,6 +154,11 @@ int main(int argc, char **argv)
     std::cout << "Start processing sequence ..." << std::endl;
     std::cout << "Images in the sequence: " << nImages << std::endl << std::endl;
 
+    // ==============================================================================
+    // 🌟 [新增] 记录整个系统启动的总起始时间 (Tracking + Backend + Refinement)
+    // ==============================================================================
+    std::chrono::steady_clock::time_point total_start_time = std::chrono::steady_clock::now();
+
     // Main loop
     cv::Mat imRGB, imD;
     for (int ni = 0; ni < nImages; ni++)
@@ -220,6 +225,31 @@ int main(int argc, char **argv)
         viewer_thd.join();
 
     std::cout << "All threads finished. Saving results..." << std::endl;
+
+
+    // ==============================================================================
+    // 🌟 [新增] 记录并计算总耗时
+    // ==============================================================================
+    std::chrono::steady_clock::time_point total_end_time = std::chrono::steady_clock::now();
+    double total_operation_time_sec = std::chrono::duration_cast<std::chrono::duration<double>>(total_end_time - total_start_time).count();
+    double total_operation_time_min = total_operation_time_sec / 60.0;
+
+    std::cout << "=====================================================" << std::endl;
+    std::cout << "[System] Total Operation Time: " << total_operation_time_sec << " seconds ("
+              << total_operation_time_min << " minutes)." << std::endl;
+    std::cout << "=====================================================" << std::endl;
+
+    std::cout << "All threads finished. Saving results..." << std::endl;
+
+    // ==============================================================================
+    // 🌟 [新增] 将总操作时间自动保存到 txt 文件，方便跑完几大场景后统一搜集数据
+    // ==============================================================================
+    std::ofstream total_time_out((output_dir / "TotalOperationTime.txt").string());
+    if (total_time_out.is_open()) {
+        total_time_out << "Total Operation Time (seconds): " << total_operation_time_sec << std::endl;
+        total_time_out << "Total Operation Time (minutes): " << total_operation_time_min << std::endl;
+        total_time_out.close();
+    }
 
     //training_thd.join();
     //if (use_viewer)

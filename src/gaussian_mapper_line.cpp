@@ -1152,19 +1152,19 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         // Log and save
         if (training_report_interval_ && (getIteration() % training_report_interval_ == 0))
         {
-            GaussianTrainerLine::trainingReport(
-                getIteration(),
-                opt_params_.iterations_,
-                Ll1,
-                loss,
-                ema_loss_for_log_,
-                loss_utils::l1_loss,
-                iter_time,
-                *gaussians_,
-                *scene_,
-                pipe_params_,
-                background_
-            );
+            // GaussianTrainerLine::trainingReport(
+            //     getIteration(),
+            //     opt_params_.iterations_,
+            //     Ll1,
+            //     loss,
+            //     ema_loss_for_log_,
+            //     loss_utils::l1_loss,
+            //     iter_time,
+            //     *gaussians_,
+            //     *scene_,
+            //     pipe_params_,
+            //     background_
+            // );
 
             writeTrainingLog(iter_time, ema_loss_for_log_, gaussians_->xyz_.size(0));
         }
@@ -1443,19 +1443,19 @@ void GaussianMapperLine::trainForOneIteration()
         // Log and save
         if (training_report_interval_ && (getIteration() % training_report_interval_ == 0)) 
         {
-            GaussianTrainerLine::trainingReport(
-                getIteration(),
-                opt_params_.iterations_,
-                Ll1,
-                loss,
-                ema_loss_for_log_,
-                loss_utils::l1_loss,
-                iter_time,
-                *gaussians_,
-                *scene_,
-                pipe_params_,
-                background_
-            );
+            // GaussianTrainerLine::trainingReport(
+            //     getIteration(),
+            //     opt_params_.iterations_,
+            //     Ll1,
+            //     loss,
+            //     ema_loss_for_log_,
+            //     loss_utils::l1_loss,
+            //     iter_time,
+            //     *gaussians_,
+            //     *scene_,
+            //     pipe_params_,
+            //     background_
+            // );
             writeTrainingLog(iter_time, ema_loss_for_log_, gaussians_->xyz_.size(0));
         }
             

@@ -79,6 +79,8 @@ public:
     void static LocalBundleAdjustmentWithLine(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, int& num_Lines, MappingOperation& opr);
     void static LocalBundleAdjustmentWithLine_Optimization(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, int& num_Lines, MappingOperation& opr);
     void static LocalBundleAdjustmentWithLine_Optimization_Reg(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, int& num_Lines, MappingOperation& opr);
+
+    void static LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg( KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF,int& num_OptKF, int& num_MPs, int& num_edges, int& num_Lines, MappingOperation& opr);
     
     void static LocalBundleAdjustmentWithLinesPluckerOld(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPlucker(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
@@ -104,6 +106,8 @@ public:
     void static TestPluckerLinesBundleEdge();
     void static CheckJacobianNumerical();
     void static TestNumericalJacobian_PointToPlucker();
+
+    void static TestEdgeSE3ProjectLine4D_Jacobian();
     //end debug function
     void static LocalBundleAdjustmentWithLinesPluckerBack(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static CheckDuplicateVertexID(g2o::SparseOptimizer& optimizer);

@@ -123,7 +123,7 @@ namespace ORB_SLAM3
         }
 
         // [DEBUG] 打印一下保留下来的线段数量，看看百叶窗区域是否还爆炸
-        std::cerr << "LSD: Raw=" << allKeylines.size() << " -> Filtered=" << keylines.size() << std::endl;
+        //std::cerr << "LSD: Raw=" << allKeylines.size() << " -> Filtered=" << keylines.size() << std::endl;
     }
 
     void LSDextractor::ComputeImagePyramid(const cv::Mat& image)

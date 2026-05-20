@@ -1830,6 +1830,7 @@ void KeyFrame::GetKeyLineInfo(
 
 bool KeyFrame::GetLineEndpoints(int lineIdx, cv::Point2f &s_out, cv::Point2f &e_out)
 {
+    unique_lock<mutex> lock(mMutexFeatures); // 🌟 加上锁防止多线程局部BA时抢占
     if(lineIdx < mvKeyLines.size() && lineIdx >= 0)
     {
         s_out.x = mvKeyLines[lineIdx].startPointX;
@@ -1843,6 +1844,7 @@ bool KeyFrame::GetLineEndpoints(int lineIdx, cv::Point2f &s_out, cv::Point2f &e_
 
 bool KeyFrame::GetLineEndPointEigen(int lineIdx, Eigen::Vector2f& s_out, Eigen::Vector2f& e_out)
 {
+    unique_lock<mutex> lock(mMutexFeatures); // 🌟 加上锁防止多线程局部BA时抢占
     if(lineIdx < mvKeyLines.size() && lineIdx >= 0)
     {
         s_out[0] = mvKeyLines[lineIdx].startPointX;
@@ -1856,6 +1858,7 @@ bool KeyFrame::GetLineEndPointEigen(int lineIdx, Eigen::Vector2f& s_out, Eigen::
 
 float KeyFrame::GetObservatonLineLsDepth(int idx)
 {
+    unique_lock<mutex> lock(mMutexFeatures);
     if(idx >=0 && idx < mvLineDepthOpti.size())
     {
         return mvLineDepthOpti[idx].first;
@@ -1868,6 +1871,7 @@ float KeyFrame::GetObservatonLineLsDepth(int idx)
 
 float KeyFrame::GetObservatonLineLeDepth(int idx)
 {
+    unique_lock<mutex> lock(mMutexFeatures);
     if(idx >=0 && idx < mvLineDepthOpti.size())
     {
         return mvLineDepthOpti[idx].second;
@@ -1880,16 +1884,18 @@ float KeyFrame::GetObservatonLineLeDepth(int idx)
 
 void KeyFrame::SetObservationLineLsDepth(int idx, float dv)
 {
-     if(idx >=0 && idx < mvLineDepthOpti.size())
-     {
+    unique_lock<mutex> lock(mMutexFeatures);
+    if(idx >=0 && idx < mvLineDepthOpti.size())
+    {
         mvLineDepthOpti[idx].first = dv;
      }
 }
 
 void KeyFrame::SetObservationLineLeDepth(int idx, float dv)
 {
-     if(idx >=0 && idx < mvLineDepthOpti.size())
-     {
+    unique_lock<mutex> lock(mMutexFeatures);
+    if(idx >=0 && idx < mvLineDepthOpti.size())
+    {
         mvLineDepthOpti[idx].second = dv;
      }
 }
@@ -1917,7 +1923,7 @@ Eigen::Matrix3d KeyFrame::GetCamKinv()
 Eigen::Vector3d KeyFrame::UnprojectToNormalizedPlane(const Eigen::Vector2d &pixel)
 {
     Eigen::Vector3d ray;
-    ray[0] = (pixel[0] - fx) / fx;
+    ray[0] = (pixel[0] - cx) / fx;
     ray[1] = (pixel[1] - cy) / fy;
     ray[2] = 1.0;
     return ray;

@@ -4325,7 +4325,6 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     std::vector<ORB_SLAM3::EdgeSE3ProjectPointToLine2D*> vpEdgesLineMono; 
     std::vector<KeyFrame*> vpEdgeKFLineMono;
     std::vector<MapLine*> vpMapLineEdgeMono;
-
     // Compute a safe offset for line vertex ids so they do not collide with point ids used above
     int nextVertexId = (int)maxKFid + 1;
     for (MapPoint* pMP : lLocalMapPoints)
@@ -4333,11 +4332,64 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         int pid = (int)pMP->mnId + (int)maxKFid + 2;
         if (pid > nextVertexId) nextVertexId = pid;
     }
-
     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
     mapLineVertexId.reserve(lLocalMapLines.size() * 2);
-
     const double min_pixel_len = 40.0;
+    // for (MapLine* pML : lLocalMapLines)
+    // {
+    //     if (!pML || pML->isBad()) continue;
+    //     auto endpoints = pML->GetLineWorldPos();
+    //     Eigen::Vector3d Xw1 = endpoints.first.cast<double>();
+    //     Eigen::Vector3d Xw2 = endpoints.second.cast<double>();
+    //     Eigen::Vector3d d = Xw2 - Xw1;
+    //     if (!d.allFinite() || d.squaredNorm() < 1e-12) continue;
+    //     // endpoint 1
+    //     auto* vP1 = new g2o::VertexSBAPointXYZ();
+    //     int id1 = ++nextVertexId;
+    //     vP1->setId(id1);
+    //     vP1->setEstimate(Xw1);
+    //     vP1->setFixed(false);        // 🌟 解除锁死
+    //     vP1->setMarginalized(true);  // 🌟 Schur 补必须条件
+    //     // endpoint 2
+    //     auto* vP2 = new g2o::VertexSBAPointXYZ();
+    //     int id2 = ++nextVertexId;
+    //     vP2->setId(id2);
+    //     vP2->setEstimate(Xw2);
+    //     vP2->setFixed(false);        // 🌟 解除锁死
+    //     vP2->setMarginalized(true);  // 🌟 Schur 补必须条件
+    //     bool ok1 = optimizer.addVertex(vP1);
+    //     bool ok2 = optimizer.addVertex(vP2);
+    //     if (!ok1 || !ok2)
+    //     {
+    //         if (ok1) optimizer.removeVertex(vP1);
+    //         delete vP1;
+    //         delete vP2;
+    //         continue;
+    //     }
+    //     mapLineVertexId[pML] = {id1, id2};
+    //     double L0 = d.norm();
+    //     // =========================================================
+    //     // 🌟 [核心修改] 使用一元先验边代替双元先验边！
+    //     // =========================================================
+    //     double w_prior = 1.0; 
+    //     if (L0 < 0.1) w_prior = 1000.0;     // 极短线段完全锁死
+    //     else if (L0 < 0.5) w_prior = 20.0;  // 中短线段较强约束
+    //     // 端点 1 约束
+    //     auto* ep1 = new EdgePointPriorXYZ();
+    //     ep1->setVertex(0, vP1);
+    //     ep1->setMeasurement(Xw1);
+    //     ep1->setInformation(Eigen::Matrix3d::Identity() * w_prior);
+    //     optimizer.addEdge(ep1);
+    //     nEdges++;
+    //     // 端点 2 约束
+    //     auto* ep2 = new EdgePointPriorXYZ();
+    //     ep2->setVertex(0, vP2);
+    //     ep2->setMeasurement(Xw2);
+    //     ep2->setInformation(Eigen::Matrix3d::Identity() * w_prior);
+    //     optimizer.addEdge(ep2);
+    //     nEdges++;
+    //     // =========================================================
+    // }
 
     for (MapLine* pML : lLocalMapLines)
     {
@@ -4347,24 +4399,27 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         Eigen::Vector3d Xw1 = endpoints.first.cast<double>();
         Eigen::Vector3d Xw2 = endpoints.second.cast<double>();
 
-        Eigen::Vector3d d = Xw2 - Xw1;
-        if (!d.allFinite() || d.squaredNorm() < 1e-12) continue;
+        Eigen::Vector3d d0 = Xw2 - Xw1;
+        double L0 = d0.norm();
+        if (!std::isfinite(L0) || L0 < 1e-12) continue;
+
+        Eigen::Vector3d d0_unit = d0 / L0;
 
         // endpoint 1
         auto* vP1 = new g2o::VertexSBAPointXYZ();
         int id1 = ++nextVertexId;
         vP1->setId(id1);
         vP1->setEstimate(Xw1);
-        vP1->setFixed(false);        // 🌟 解除锁死
-        vP1->setMarginalized(true);  // 🌟 Schur 补必须条件
+        vP1->setFixed(false);        // 放开，允许优化
+        vP1->setMarginalized(true);
 
         // endpoint 2
         auto* vP2 = new g2o::VertexSBAPointXYZ();
         int id2 = ++nextVertexId;
         vP2->setId(id2);
         vP2->setEstimate(Xw2);
-        vP2->setFixed(false);        // 🌟 解除锁死
-        vP2->setMarginalized(true);  // 🌟 Schur 补必须条件
+        vP2->setFixed(false);        // 放开，允许优化
+        vP2->setMarginalized(true);
 
         bool ok1 = optimizer.addVertex(vP1);
         bool ok2 = optimizer.addVertex(vP2);
@@ -4379,20 +4434,32 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
 
         mapLineVertexId[pML] = {id1, id2};
 
-        double L0 = d.norm();
+        // =========================================================
+        // 🌟 [核心修改] 各向异性先验矩阵 (Anisotropic Prior Matrix)
+        // 解决线段滑动和拉伸问题的终极方案
+        // =========================================================
+        
+        // 投影矩阵：平行于线段方向
+        Eigen::Matrix3d P_parallel = d0_unit * d0_unit.transpose();
+        // 投影矩阵：垂直于线段方向
+        Eigen::Matrix3d P_perp = Eigen::Matrix3d::Identity() - P_parallel;
 
-        // =========================================================
-        // 🌟 [核心修改] 使用一元先验边代替双元先验边！
-        // =========================================================
-        double w_prior = 1.0; 
-        if (L0 < 0.1) w_prior = 1000.0;     // 极短线段完全锁死
-        else if (L0 < 0.5) w_prior = 20.0;  // 中短线段较强约束
+        double w_parallel = 1000.0; // 极高权重：严禁沿线段方向滑动和改变长度
+        double w_perp = 2.0;         // 较低权重：允许垂直方向微调以匹配图像观测
+
+        // 如果是极端噪声线段（太短），全面锁死
+        if (L0 < 0.1) {
+            w_perp = 1000.0; 
+        }
+
+        // 构建信息矩阵
+        Eigen::Matrix3d info_matrix = w_parallel * P_parallel + w_perp * P_perp;
 
         // 端点 1 约束
-        auto* ep1 = new EdgePointPriorXYZ();
+        auto* ep1 = new EdgePointPriorXYZ(); // 假设你已有这个先验边类
         ep1->setVertex(0, vP1);
         ep1->setMeasurement(Xw1);
-        ep1->setInformation(Eigen::Matrix3d::Identity() * w_prior);
+        ep1->setInformation(info_matrix); // 传入各向异性矩阵
         optimizer.addEdge(ep1);
         nEdges++;
 
@@ -4400,7 +4467,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
         auto* ep2 = new EdgePointPriorXYZ();
         ep2->setVertex(0, vP2);
         ep2->setMeasurement(Xw2);
-        ep2->setInformation(Eigen::Matrix3d::Identity() * w_prior);
+        ep2->setInformation(info_matrix); // 传入各向异性矩阵
         optimizer.addEdge(ep2);
         nEdges++;
         // =========================================================
@@ -4631,6 +4698,424 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
     pMap->IncreaseChangeIndex();
     
     // --- 14. statistics output ---
+    num_OptKF = lLocalKeyFrames.size();
+    num_MPs = lLocalMapPoints.size();
+    num_edges = nEdges;
+    num_Lines = lLocalMapLines.size();
+}
+
+
+// Local Bundle Adjustment with Plucker 4-DoF Orthogonal Representation
+void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
+    KeyFrame *pKF,
+    bool* pbStopFlag,
+    Map* pMap,
+    int& num_fixedKF,
+    int& num_OptKF,
+    int& num_MPs,
+    int& num_edges,
+    int& num_Lines,
+    MappingOperation& opr)
+{
+    // --- 1. collect local keyframes (BFS) ---
+    list<KeyFrame*> lLocalKeyFrames;
+    lLocalKeyFrames.push_back(pKF);
+    pKF->mnBALocalForKF = pKF->mnId;
+    Map* pCurrentMap = pKF->GetMap();
+
+    const vector<KeyFrame*> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    for (KeyFrame* pKFi : vNeighKFs)
+    {
+        if (!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+        {
+            pKFi->mnBALocalForKF = pKF->mnId;
+            lLocalKeyFrames.push_back(pKFi);
+        }
+    }
+
+    // --- 2. collect local MapPoints ---
+    num_fixedKF = 0;
+    list<MapPoint*> lLocalMapPoints;
+    for (KeyFrame* pKFi : lLocalKeyFrames)
+    {
+        if (pKFi->mnId == pMap->GetInitKFid())
+            num_fixedKF = 1;
+        vector<MapPoint*> vpMPs = pKFi->GetMapPointMatches();
+        for (MapPoint* pMP : vpMPs)
+        {
+            if (pMP && !pMP->isBad() && pMP->GetMap() == pCurrentMap)
+            {
+                if (pMP->mnBALocalForKF != pKF->mnId)
+                {
+                    pMP->mnBALocalForKF = pKF->mnId;
+                    lLocalMapPoints.push_back(pMP);
+                }
+            }
+        }
+    }
+
+    // --- 3. collect fixed keyframes ---
+    list<KeyFrame*> lFixedCameras;
+    for (MapPoint* pMP : lLocalMapPoints)
+    {
+        const map<KeyFrame*, tuple<int,int>>& obs = pMP->GetObservations();
+        for (auto & mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if (pKFi->mnBALocalForKF != pKF->mnId && pKFi->mnBAFixedForKF != pKF->mnId)
+            {
+                pKFi->mnBAFixedForKF = pKF->mnId;
+                if (!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+                    lFixedCameras.push_back(pKFi);
+            }
+        }
+    }
+    num_fixedKF = lFixedCameras.size() + num_fixedKF;
+    if (num_fixedKF == 0) return;
+
+    // --- 4. setup optimizer ---
+    g2o::SparseOptimizer optimizer;
+    
+    // 🌟 核心修复 1：改用 BlockSolverX 支持动态维度 (6-3-4)，杜绝段错误
+    using BlockSolverX = g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1>>;
+    using LinearSolverX = g2o::LinearSolverEigen<BlockSolverX::PoseMatrixType>;
+    auto* linearSolver = new LinearSolverX();
+    auto* solver_ptr = new BlockSolverX(linearSolver);
+    auto* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    
+    if (pMap->IsInertial()) solver->setUserLambdaInit(100.0);
+    optimizer.setAlgorithm(solver);
+    optimizer.setVerbose(false);
+    if (pbStopFlag) optimizer.setForceStopFlag(pbStopFlag);
+
+    unsigned long maxKFid = 0;
+    pCurrentMap->msOptKFs.clear();
+    pCurrentMap->msFixedKFs.clear();
+
+    // --- 5. add local keyframe vertices (optimizable) ---
+    for (KeyFrame* pKFi : lLocalKeyFrames)
+    {
+        g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+        Sophus::SE3<float> Tcw = pKFi->GetPose();
+        vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(), Tcw.translation().cast<double>()));
+        vSE3->setId(pKFi->mnId);
+        vSE3->setFixed(pKFi->mnId==pMap->GetInitKFid());
+        optimizer.addVertex(vSE3);
+        if (pKFi->mnId > maxKFid) maxKFid = pKFi->mnId;
+        pCurrentMap->msOptKFs.insert(pKFi->mnId);
+    }
+
+    // --- 6. add fixed keyframe vertices ---
+    for (KeyFrame* pKFi : lFixedCameras)
+    {
+        g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+        Sophus::SE3<float> Tcw = pKFi->GetPose();
+        vSE3->setEstimate(g2o::SE3Quat(Tcw.unit_quaternion().cast<double>(), Tcw.translation().cast<double>()));
+        vSE3->setId(pKFi->mnId);
+        vSE3->setFixed(true);
+        optimizer.addVertex(vSE3);
+        if (pKFi->mnId > maxKFid) maxKFid = pKFi->mnId;
+        pCurrentMap->msFixedKFs.insert(pKFi->mnId);
+    }
+
+    // --- 7. add MapPoint vertices + edges ---
+    const float thHuberMono = sqrt(5.991);
+    const float thHuberStereo = sqrt(7.815);
+    
+    std::vector<ORB_SLAM3::EdgeSE3ProjectXYZ*> vpEdgesMono;
+    std::vector<KeyFrame*> vpEdgeKFMono;
+    std::vector<MapPoint*> vpMapPointEdgeMono;
+    
+    std::vector<g2o::EdgeStereoSE3ProjectXYZ*> vpEdgesStereo;
+    std::vector<KeyFrame*> vpEdgeKFStereo;
+    std::vector<MapPoint*> vpMapPointEdgeStereo;
+
+    int nEdges = 0;
+
+    for (MapPoint* pMP : lLocalMapPoints)
+    {
+        g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
+        vPoint->setEstimate(pMP->GetWorldPos().cast<double>());
+        int id = pMP->mnId + maxKFid + 1;
+        vPoint->setId(id);
+        vPoint->setMarginalized(true);
+        optimizer.addVertex(vPoint);
+
+        const map<KeyFrame*, tuple<int,int>>& observations = pMP->GetObservations();
+        for (auto & mit : observations)
+        {
+            KeyFrame* pKFi = mit.first;
+            if (pKFi->isBad() || pKFi->GetMap() != pCurrentMap) continue;
+            const int leftIndex = get<0>(mit.second);
+            
+            // 🌟 核心修复 2：加入 RGB-D / Stereo 边，防止深度丢失
+            if (leftIndex != -1 && pKFi->mvuRight[leftIndex] < 0) // mono
+            {
+                const cv::KeyPoint &kpUn = pKFi->mvKeysUn[leftIndex];
+                Eigen::Matrix<double,2,1> obs; obs << kpUn.pt.x, kpUn.pt.y;
+                ORB_SLAM3::EdgeSE3ProjectXYZ* e = new ORB_SLAM3::EdgeSE3ProjectXYZ();
+                e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                e->setMeasurement(obs);
+                const float invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
+                e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+                g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber; rk->setDelta(thHuberMono); e->setRobustKernel(rk);
+                e->pCamera = pKFi->mpCamera;
+                optimizer.addEdge(e);
+                vpEdgesMono.push_back(e);
+                vpEdgeKFMono.push_back(pKFi);
+                vpMapPointEdgeMono.push_back(pMP);
+                nEdges++;
+            }
+            else if (leftIndex != -1 && pKFi->mvuRight[leftIndex] >= 0) // stereo / RGB-D
+            {
+                const cv::KeyPoint &kpUn = pKFi->mvKeysUn[leftIndex];
+                Eigen::Matrix<double,3,1> obs; obs << kpUn.pt.x, kpUn.pt.y, pKFi->mvuRight[leftIndex];
+                g2o::EdgeStereoSE3ProjectXYZ* e = new g2o::EdgeStereoSE3ProjectXYZ();
+                e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+                e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+                e->setMeasurement(obs);
+                const float invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
+                e->setInformation(Eigen::Matrix3d::Identity() * invSigma2);
+                g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber; rk->setDelta(thHuberStereo); e->setRobustKernel(rk);
+                e->fx = pKFi->fx; e->fy = pKFi->fy; e->cx = pKFi->cx; e->cy = pKFi->cy; e->bf = pKFi->mbf;
+                optimizer.addEdge(e);
+                vpEdgesStereo.push_back(e);
+                vpEdgeKFStereo.push_back(pKFi);
+                vpMapPointEdgeStereo.push_back(pMP);
+                nEdges++;
+            }
+        }
+    }
+
+    // --- 8. collect MapLines and add 4-DoF Plucker Vertices ---
+    // 🌟 [新增] 用于记录优化前的 Plücker 坐标
+    std::map<long unsigned int, Eigen::Matrix<double, 6, 1>> initial_plucker_map;
+    list<MapLine*> lLocalMapLines;
+    for (KeyFrame* pKFi : lLocalKeyFrames) {
+        vector<MapLine*> vpLines = pKFi->GetMapLineMatches();
+        for (MapLine* pML : vpLines) {
+            if (pML && !pML->isBad() && pML->GetMap() == pCurrentMap) {
+                if (pML->mnBALocalForKF != pKF->mnId) {
+                    pML->mnBALocalForKF = pKF->mnId;
+                    lLocalMapLines.push_back(pML);
+                }
+            }
+        }
+    }
+
+    std::vector<EdgeSE3ProjectLine4D*> vpEdgesLineMono; 
+    std::vector<KeyFrame*> vpEdgeKFLineMono;
+    std::vector<MapLine*> vpMapLineEdgeMono;
+
+    int nextLineVertexId = maxKFid + 1 + lLocalMapPoints.size() + 10000000; // 确保线段顶点ID不与点云顶点冲突
+    unordered_map<MapLine*, int> mapLineVertexId;
+
+    for (MapLine* pML : lLocalMapLines)
+    {
+        if (!pML || pML->isBad()) continue;
+
+        Eigen::Matrix<double,6,1> Lw = pML->GetPluckerLine().cast<double>();
+        if (!Lw.allFinite() || Lw.head<3>().norm() < 1e-9 || Lw.tail<3>().norm() < 1e-9) continue;
+
+        // 🌟 [新增] 记录初始的 Plücker 坐标
+        initial_plucker_map[pML->mnId] = Lw;
+
+        auto* vLine4D = new VertexLine4D();
+        int idLine = ++nextLineVertexId;
+        vLine4D->setId(idLine);
+        vLine4D->setEstimate(Lw);
+        vLine4D->setFixed(false);        
+        vLine4D->setMarginalized(true);  
+
+        optimizer.addVertex(vLine4D);
+        mapLineVertexId[pML] = idLine;
+
+        int nLineObsEdges = 0; // 记录这条线的有效观测数
+
+        const auto& obs = pML->GetLineObservations();
+        for(auto& mit : obs)
+        {
+            KeyFrame* pKFi = mit.first;
+            if(!pKFi || pKFi->isBad() || pKFi->GetMap()!=pCurrentMap) continue;
+            int idxLine = get<0>(mit.second);
+            if(idxLine < 0 || idxLine >= (int)pKFi->mvKeyLines.size()) continue;
+
+            const cv::line_descriptor::KeyLine& kl = pKFi->mvKeyLines[idxLine];
+            Eigen::Vector2d sp(kl.startPointX, kl.startPointY);
+            Eigen::Vector2d ep(kl.endPointX, kl.endPointY);
+
+            auto* vPose = optimizer.vertex(pKFi->mnId);
+            if(!vPose) continue;
+
+            auto* eLine = new EdgeSE3ProjectLine4D();
+            eLine->setVertex(0, vPose);
+            eLine->setVertex(1, vLine4D);
+            eLine->setMeasurement(std::make_pair(sp, ep));
+            eLine->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
+
+            int octave = kl.octave;
+            if (octave < 0 || octave >= (int)pKFi->mvInvLevelSigma2.size()) octave = 0;
+            double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
+            
+            eLine->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+            eLine->setLevel(0); 
+            
+            g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+            rk->setDelta(sqrt(5.991)); 
+            eLine->setRobustKernel(rk);
+            
+            optimizer.addEdge(eLine);
+            vpEdgesLineMono.push_back(eLine);
+            vpEdgeKFLineMono.push_back(pKFi);
+            vpMapLineEdgeMono.push_back(pML);
+
+            nLineObsEdges++; // 成功加一条边，计数+1
+            nEdges++;
+        }
+
+        // 🌟 【核心防火墙】: 保护 4-DoF 优化不发散
+        if (nLineObsEdges == 0) {
+            // 没有任何观测，直接从图里移除
+            optimizer.removeVertex(vLine4D);
+        } else if (nLineObsEdges < 2) {
+            // 只有 1 个观测 (2个方程) 无法约束 4-DoF 直线，必须锁死！
+            vLine4D->setFixed(true); 
+        }
+    }
+
+    if (optimizer.vertices().empty() || optimizer.edges().empty()) return;
+
+    // --- 9. run optimization ---
+    if (pbStopFlag && *pbStopFlag) return;
+    optimizer.initializeOptimization();
+    optimizer.optimize(10); 
+    
+    // --- 10. outlier detection (points + lines) ---
+    vector<pair<KeyFrame*,MapPoint*>> vToErasePoints;
+    for (size_t i = 0; i < vpEdgesMono.size(); ++i) {
+        if (vpEdgesMono[i]->chi2() > 5.991 || !vpEdgesMono[i]->isDepthPositive())
+            vToErasePoints.emplace_back(vpEdgeKFMono[i], vpMapPointEdgeMono[i]);
+    }
+    for (size_t i = 0; i < vpEdgesStereo.size(); ++i) {
+        if (vpEdgesStereo[i]->chi2() > 7.815 || !vpEdgesStereo[i]->isDepthPositive())
+            vToErasePoints.emplace_back(vpEdgeKFStereo[i], vpMapPointEdgeStereo[i]);
+    }
+
+    vector<pair<KeyFrame*,MapLine*>> vToEraseLines;
+    for (size_t i = 0; i < vpEdgesLineMono.size(); ++i) {
+        if (vpEdgesLineMono[i]->chi2() > 9.0) // 容忍度稍高
+            vToEraseLines.emplace_back(vpEdgeKFLineMono[i], vpMapLineEdgeMono[i]);
+    }
+    
+    // --- 11. apply erasures under map mutex ---
+    {
+        unique_lock<mutex> lock(pMap->mMutexMapUpdate);
+        for (auto & pr : vToErasePoints) {
+            pr.first->EraseMapPointMatch(pr.second);
+            pr.second->EraseObservation(pr.first);
+        }
+        for (auto & pr : vToEraseLines) {
+            pr.first->EraseMapLineMatch(pr.second);
+            pr.second->EraseLineObservation(pr.first);
+        }
+    }
+    
+    // --- 12. write back optimized poses and points ---
+    opr.reserveKeyFrames(lLocalKeyFrames.size());
+    for (KeyFrame* pKFi : lLocalKeyFrames) {
+        g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKFi->mnId));
+        g2o::SE3Quat SE3quat = vSE3->estimate();
+        pKFi->SetPose(Sophus::SE3f(SE3quat.rotation().cast<float>(), SE3quat.translation().cast<float>()));
+        opr.addKeyFrame(pKFi);
+    }
+    
+    opr.reserveMapPoints(lLocalMapPoints.size());
+    for (MapPoint* pMP : lLocalMapPoints) {
+        g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->mnId + maxKFid + 1));
+        pMP->SetWorldPos(vPoint->estimate().cast<float>());
+        pMP->UpdateNormalAndDepth();
+        if (!pMP->isRetrived()) { pMP->setRetrived(true); opr.addMapPoint(pMP); }
+    }
+    
+    // --- 13. Write back 4-DoF Lines and Re-truncate Endpoints ---
+    // --- 13. Write back 4-DoF Lines and Re-truncate Endpoints ---
+    opr.reserveMapLines(lLocalMapLines.size());
+    for (MapLine* pML : lLocalMapLines)
+    {
+        if(!pML || pML->isBad()) continue;
+        auto it = mapLineVertexId.find(pML);
+        if(it == mapLineVertexId.end()) continue;
+
+        auto* vLine4D = static_cast<VertexLine4D*>(optimizer.vertex(it->second));
+        Eigen::Matrix<double,6,1> Lw_opt = vLine4D->estimate();
+        
+        // 1. 记录优化前旧的端点，用于比对变化
+        auto old_endpoints = pML->GetLineWorldPos();
+        Eigen::Vector3f old_P1 = old_endpoints.first;
+        Eigen::Vector3f old_P2 = old_endpoints.second;
+        float old_len = (old_P1 - old_P2).norm();
+
+        // 🌟 [新增] 打印前后对比日志
+        Eigen::Matrix<double, 6, 1> Lw_init = initial_plucker_map[pML->mnId];
+        double diff_norm = (Lw_opt - Lw_init).norm();
+        
+        // 为了防止刷屏太严重，只打印发生了微小移动的线（过滤掉完全没变的或者变化极小的）
+        if (diff_norm > 1e-6) 
+        {
+            std::cout << "--------------------------------------------------------\n";
+            std::cout << "[LBA Plucker Line ID: " << pML->mnId << "]\n";
+            std::cout << "  [Before] n: " << Lw_init.head<3>().transpose() << " | v: " << Lw_init.tail<3>().transpose() << "\n";
+            std::cout << "  [After ] n: " << Lw_opt.head<3>().transpose()  << " | v: " << Lw_opt.tail<3>().transpose()  << "\n";
+            std::cout << "  [Diff Norm] : " << diff_norm << "\n";
+        }
+
+        // 2. 写入新的 Plucker 并重新截取物理端点
+        //pML->SetPluckerLineNew(Lw_opt);
+        pML->UpdateFromPluckerLineNew(); 
+
+        // 3. 获取优化后的新端点
+        auto new_endpoints = pML->GetLineWorldPos();
+        Eigen::Vector3f new_P1 = new_endpoints.first;
+        Eigen::Vector3f new_P2 = new_endpoints.second;
+        float new_len = (new_P1 - new_P2).norm();
+
+        // 4. 🌟 智能更新逻辑：打破 isRetrived 陷阱
+        bool needUpdate = false;
+        
+        if (!pML->isRetrived()) {
+            // 第一次见，必须发送
+            needUpdate = true;
+        } else {
+            // 如果已经发送过，检查几何是否发生了显著变化
+            // 变化 1：端点发生了漂移 (比如超过 5cm)
+            float shift_P1 = (new_P1 - old_P1).norm();
+            float shift_P2 = (new_P2 - old_P2).norm();
+            // 变化 2：长度发生了显著拉伸或合并 (比如长度增加了 10%)
+            
+            if (shift_P1 > 0.05f || shift_P2 > 0.05f || new_len > old_len * 1.1f) {
+                needUpdate = true;
+            }
+        }
+
+        // 5. 只有发生显著变化，才重新采样并发送给 3DGS
+        if (needUpdate) 
+        {
+            float sample_step = pKF->getLineSampleStep();
+            float view_weight = pKF->getLineViewWeight();
+            float sigma = pKF->getLineSigma();
+            int top_k = pKF->getLineTopK();
+
+            // 重新高频采样 (内部会清除旧的采样点)
+            pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
+                sample_step, view_weight, sigma, top_k);
+
+            opr.addMapLine(pML);
+            pML->setRetrived(true); 
+        }
+    }
+    pMap->IncreaseChangeIndex();
+    
     num_OptKF = lLocalKeyFrames.size();
     num_MPs = lLocalMapPoints.size();
     num_edges = nEdges;
@@ -6571,6 +7056,125 @@ void Optimizer::TestEdgeLineDirectionPrior_Jacobian_SAFE()
     std::cout << "------ end test ------\n";
 }
 
+
+void Optimizer::TestEdgeSE3ProjectLine4D_Jacobian()
+{
+    using namespace g2o;
+
+    std::cout << "\n======================================================\n";
+    std::cout << " 4-DoF Plücker Line Jacobian Verification (Strict Mode)\n";
+    std::cout << "======================================================\n";
+
+    // 1. 构造线段 (满足 n·v = 0)
+    Eigen::Vector3d P1(1.0, 0.0, 3.0);
+    Eigen::Vector3d P2(2.0, 1.0, 3.0);
+    Eigen::Vector3d v = P2 - P1;
+    Eigen::Vector3d n = P1.cross(v);
+    
+    Eigen::Matrix<double, 6, 1> Lw_true;
+    Lw_true.head<3>() = n;
+    Lw_true.tail<3>() = v;
+
+    std::cout << "Initial Plucker n·v (must be 0): " << n.dot(v) << std::endl;
+
+    // 2. 初始化顶点 (纯局部对象)
+    VertexSE3Expmap vPose;
+    vPose.setId(0);
+    vPose.setEstimate(SE3Quat(Eigen::Quaterniond::Identity(), Eigen::Vector3d(0.1, 0.2, 0.0)));
+
+    ORB_SLAM3::VertexLine4D vLine4D;
+    vLine4D.setId(1);
+    vLine4D.setEstimate(Lw_true);
+
+    // 3. 构建 4-DoF 边 (不放入任何 Optimizer)
+    ORB_SLAM3::EdgeSE3ProjectLine4D edge;
+    edge.setVertex(0, &vPose);
+    edge.setVertex(1, &vLine4D);
+    edge.SetCameraIntrinsics(500.0, 500.0, 320.0, 240.0);
+    edge.setMeasurement(std::make_pair(Eigen::Vector2d(100, 150), Eigen::Vector2d(200, 250))); 
+
+    // =========================================================
+    // 第一步：计算解析雅可比 (直接调数学函数，防崩溃)
+    // =========================================================
+    edge.computeError();
+    std::cout << "Initial Error: " << edge.error().transpose() << std::endl;
+
+    Eigen::Matrix<double, 2, 6> J_pose_ana;
+    Eigen::Matrix<double, 2, 4> J_line_ana;
+    edge.computeAnalyticJacobian(J_pose_ana, J_line_ana);
+
+    // =========================================================
+    // 第二步：计算数值雅可比 (中心差分)
+    // =========================================================
+    const double eps = 1e-6;
+    Eigen::Matrix<double, 2, 6> J_pose_num;
+    Eigen::Matrix<double, 2, 4> J_line_num;
+
+    // A. 对 Pose 求导
+    SE3Quat pose_backup = vPose.estimate();
+    for (int i = 0; i < 6; ++i) {
+        Eigen::Matrix<double, 6, 1> d = Eigen::Matrix<double, 6, 1>::Zero();
+        
+        d(i) = eps;
+        vPose.setEstimate(pose_backup);
+        vPose.oplus(d.data());
+        edge.computeError();
+        Eigen::Vector2d err_plus = edge.error();
+
+        d(i) = -eps;
+        vPose.setEstimate(pose_backup);
+        vPose.oplus(d.data());
+        edge.computeError();
+        Eigen::Vector2d err_minus = edge.error();
+
+        J_pose_num.col(i) = (err_plus - err_minus) / (2.0 * eps);
+    }
+    vPose.setEstimate(pose_backup);
+
+    // B. 对 Line4D 求导
+    Eigen::Matrix<double, 6, 1> line_backup = vLine4D.estimate();
+    for (int i = 0; i < 4; ++i) {
+        Eigen::Vector4d d = Eigen::Vector4d::Zero(); 
+        
+        d(i) = eps;
+        vLine4D.setEstimate(line_backup);
+        vLine4D.oplus(d.data());     
+        edge.computeError();
+        Eigen::Vector2d err_plus = edge.error();
+
+        d(i) = -eps;
+        vLine4D.setEstimate(line_backup);
+        vLine4D.oplus(d.data());
+        edge.computeError();
+        Eigen::Vector2d err_minus = edge.error();
+
+        J_line_num.col(i) = (err_plus - err_minus) / (2.0 * eps);
+    }
+    vLine4D.setEstimate(line_backup); 
+
+    // =========================================================
+    // 第三步：打印对比
+    // =========================================================
+    std::cout << "\n--- Pose Jacobian (2x6) ---" << std::endl;
+    std::cout << "Analytic:\n" << J_pose_ana << std::endl;
+    std::cout << "Numeric:\n" << J_pose_num << std::endl;
+    double max_diff_pose = (J_pose_ana - J_pose_num).cwiseAbs().maxCoeff();
+    std::cout << "Max Diff: " << max_diff_pose << std::endl;
+
+    std::cout << "\n--- Line4D Jacobian (2x4) ---" << std::endl;
+    std::cout << "Analytic:\n" << J_line_ana << std::endl;
+    std::cout << "Numeric:\n" << J_line_num << std::endl;
+    double max_diff_line = (J_line_ana - J_line_num).cwiseAbs().maxCoeff();
+    std::cout << "Max Diff: " << max_diff_line << std::endl;
+
+    if (!J_pose_ana.allFinite() || !J_line_ana.allFinite()) {
+        std::cout << "\n❌ FAILED: Found NaN or Inf!" << std::endl;
+    } else if (max_diff_pose < 1e-4 && max_diff_line < 1e-4) {
+        std::cout << "\n✅ SUCCESS: Analytical math is perfectly correct!" << std::endl;
+    } else {
+        std::cout << "\n⚠️ WARNING: Jacobian mismatch!" << std::endl;
+    }
+}
 
 g2o::SE3Quat Optimizer::se3Plus_ZDG(const g2o::SE3Quat& T, const Eigen::Matrix<double,6,1>& dx)
 {

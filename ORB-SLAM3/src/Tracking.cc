@@ -4024,8 +4024,8 @@ bool Tracking::TrackReferenceKeyFrameWithLine()
                 nline_matchesMap++;
         }
     }
-    std::cerr << "TrackReferenceKeyFrameWithLine->After outlier rejection-> Total Point Matches: " << nmatches << "; Total Line Matches: " << nline_matches << std::endl;
-    std::cerr << "TrackReferenceKeyFrameWithLine->After outlier rejection-> Point Matches: " << nmatchesMap << "; Line Matches: " << nline_matchesMap << std::endl;
+    //std::cerr << "TrackReferenceKeyFrameWithLine->After outlier rejection-> Total Point Matches: " << nmatches << "; Total Line Matches: " << nline_matches << std::endl;
+    //std::cerr << "TrackReferenceKeyFrameWithLine->After outlier rejection-> Point Matches: " << nmatchesMap << "; Line Matches: " << nline_matchesMap << std::endl;
 
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
@@ -5686,7 +5686,7 @@ void Tracking::SearchLocalPointsAndLine()
         //matcher.DebugSearchByProjectionPoints(mCurrentFrame, mLastFrame, "Debug_Point_LastFrame_projection_Frame1");
         //matcher.DebugSearchByProjectionPointsMatch(mCurrentFrame, mvpLocalMapPoints, "Debug_Point_localMap_Projection_Frame1");
     }
-    std::cerr << "Tracked Local Map Points: " << mvpLocalMapPoints.size() << ", Tracked Local Map Lines: " << mvpLocalMapLines.size() << std::endl;
+    //std::cerr << "Tracked Local Map Points: " << mvpLocalMapPoints.size() << ", Tracked Local Map Lines: " << mvpLocalMapLines.size() << std::endl;
 
     //MapExporter::ExportFrameMapPoints("CurrentFrame_MapPoints_BeforeLineMatch.txt", mCurrentFrame, mpAtlas->GetCurrentMap());
     //MapExporter::ExportLocalMapWithCameraAxesOBJ(mCurrentFrame, mvpLocalMapPoints, mvpLocalMapLines);
@@ -5729,7 +5729,7 @@ void Tracking::SearchLocalPointsAndLine()
         // //line_matcher.DebugLineProjectionNew(mCurrentFrame, mLastFrame.mvpMapLines, "Debug_Line_LastFrame_projection_Frame1_Method");
 
         int nLinematches = line_matcher.SearchByProjection(mCurrentFrame, mvpLocalMapLines, thLine);
-        std::cerr << "Line Matches by Projection: " << nLinematches << std::endl;
+        //std::cerr << "Line Matches by Projection: " << nLinematches << std::endl;
 #if 0
         // line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
         // std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
@@ -5873,7 +5873,7 @@ void Tracking::UpdateLocalPointsAndLine()
             }
         }
     }
-    std::cerr << "UpdateLocalPointsAndLine->Local Map Points: " << count_pts << ", Local Map Lines: " << count_lines << std::endl;
+    //std::cerr << "UpdateLocalPointsAndLine->Local Map Points: " << count_pts << ", Local Map Lines: " << count_lines << std::endl;
     //std::cerr << "Local Map Points size: " << mvpLocalMapPoints.size() << ", Local Map Lines size: " << mvpLocalMapLines.size() << std::endl;
 }
 
