@@ -1,0 +1,62 @@
+发现在tum_rgbd的数据库上运行，发现有bug，发现线段匹配一直为0，不知道是怎么回事。
+
+最后就是就算为0，为啥效果不如原始的Photoslam，这点很奇怪。所以明天需要设计一下方案来测试，为啥程序对tum_rgb出现问题。
+
+1：设置断点，来输出线段是啥样子的。我感觉应该是匹配那边出了问题。加上，一些参数也出了问题。
+
+
+
+上述问题全部解决了。
+
+下面需要做的：
+
+
+对于百叶窗，我希望不再是沿着线段去split和clone。还是按照原始的梯度去测试，看看是否好点。对于百叶窗的话。
+
+
+
+解决的问题：
+
+当两个端点 vP1 和 vP2 都被设置为 setFixed(false) 时，程序发生崩溃（通常是 Segmentation Fault 或矩阵求逆失败导致的 NaN 崩溃）
+
+这是一个非常经典且触及 g2o 底层数学架构 的问题！
+
+你观察到的现象极其准确：当两个端点 vP1 和 vP2 都被设置为 setFixed(false) 时，程序发生崩溃（通常是 Segmentation Fault 或矩阵求逆失败导致的 NaN 崩溃）。
+
+我来为你揭开这个崩溃背后的“数学真相”，并提供两种完美的解决方案。
+🚨 为什么会崩溃？(The Root Cause)
+
+崩溃的罪魁祸首不是你的代码写错了，而是你打破了 g2o 中 Schur Complement（舒尔补）的图结构假设。
+
+    BlockSolver_6_3 的致命假设：
+    在 ORB-SLAM 中，BA 使用的是 g2o::BlockSolver_6_3。这个求解器专门为视觉 SLAM 设计，它要求图必须是二分图（Bipartite Graph）：
+
+        所有的位姿顶点（Pose）（未边缘化，维度6）可以在一块。
+
+        所有的路标顶点（Point）（设置了 setMarginalized(true)，维度3）绝对不能相互连接。
+
+        Schur 补算法在底层求解时，假设 Landmark 的 Hessian 矩阵块是严格的对角矩阵（Block-Diagonal）。
+
+    你犯的“禁忌”：
+    你看你的代码，你给两个端点都加了 setMarginalized(true)，但是你又加了三条边：
+
+        EdgeLineLengthPrior(vP1, vP2)
+
+        EdgeLineDirectionPrior(vP1, vP2)
+
+        EdgeLineMidpointPrior(vP1, vP2)
+
+    这三条边直接把两个 Marginalized 的顶点连在了一起！
+
+        当 vP1 是 Fixed(true) 时：vP1 从优化变量中被剔除，这三条边退化成了只作用于 vP2 的一元边，Hessian 矩阵依然是对角的，程序完美运行。
+
+        当 vP1 是 Fixed(false) 时：vP1 和 vP2 同时参与优化，g2o 试图在严格对角的矩阵数据结构中强行插入非对角块（Off-diagonal blocks）。这会导致内存越界（Segfault）或者线性求解器（LinearSolverEigen）直接崩溃。
+
+(注：至于你提到的 BundleAdjustmentWithLine 里全设为 false 没崩，可能是因为那里的线段数量少刚好没触发内存段错误，或者是处于 Undefined Behavior 状态，算出来的结果其实也是错的。)
+
+
+解决方法：
+方案一：使用“一元先验边”代替“二元先验边”（最优雅、速度最快）
+
+你之所以加那三个 Prior（长度、方向、中点），是为了防止线段端点在 3D 空间中沿着射线“乱滑”或者“乱飞”。
+其实，你只需要对 vP1 和 vP2 分别加一个“3D位置先验边”（一元边），就能达到完全相同的约束效果，并且不会破坏 g2o 的二分图结构！

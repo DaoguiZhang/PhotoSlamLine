@@ -1,0 +1,16 @@
+feat(mapper): introduce error-guided sampling and aggressive line-aware pruning
+
+1. Error-Guided Keyframe Sampling (Hard Example Mining):
+   - Replaced uniform random sampling in `useOneRandomSlidingWindowKeyframe` with Roulette Wheel Selection based on L1 loss (`tracking_error_`).
+   - The optimizer now prioritizes training on keyframes with lower PSNR, effectively reducing local artifacts.
+
+2. Aggressive Pruning Mechanism:
+   - Upgraded `densifyAndPruneWithLineAwareness` to tackle the numerical black-hole caused by over-seeded line Gaussians.
+   - Introduced anisotropy pruning and isolation checks to forcefully remove deformed, spike-like artifacts that mask photometric errors.
+
+3. Tensor Dimension & Sync Fixes:
+   - Fixed fatal shape mismatch bugs for `rotation_` during `increasePcd`, `densifyAndClone`, and `Split` (ensuring strictly `[N, 4]`).
+   - Maintained global sync for shadow tensors like `xyz_init_` across all point addition/removal operations.
+
+4. Performance Tweaks:
+   - Moved `Ll1.item<float>()` fetch after `loss.backward()` and `cuda::synchronize()` to prevent implicit Device-to-Host sync from blocking the computational graph pipeline.

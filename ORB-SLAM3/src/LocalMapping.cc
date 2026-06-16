@@ -1,0 +1,3687 @@
+/**
+* This file is part of ORB-SLAM3
+*
+* Copyright (C) 2017-2021 Carlos Campos, Richard Elvira, Juan J. Gómez Rodríguez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+* Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+*
+* ORB-SLAM3 is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
+* License as published by the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* ORB-SLAM3 is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+* the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License along with ORB-SLAM3.
+* If not, see <http://www.gnu.org/licenses/>.
+*/
+
+
+#include "LocalMapping.h"
+#include "LoopClosing.h"
+#include "ORBmatcher.h"
+#include "Optimizer.h"
+#include "Converter.h"
+#include "GeometricTools.h"
+#include "MapExporter.h"
+
+#include<mutex>
+#include<chrono>
+
+//#define DEBUG_LBA_VISUALIZATION
+
+namespace ORB_SLAM3
+{
+
+LocalMapping::LocalMapping(System* pSys, Atlas *pAtlas, const float bMonocular, bool bInertial, const string &_strSeqName):
+    mpSystem(pSys), mbMonocular(bMonocular), mbInertial(bInertial), mbResetRequested(false), mbResetRequestedActiveMap(false), mbFinishRequested(false), mbFinished(true), mpAtlas(pAtlas), bInitializing(false),
+    mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true),
+    mIdxInit(0), mScale(1.0), mInitSect(0), mbNotBA1(true), mbNotBA2(true), mIdxIteration(0), infoInertial(Eigen::MatrixXd::Zero(9,9))
+{
+    mnMatchesInliers = 0;
+
+    mbBadImu = false;
+
+    mTinit = 0.f;
+
+    mNumLM = 0;
+    mNumKFCulling=0;
+
+#ifdef REGISTER_TIMES
+    nLBA_exec = 0;
+    nLBA_abort = 0;
+#endif
+
+}
+
+void LocalMapping::SetLoopCloser(LoopClosing* pLoopCloser)
+{
+    mpLoopCloser = pLoopCloser;
+}
+
+void LocalMapping::SetTracker(Tracking *pTracker)
+{
+    mpTracker=pTracker;
+}
+
+void LocalMapping::Run()
+{
+    mbFinished = false;
+
+    while(1)
+    {
+        // Tracking will see that Local Mapping is busy
+        SetAcceptKeyFrames(false);
+
+        // Check if there are keyframes in the queue
+        if(CheckNewKeyFrames() && !mbBadImu)
+        {
+#ifdef REGISTER_TIMES
+            double timeLBA_ms = 0;
+            double timeKFCulling_ms = 0;
+
+            std::chrono::steady_clock::time_point time_StartProcessKF = std::chrono::steady_clock::now();
+#endif
+            // BoW conversion and insertion in Map
+            ProcessNewKeyFrame();
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndProcessKF = std::chrono::steady_clock::now();
+
+            double timeProcessKF = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndProcessKF - time_StartProcessKF).count();
+            vdKFInsert_ms.push_back(timeProcessKF);
+#endif
+
+            // Check recent MapPoints
+            MapPointCulling();
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndMPCulling = std::chrono::steady_clock::now();
+
+            double timeMPCulling = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndMPCulling - time_EndProcessKF).count();
+            vdMPCulling_ms.push_back(timeMPCulling);
+#endif
+
+            // Triangulate new MapPoints
+            CreateNewMapPoints();
+
+            mbAbortBA = false;
+
+            if(!CheckNewKeyFrames())
+            {
+                // Find more matches in neighbor keyframes and fuse point duplications
+                SearchInNeighbors();
+            }
+
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndMPCreation = std::chrono::steady_clock::now();
+
+            double timeMPCreation = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndMPCreation - time_EndMPCulling).count();
+            vdMPCreation_ms.push_back(timeMPCreation);
+#endif
+
+            bool b_doneLBA = false;
+            int num_FixedKF_BA = 0;
+            int num_OptKF_BA = 0;
+            int num_MPs_BA = 0;
+            int num_edges_BA = 0;
+
+            if(!CheckNewKeyFrames() && !stopRequested())
+            {
+                if(mpAtlas->KeyFramesInMap()>2)
+                {
+
+                    if(mbInertial && mpCurrentKeyFrame->GetMap()->isImuInitialized())
+                    {
+                        float dist = (mpCurrentKeyFrame->mPrevKF->GetCameraCenter() - mpCurrentKeyFrame->GetCameraCenter()).norm() +
+                                (mpCurrentKeyFrame->mPrevKF->mPrevKF->GetCameraCenter() - mpCurrentKeyFrame->mPrevKF->GetCameraCenter()).norm();
+
+                        if(dist>0.05)
+                            mTinit += mpCurrentKeyFrame->mTimeStamp - mpCurrentKeyFrame->mPrevKF->mTimeStamp;
+                        if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA2())
+                        {
+                            if((mTinit<10.f) && (dist<0.02))
+                            {
+                                cout << "Not enough motion for initializing. Reseting..." << endl;
+                                unique_lock<mutex> lock(mMutexReset);
+                                mbResetRequestedActiveMap = true;
+                                mpMapToReset = mpCurrentKeyFrame->GetMap();
+                                mbBadImu = true;
+                            }
+                        }
+
+                        bool bLarge = ((mpTracker->GetMatchesInliers()>75)&&mbMonocular)||((mpTracker->GetMatchesInliers()>100)&&!mbMonocular);
+                        MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
+                        Optimizer::LocalInertialBA(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr, bLarge, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());
+                        b_doneLBA = true;
+                        mpAtlas->pushMappingOperation(opr);
+                    }
+                    else
+                    {
+                        MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
+                        Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
+                        b_doneLBA = true;
+                        mpAtlas->pushMappingOperation(opr);
+                    }
+
+                }
+#ifdef REGISTER_TIMES
+                std::chrono::steady_clock::time_point time_EndLBA = std::chrono::steady_clock::now();
+
+                if(b_doneLBA)
+                {
+                    timeLBA_ms = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndLBA - time_EndMPCreation).count();
+                    vdLBA_ms.push_back(timeLBA_ms);
+
+                    nLBA_exec += 1;
+                    if(mbAbortBA)
+                    {
+                        nLBA_abort += 1;
+                    }
+                    vnLBA_edges.push_back(num_edges_BA);
+                    vnLBA_KFopt.push_back(num_OptKF_BA);
+                    vnLBA_KFfixed.push_back(num_FixedKF_BA);
+                    vnLBA_MPs.push_back(num_MPs_BA);
+                }
+
+#endif
+
+                // Initialize IMU here
+                if(!mpCurrentKeyFrame->GetMap()->isImuInitialized() && mbInertial)
+                {
+                    if (mbMonocular)
+                        InitializeIMU(1e2, 1e10, true);
+                    else
+                        InitializeIMU(1e2, 1e5, true);
+                }
+
+
+                // Check redundant local Keyframes
+                KeyFrameCulling();
+
+#ifdef REGISTER_TIMES
+                std::chrono::steady_clock::time_point time_EndKFCulling = std::chrono::steady_clock::now();
+
+                timeKFCulling_ms = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndKFCulling - time_EndLBA).count();
+                vdKFCulling_ms.push_back(timeKFCulling_ms);
+#endif
+
+                if ((mTinit<50.0f) && mbInertial)
+                {
+                    if(mpCurrentKeyFrame->GetMap()->isImuInitialized() && mpTracker->mState==Tracking::OK) // Enter here everytime local-mapping is called
+                    {
+                        if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA1()){
+                            if (mTinit>5.0f)
+                            {
+                                cout << "start VIBA 1" << endl;
+                                mpCurrentKeyFrame->GetMap()->SetIniertialBA1();
+                                if (mbMonocular)
+                                    InitializeIMU(1.f, 1e5, true);
+                                else
+                                    InitializeIMU(1.f, 1e5, true);
+
+                                cout << "end VIBA 1" << endl;
+                            }
+                        }
+                        else if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA2()){
+                            if (mTinit>15.0f){
+                                cout << "start VIBA 2" << endl;
+                                mpCurrentKeyFrame->GetMap()->SetIniertialBA2();
+                                if (mbMonocular)
+                                    InitializeIMU(0.f, 0.f, true);
+                                else
+                                    InitializeIMU(0.f, 0.f, true);
+
+                                cout << "end VIBA 2" << endl;
+                            }
+                        }
+
+                        // scale refinement
+                        if (((mpAtlas->KeyFramesInMap())<=200) &&
+                                ((mTinit>25.0f && mTinit<25.5f)||
+                                (mTinit>35.0f && mTinit<35.5f)||
+                                (mTinit>45.0f && mTinit<45.5f)||
+                                (mTinit>55.0f && mTinit<55.5f)||
+                                (mTinit>65.0f && mTinit<65.5f)||
+                                (mTinit>75.0f && mTinit<75.5f))){
+                            if (mbMonocular)
+                                ScaleRefinement();
+                        }
+                    }
+                }
+            }
+
+#ifdef REGISTER_TIMES
+            vdLBASync_ms.push_back(timeKFCulling_ms);
+            vdKFCullingSync_ms.push_back(timeKFCulling_ms);
+#endif
+
+            mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);
+
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndLocalMap = std::chrono::steady_clock::now();
+
+            double timeLocalMap = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndLocalMap - time_StartProcessKF).count();
+            vdLMTotal_ms.push_back(timeLocalMap);
+#endif
+        }
+        else if(Stop() && !mbBadImu)
+        {
+            // Safe area to stop
+            while(isStopped() && !CheckFinish())
+            {
+                usleep(3000);
+            }
+            if(CheckFinish())
+                break;
+        }
+
+        ResetIfRequested();
+
+        // Tracking will see that Local Mapping is busy
+        SetAcceptKeyFrames(true);
+
+        if(CheckFinish())
+            break;
+
+        usleep(3000);
+    }
+
+    SetFinish();
+}
+
+void LocalMapping::RunWithLine()
+{
+    mbFinished = false;
+
+    while(1)
+    {
+        // Tracking will see that Local Mapping is busy
+        SetAcceptKeyFrames(false);
+
+        // Check if there are keyframes in the queue
+        if(CheckNewKeyFrames() && !mbBadImu)
+        {
+#ifdef REGISTER_TIMES
+            double timeLBA_ms = 0;
+            double timeKFCulling_ms = 0;
+
+            std::chrono::steady_clock::time_point time_StartProcessKF = std::chrono::steady_clock::now();
+#endif
+            // BoW conversion and insertion in Map
+            ProcessNewKeyFrameWithLine();
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndProcessKF = std::chrono::steady_clock::now();
+
+            double timeProcessKF = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndProcessKF - time_StartProcessKF).count();
+            vdKFInsert_ms.push_back(timeProcessKF);
+#endif
+
+            // Check recent MapPoints
+            MapPointCulling();
+            //Check recent MapLines
+            MapLineCulling();
+
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndMPCulling = std::chrono::steady_clock::now();
+
+            double timeMPCulling = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndMPCulling - time_EndProcessKF).count();
+            vdMPCulling_ms.push_back(timeMPCulling);
+#endif
+
+            // Triangulate new MapPoints
+            CreateNewMapPoints();
+            //Triangle new MapLines
+            CreateNewMapLines();
+            //Debug the lines
+
+
+            mbAbortBA = false;
+
+            if(!CheckNewKeyFrames())
+            {
+                // Find more matches in neighbor keyframes and fuse point and lines duplications
+                SearchInNeighborsWithLine();
+                //SearchInNeighbors();
+            }
+
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndMPCreation = std::chrono::steady_clock::now();
+
+            double timeMPCreation = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndMPCreation - time_EndMPCulling).count();
+            vdMPCreation_ms.push_back(timeMPCreation);
+#endif
+
+            bool b_doneLBA = false;
+            int num_FixedKF_BA = 0;
+            int num_OptKF_BA = 0;
+            int num_MPs_BA = 0;
+            int num_MLs_BA = 0;
+            int num_edges_BA = 0;
+
+            if(!CheckNewKeyFrames() && !stopRequested())
+            {
+                if(mpAtlas->KeyFramesInMap()>2) //三个或者以上的KeyFrame
+                {
+                    //优化前的点云和线段导出来，现在测试第三keyframe的时候，就运行这一步
+                    if(mpCurrentKeyFrame->mnId == 2)
+                    {
+                        auto matches = mpCurrentKeyFrame->GetMapLineMatches();
+                        std::cout << "============= [LIVE SNAKE RADAR] =============" << std::endl;
+                        std::cout << "  - Frame ID: " << mpCurrentKeyFrame->mnId << std::endl;
+                        std::cout << "  - Matches Vector Size: " << matches.size() << std::endl;
+    
+                        int valid_ptr = 0;
+                         int bad_line = 0;
+                        for(size_t i=0; i<matches.size(); ++i) {
+                            if(matches[i]) {
+                                valid_ptr++;
+                                if(matches[i]->isBad()) bad_line++;
+                            }
+                        }
+                        std::cout << "  - Non-Null Pointers: " << valid_ptr << std::endl;
+                        std::cout << "  - Bad Lines Flagged: " << bad_line << std::endl;
+                        std::cout << "===============================================" << std::endl;
+
+                        std::string map_points_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_MapPoints_before.obj";
+                        MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
+                        std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_before.obj";
+                        MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
+                        std::string map_lines_points3d_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_points3d_before.obj";
+                        //获取mpCurrentKeyFrame->mnId == 0 的相机位姿
+                        std::string keyframe_camera_initial_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Camera_before.txt";
+                        std::vector<KeyFrame*> all_keyframes = mpAtlas->GetAllKeyFrames();
+                        MapExporter::ExportMapKeyFrameCameraPose(all_keyframes, keyframe_camera_initial_filename);
+                        //用于测试在世界坐标系下的线段采样点的颜色。它为后续的gaussian splatting的优化提供好的初始值
+                        // float sample_step = 0.05f;        // 世界坐标采样步长 (e.g. 0.05f)
+                        // float view_angle_power = 2.0f;   // 视角权重指数 (e.g. 2.0)
+                        // float sigma_line_pixel = 3.0f;   // 图像线一致性 σ (e.g. 3.0 px)
+                        // int   top_k = 3;               // Top-K 视角 (e.g. 3)
+                        // for(int j = 0; j < mpCurrentKeyFrame->GetMapLineMatches().size(); ++j)
+                        // {
+                        //     MapLine* pML = mpCurrentKeyFrame->GetMapLineMatches()[j];
+                        //     if(!pML)
+                        //         continue;
+                        //     pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(sample_step, view_angle_power, sigma_line_pixel, top_k);
+                        // }
+                        //用于测试在世界坐标系下的线段采样点的颜色。它为后续的gaussian splatting的优化提供好的初始值
+                        // float sample_step = 0.2f;
+                        // for(int j = 0; j < mpCurrentKeyFrame->GetMapLineMatches().size(); ++j)
+                        // {
+                        //     MapLine* pML = mpCurrentKeyFrame->GetMapLineMatches()[j];
+                        //     if(!pML)
+                        //         continue;
+                        //     pML->SamplePointsByImageLength(mpCurrentKeyFrame, sample_step);
+                        // }
+                        // MapExporter::ExportMapLinesSampled3DWithColorAndCameraAxesOBJ(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_points3d_filename);
+                    }
+                    //
+                    //std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+                    //MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+                    //std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+                    //MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
+
+                    if(mbInertial && mpCurrentKeyFrame->GetMap()->isImuInitialized())
+                    {
+                        float dist = (mpCurrentKeyFrame->mPrevKF->GetCameraCenter() - mpCurrentKeyFrame->GetCameraCenter()).norm() +
+                                (mpCurrentKeyFrame->mPrevKF->mPrevKF->GetCameraCenter() - mpCurrentKeyFrame->mPrevKF->GetCameraCenter()).norm();
+
+                        if(dist>0.05)
+                            mTinit += mpCurrentKeyFrame->mTimeStamp - mpCurrentKeyFrame->mPrevKF->mTimeStamp;
+                        if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA2())
+                        {
+                            if((mTinit<10.f) && (dist<0.02))
+                            {
+                                cout << "Not enough motion for initializing. Reseting..." << endl;
+                                unique_lock<mutex> lock(mMutexReset);
+                                mbResetRequestedActiveMap = true;
+                                mpMapToReset = mpCurrentKeyFrame->GetMap();
+                                mbBadImu = true;
+                            }
+                        }
+                        bool bLarge = ((mpTracker->GetMatchesInliers()>75)&&mbMonocular)||((mpTracker->GetMatchesInliers()>100)&&!mbMonocular);
+                        MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
+                        Optimizer::LocalInertialBA(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr, bLarge, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());
+                        b_doneLBA = true;
+                        mpAtlas->pushMappingOperation(opr);
+                    }
+                    else
+                    {
+                        MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
+                        //Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
+                        ///修改LocalBundleAdjustment，把这个写完，明天调试这些代码，如果能调试好，几乎所有都做好了。后面对于全局的相机优化，是否再弄一下，需要调整一下。
+                        //Optimizer::TestEdgeSE3ProjectLine_PoseAndPoints(); //debug, 
+                        //std::cerr <<"------start test-------" << std::endl;
+                        //Optimizer::TestEdgeSE3ProjectLineXYZOnlyPose_PointToLine(); //debug, 点到线的误差边的雅可比矩阵测试函数
+                        //std::cerr <<"------end test-------" << std::endl;
+
+                        //Optimizer::TestEdgeSE3ProjectXYZOnlyPose(); //debug, 仅优化位姿的点投影误差边的雅可比矩阵测试函数
+                        //Optimizer::TestEdgeSE3ProjectLine4D_Jacobian(); //debug, 线段(end points)(4x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
+
+                        //测试通过（只优化位姿和点+线只是用来约束）
+                        //std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLine" << std::endl;
+                        //Optimizer::LocalBundleAdjustmentWithLine(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        //std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLine" << std::endl;
+
+                        //测试通过（只优化位姿和点+线，它们同时优化，但是没有加正则项，这些正则项是约束，防止线段跑远等等）
+                        //std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization" << std::endl;
+                        //Optimizer::LocalBundleAdjustmentWithLine_Optimization(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        //std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization" << std::endl;
+                        
+                        //
+                        
+                        //测试通过（只优化位姿和点+线，它们同时优化，加正则项，这些正则项是约束，防止线段跑远等等）
+                        //std::cerr << "test jac " << std::endl;
+                        //Optimizer::TestEdgeSE3ProjectPointToLine2D_Jacobian(); //debug, line(end points)(6x1)投影误差边的雅可比矩阵测试函数(数值测试通过)
+                        // Optimizer::TestEdgeLineLengthPrior_Jacobian_SAFE(); //debug, 线段长度先验边的雅可比矩阵测试函数（数值测试通过）
+                        // Optimizer::TestEdgeLineDirectionPrior_Jacobian_SAFE(); //debug, 线段方向先验边的雅可比矩阵测试函数（数值测试通过）
+                        //std::cerr << "end test jac " << std::endl;
+                        
+                        //std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
+                        //Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        //std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
+
+                        std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
+                        Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                        std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
+
+
+                        b_doneLBA = true;
+
+                        //Optimizer::TestPluckerLineEdgeJacobian(); //debug, plucker line(6x1)投影误差边的雅可比矩阵测试函数
+                        //std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker" << std::endl;
+                        //Optimizer::LocalBundleAdjustmentWithLinesPlucker(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;
+                        //std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLinesPlucker" << std::endl;
+
+                        //Optimizer::TestPluckerLinesBundleEdge();
+                        //Optimizer::TestNumericalJacobian_PointToPlucker();
+                        //std::cerr <<"------end test-------" << std::endl;
+                        // std::cerr <<"LocalMapping::RunWithLine: start LocalBundleAdjustmentWithLinesPlucker_Alternating" << std::endl;
+                        // //Optimizer::LocalBundleAdjustmentWithLinesPlucker_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        // Optimizer::LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA, num_MLs_BA, num_edges_BA, opr);
+                        // b_doneLBA = true;
+                        // std::cerr << "Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: " << num_MPs_BA << ", " <<  num_MLs_BA << ", " << num_edges_BA << std::endl;
+                        // std::cerr <<"LocalMapping::RunWithLine: end LocalBundleAdjustmentWithLinesPlucker_Alternating" << std::endl;
+                        mpAtlas->pushMappingOperation(opr);
+                    }
+
+                    if(mpCurrentKeyFrame->mnId == 2)
+                    {
+                        std::string map_points_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_MapPoints_after.obj";
+                        MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
+                        std::string map_lines_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Maplines_after.obj";
+                        MapExporter::ExportMapLinesWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapLineMatches(), map_lines_filename); //added for MapLine
+
+                        //获取mpCurrentKeyFrame->mnId == 0 的相机位姿
+                        std::string keyframe_camera_initial_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_Camera_after.txt";
+                        std::vector<KeyFrame*> all_keyframes = mpAtlas->GetAllKeyFrames();
+                        MapExporter::ExportMapKeyFrameCameraPose(all_keyframes, keyframe_camera_initial_filename);
+
+                        // ============================================
+    // [插入] 可视化 Debug
+    // ============================================
+    // 只有在调试模式下开启
+#ifdef DEBUG_LBA_VISUALIZATION 
+    //Get optimized lines
+    std::list<KeyFrame*> lLocalKeyFrames;
+    std::list<MapLine*> lLocalMapLines;
+
+    // --- 1. collect local keyframes (BFS) ---
+    // lLocalKeyFrames.push_back(mpCurrentKeyFrame);
+    // mpCurrentKeyFrame->mnBALocalForKF = mpCurrentKeyFrame->mnId;
+    // Map* pCurrentMap = mpCurrentKeyFrame->GetMap();
+
+    // const vector<KeyFrame*> vNeighKFs = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+    // for (KeyFrame* pKFi : vNeighKFs)
+    // {
+    //     if (!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+    //     {
+    //         pKFi->mnBALocalForKF = mpCurrentKeyFrame->mnId;
+    //         lLocalKeyFrames.push_back(pKFi);
+    //     }
+    // }
+
+    for(auto& kf : mpCurrentKeyFrame->GetMap()->GetAllKeyFrames())
+    {
+        if(kf->isBad())
+            continue;
+        lLocalKeyFrames.push_back(kf);
+    }
+    for(auto& kf : lLocalKeyFrames)
+    {
+        std::cerr <<"--------Local key frame id------------: " << kf->mnId << std::endl;
+    }
+
+    for(auto& ml : mpCurrentKeyFrame->GetMapLineMatches())
+    {
+        if (!ml) continue;
+        if(ml->isBad())
+            continue;
+        lLocalMapLines.push_back(ml);
+    }
+
+    DebugProjectOptimizedLines(lLocalKeyFrames, lLocalMapLines);
+#endif
+                    }
+
+                }
+#ifdef REGISTER_TIMES
+                std::chrono::steady_clock::time_point time_EndLBA = std::chrono::steady_clock::now();
+
+                if(b_doneLBA)
+                {
+                    timeLBA_ms = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndLBA - time_EndMPCreation).count();
+                    vdLBA_ms.push_back(timeLBA_ms);
+
+                    nLBA_exec += 1;
+                    if(mbAbortBA)
+                    {
+                        nLBA_abort += 1;
+                    }
+                    vnLBA_edges.push_back(num_edges_BA);
+                    vnLBA_KFopt.push_back(num_OptKF_BA);
+                    vnLBA_KFfixed.push_back(num_FixedKF_BA);
+                    vnLBA_MPs.push_back(num_MPs_BA);
+                }
+
+#endif
+
+                // Initialize IMU here
+                if(!mpCurrentKeyFrame->GetMap()->isImuInitialized() && mbInertial)
+                {
+                    if (mbMonocular)
+                        InitializeIMU(1e2, 1e10, true);
+                    else
+                        InitializeIMU(1e2, 1e5, true);
+                }
+
+
+                // Check redundant local Keyframes
+                KeyFrameCulling();
+
+#ifdef REGISTER_TIMES
+                std::chrono::steady_clock::time_point time_EndKFCulling = std::chrono::steady_clock::now();
+
+                timeKFCulling_ms = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndKFCulling - time_EndLBA).count();
+                vdKFCulling_ms.push_back(timeKFCulling_ms);
+#endif
+
+                if ((mTinit<50.0f) && mbInertial)
+                {
+                    if(mpCurrentKeyFrame->GetMap()->isImuInitialized() && mpTracker->mState==Tracking::OK) // Enter here everytime local-mapping is called
+                    {
+                        if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA1()){
+                            if (mTinit>5.0f)
+                            {
+                                cout << "start VIBA 1" << endl;
+                                mpCurrentKeyFrame->GetMap()->SetIniertialBA1();
+                                if (mbMonocular)
+                                    InitializeIMU(1.f, 1e5, true);
+                                else
+                                    InitializeIMU(1.f, 1e5, true);
+
+                                cout << "end VIBA 1" << endl;
+                            }
+                        }
+                        else if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA2()){
+                            if (mTinit>15.0f){
+                                cout << "start VIBA 2" << endl;
+                                mpCurrentKeyFrame->GetMap()->SetIniertialBA2();
+                                if (mbMonocular)
+                                    InitializeIMU(0.f, 0.f, true);
+                                else
+                                    InitializeIMU(0.f, 0.f, true);
+
+                                cout << "end VIBA 2" << endl;
+                            }
+                        }
+
+                        // scale refinement
+                        if (((mpAtlas->KeyFramesInMap())<=200) &&
+                                ((mTinit>25.0f && mTinit<25.5f)||
+                                (mTinit>35.0f && mTinit<35.5f)||
+                                (mTinit>45.0f && mTinit<45.5f)||
+                                (mTinit>55.0f && mTinit<55.5f)||
+                                (mTinit>65.0f && mTinit<65.5f)||
+                                (mTinit>75.0f && mTinit<75.5f))){
+                            if (mbMonocular)
+                                ScaleRefinement();
+                        }
+                    }
+                }
+            }
+
+#ifdef REGISTER_TIMES
+            vdLBASync_ms.push_back(timeKFCulling_ms);
+            vdKFCullingSync_ms.push_back(timeKFCulling_ms);
+#endif
+
+            mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);    //TO DO THE GLOBALBUNDLEADJUSTMENT
+
+#ifdef REGISTER_TIMES
+            std::chrono::steady_clock::time_point time_EndLocalMap = std::chrono::steady_clock::now();
+
+            double timeLocalMap = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndLocalMap - time_StartProcessKF).count();
+            vdLMTotal_ms.push_back(timeLocalMap);
+#endif
+        }
+        else if(Stop() && !mbBadImu)
+        {
+            // Safe area to stop
+            while(isStopped() && !CheckFinish())
+            {
+                usleep(3000);
+            }
+            if(CheckFinish())
+                break;
+        }
+
+        ResetIfRequested();
+
+        // Tracking will see that Local Mapping is busy
+        SetAcceptKeyFrames(true);
+
+        if(CheckFinish())
+            break;
+
+        usleep(3000);
+    }
+
+    SetFinish();
+}
+
+void LocalMapping::InsertKeyFrame(KeyFrame *pKF)
+{
+    unique_lock<mutex> lock(mMutexNewKFs);
+    mlNewKeyFrames.push_back(pKF);
+    mbAbortBA=true;
+}
+
+
+bool LocalMapping::CheckNewKeyFrames()
+{
+    unique_lock<mutex> lock(mMutexNewKFs);
+    return(!mlNewKeyFrames.empty());
+}
+
+void LocalMapping::ProcessNewKeyFrame()
+{
+    {
+        unique_lock<mutex> lock(mMutexNewKFs);
+        mpCurrentKeyFrame = mlNewKeyFrames.front();
+        mlNewKeyFrames.pop_front();
+    }
+
+    // Compute Bags of Words structures
+    mpCurrentKeyFrame->ComputeBoW();
+
+    // Associate MapPoints to the new keyframe and update normal and descriptor
+    const vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+
+    for(size_t i=0; i<vpMapPointMatches.size(); i++)
+    {
+        MapPoint* pMP = vpMapPointMatches[i];
+        if(pMP)
+        {
+            if(!pMP->isBad())
+            {
+                if(!pMP->IsInKeyFrame(mpCurrentKeyFrame))
+                {
+                    pMP->AddObservation(mpCurrentKeyFrame, i);
+                    pMP->UpdateNormalAndDepth();
+                    pMP->ComputeDistinctiveDescriptors();
+                }
+                else // this can only happen for new stereo points inserted by the Tracking
+                {
+                    mlpRecentAddedMapPoints.push_back(pMP);
+                }
+            }
+        }
+    }
+
+    // Update links in the Covisibility Graph
+    mpCurrentKeyFrame->UpdateConnections();
+
+    // Insert Keyframe in Map
+    mpAtlas->AddKeyFrame(mpCurrentKeyFrame);
+}
+
+void LocalMapping::ProcessNewKeyFrameWithLine()
+{
+    {
+        unique_lock<mutex> lock(mMutexNewKFs);
+        mpCurrentKeyFrame = mlNewKeyFrames.front();
+        mlNewKeyFrames.pop_front();
+    }
+
+    // Compute Bags of Words structures
+    mpCurrentKeyFrame->ComputeBoW();
+
+    // Associate MapPoints to the new keyframe and update normal and descriptor
+    const vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+    const vector<MapLine*> vpMapLineMatches = mpCurrentKeyFrame->GetMapLineMatches();
+
+    std::cerr << " ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId " << mpCurrentKeyFrame->mnId << std::endl;
+    //td::cerr << " ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnFrameId " << mpCurrentKeyFrame->mnFrameId << std::endl;
+
+    for(size_t i=0; i<vpMapPointMatches.size(); i++)
+    {
+        MapPoint* pMP = vpMapPointMatches[i];
+        if(pMP)
+        {
+            if(!pMP->isBad())
+            {
+                if(!pMP->IsInKeyFrame(mpCurrentKeyFrame))
+                {
+                    pMP->AddObservation(mpCurrentKeyFrame, i);
+                    pMP->UpdateNormalAndDepth();
+                    pMP->ComputeDistinctiveDescriptors();
+                }
+                else // this can only happen for new stereo points inserted by the Tracking
+                {
+                    mlpRecentAddedMapPoints.push_back(pMP);
+                }
+            }
+        }
+    }
+
+    for(size_t i = 0; i < vpMapLineMatches.size(); ++i)
+    {
+        MapLine* pML = vpMapLineMatches[i];
+        if(pML)
+        {
+            if(!pML->isBad())
+            {
+                if(!pML->IsInKeyFrame(mpCurrentKeyFrame))
+                {
+                    pML->AddLineObservation(mpCurrentKeyFrame, i);
+                    pML->UpdateNormalAndDepth();
+                    pML->ComputeDistinctiveDescriptors();
+
+                    pML->UpdateEndpointsFromPluckerAndObservations();
+                }
+                else    //// this can only happen for new stereo points inserted by the Tracking
+                {
+                    mlpRecentAddedMapLines.push_back(pML);
+                }
+            }
+        }
+    }
+
+    // Update links in the Covisibility Graph
+    mpCurrentKeyFrame->UpdateConnections();
+
+    // Insert Keyframe in Map
+    mpAtlas->AddKeyFrame(mpCurrentKeyFrame);
+}
+
+
+void LocalMapping::EmptyQueue()
+{
+    while(CheckNewKeyFrames())
+        ProcessNewKeyFrame();
+}
+
+void LocalMapping::MapPointCulling()
+{
+    // Check Recent Added MapPoints
+    list<MapPoint*>::iterator lit = mlpRecentAddedMapPoints.begin();
+    const unsigned long int nCurrentKFid = mpCurrentKeyFrame->mnId;
+
+    int nThObs;
+    if(mbMonocular)
+        nThObs = 2;
+    else
+        nThObs = 3;
+    const int cnThObs = nThObs;
+
+    int borrar = mlpRecentAddedMapPoints.size();
+
+    while(lit!=mlpRecentAddedMapPoints.end())
+    {
+        MapPoint* pMP = *lit;
+
+        if(pMP->isBad())
+            lit = mlpRecentAddedMapPoints.erase(lit);
+        else if(pMP->GetFoundRatio()<0.25f)
+        {
+            pMP->SetBadFlag();
+            lit = mlpRecentAddedMapPoints.erase(lit);
+        }
+        else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->Observations()<=cnThObs)
+        {
+            pMP->SetBadFlag();
+            lit = mlpRecentAddedMapPoints.erase(lit);
+        }
+        else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=3)
+            lit = mlpRecentAddedMapPoints.erase(lit);
+        else
+        {
+            lit++;
+            borrar--;
+        }
+    }
+}
+
+void LocalMapping::MapLineCulling()
+{
+    list<MapLine*>::iterator lit = mlpRecentAddedMapLines.begin();
+    const unsigned long int nCurrentKFid = mpCurrentKeyFrame->mnId;
+
+    // [修改建议 1] 降低观测阈值
+    // 线特征比点难跟踪，RGBD模式下设为 3 几乎是“必杀令”。建议改为 2。
+    int nThObs;
+    if(mbMonocular)
+        nThObs = 2;
+    else
+        nThObs = 2; // 原来是 3，改为 2，给线段一条生路！
+
+    const int cnThObs = nThObs;
+
+    // Debug 计数器
+    int nKilledByBad = 0;
+    int nKilledByRatio = 0;
+    int nKilledByObs = 0;
+    int nGraduated = 0;
+
+    while(lit != mlpRecentAddedMapLines.end())
+    {
+        MapLine* pML = *lit;
+        if(!pML) {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            continue;
+        }
+
+        // 1. 已经标为坏
+        if(pML->isBad())
+        {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nKilledByBad++;
+            continue;
+        }
+
+        // 2. 线段 “成功跟踪比例” 太差
+        // [修改建议 2] 0.25 对于线特征可能有点高，如果还不行，尝试降到 0.15
+        if(pML->GetFoundRatio() < 0.25f)
+        {
+            pML->SetBadFlag();
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nKilledByRatio++;
+            continue;
+        }
+
+        // 3. 关键帧间隔 >= 2 并且观测次数太少
+        // 这里的逻辑是：出生了 2 帧以上，如果还没有被 > cnThObs 个帧看到，就删掉。
+        if(((int)nCurrentKFid - (int)pML->mnFirstKFid) >= 2 &&
+            pML->Observations() <= cnThObs)
+        {
+            pML->SetBadFlag();
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nKilledByObs++;
+            continue;
+        }
+
+        // 4. 加入超过 3 帧，还没有足够观测，直接移除 (从检查列表中移除，不是从地图移除)
+        // 意味着它通过了考核，正式成为地图的永久居民
+        if(((int)nCurrentKFid - (int)pML->mnFirstKFid) >= 3)
+        {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            nGraduated++;
+            continue;
+        }
+
+        // 5. 否则保留
+        lit++;
+    }
+
+    // [Debug 输出] 只有当有线段被操作时才打印，避免刷屏
+    if (nKilledByBad + nKilledByRatio + nKilledByObs + nGraduated > 0) {
+        std::cerr << "[MapLineCulling] KF" << nCurrentKFid 
+                  << " | Bad:" << nKilledByBad 
+                  << " | LowRatio:" << nKilledByRatio 
+                  << " | LowObs:" << nKilledByObs 
+                  << " | Graduated(Saved):" << nGraduated << std::endl;
+    }
+}
+
+#if 0
+void LocalMapping::MapLineCulling()
+{
+    // 检查最近加入的 MapLines
+    list<MapLine*>::iterator lit = mlpRecentAddedMapLines.begin();
+    const unsigned long int nCurrentKFid = mpCurrentKeyFrame->mnId;
+
+    // monocular 线段阈值更严格（仿照点）
+    int nThObs;
+    if(mbMonocular)
+        nThObs = 2;       // 较低要求
+    else
+        nThObs = 3;
+
+    const int cnThObs = nThObs;
+
+    while(lit != mlpRecentAddedMapLines.end())
+    {
+        MapLine* pML = *lit;
+
+        // 1. 已经标为坏
+        if(pML->isBad())
+        {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            continue;
+        }
+
+        // 2. 线段 “成功跟踪比例” 太差（类似 MapPoint 的 FoundRatio）
+        if(pML->GetFoundRatio() < 0.25f)
+        {
+            pML->SetBadFlag();
+            lit = mlpRecentAddedMapLines.erase(lit);
+            continue;
+        }
+
+        // 3. 关键帧间隔 >= 2 并且观测次数太少
+        if(((int)nCurrentKFid - (int)pML->mnFirstKFid) >= 2 &&
+            pML->Observations() <= cnThObs)
+        {
+            pML->SetBadFlag();
+            lit = mlpRecentAddedMapLines.erase(lit);
+            continue;
+        }
+
+        // 4. 加入超过 3 帧，还没有足够观测，直接移除
+        if(((int)nCurrentKFid - (int)pML->mnFirstKFid) >= 3)
+        {
+            lit = mlpRecentAddedMapLines.erase(lit);
+            continue;
+        }
+
+        // 5. 否则保留
+        lit++;
+    }
+}
+#endif
+
+void LocalMapping::CreateNewMapPoints()
+{
+    // Retrieve neighbor keyframes in covisibility graph
+    int nn = 10;
+    // For stereo inertial case
+    if(mbMonocular)
+        nn=30;
+    vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+
+    if (mbInertial)
+    {
+        KeyFrame* pKF = mpCurrentKeyFrame;
+        int count=0;
+        while((vpNeighKFs.size()<=nn)&&(pKF->mPrevKF)&&(count++<nn))
+        {
+            vector<KeyFrame*>::iterator it = std::find(vpNeighKFs.begin(), vpNeighKFs.end(), pKF->mPrevKF);
+            if(it==vpNeighKFs.end())
+                vpNeighKFs.push_back(pKF->mPrevKF);
+            pKF = pKF->mPrevKF;
+        }
+    }
+
+    float th = 0.6f;
+
+    ORBmatcher matcher(th,false);
+
+    Sophus::SE3<float> sophTcw1 = mpCurrentKeyFrame->GetPose();
+    Eigen::Matrix<float,3,4> eigTcw1 = sophTcw1.matrix3x4();
+    Eigen::Matrix<float,3,3> Rcw1 = eigTcw1.block<3,3>(0,0);
+    Eigen::Matrix<float,3,3> Rwc1 = Rcw1.transpose();
+    Eigen::Vector3f tcw1 = sophTcw1.translation();
+    Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+
+    const float &fx1 = mpCurrentKeyFrame->fx;
+    const float &fy1 = mpCurrentKeyFrame->fy;
+    const float &cx1 = mpCurrentKeyFrame->cx;
+    const float &cy1 = mpCurrentKeyFrame->cy;
+    const float &invfx1 = mpCurrentKeyFrame->invfx;
+    const float &invfy1 = mpCurrentKeyFrame->invfy;
+
+    const float ratioFactor = 1.5f*mpCurrentKeyFrame->mfScaleFactor;
+    int countStereo = 0;
+    int countStereoGoodProj = 0;
+    int countStereoAttempt = 0;
+    int totalStereoPts = 0;
+    // Search matches with epipolar restriction and triangulate
+    for(size_t i=0; i<vpNeighKFs.size(); i++)
+    {
+        if(i>0 && CheckNewKeyFrames())
+            return;
+
+        KeyFrame* pKF2 = vpNeighKFs[i];
+
+        GeometricCamera* pCamera1 = mpCurrentKeyFrame->mpCamera, *pCamera2 = pKF2->mpCamera;
+
+        // Check first that baseline is not too short
+        Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
+        Eigen::Vector3f vBaseline = Ow2-Ow1;
+        const float baseline = vBaseline.norm();
+
+        if(!mbMonocular)
+        {
+            if(baseline<pKF2->mb)
+                continue;
+        }
+        else
+        {
+            const float medianDepthKF2 = pKF2->ComputeSceneMedianDepth(2);
+            const float ratioBaselineDepth = baseline/medianDepthKF2;
+
+            if(ratioBaselineDepth<0.01)
+                continue;
+        }
+
+        // Search matches that fullfil epipolar constraint
+        vector<pair<size_t,size_t> > vMatchedIndices;
+        bool bCoarse = mbInertial && mpTracker->mState==Tracking::RECENTLY_LOST && mpCurrentKeyFrame->GetMap()->GetIniertialBA2();
+
+        matcher.SearchForTriangulation(mpCurrentKeyFrame,pKF2,vMatchedIndices,false,bCoarse);
+
+        Sophus::SE3<float> sophTcw2 = pKF2->GetPose();
+        Eigen::Matrix<float,3,4> eigTcw2 = sophTcw2.matrix3x4();
+        Eigen::Matrix<float,3,3> Rcw2 = eigTcw2.block<3,3>(0,0);
+        Eigen::Matrix<float,3,3> Rwc2 = Rcw2.transpose();
+        Eigen::Vector3f tcw2 = sophTcw2.translation();
+
+        const float &fx2 = pKF2->fx;
+        const float &fy2 = pKF2->fy;
+        const float &cx2 = pKF2->cx;
+        const float &cy2 = pKF2->cy;
+        const float &invfx2 = pKF2->invfx;
+        const float &invfy2 = pKF2->invfy;
+
+        // Triangulate each match
+        const int nmatches = vMatchedIndices.size();
+        for(int ikp=0; ikp<nmatches; ikp++)
+        {
+            const int &idx1 = vMatchedIndices[ikp].first;
+            const int &idx2 = vMatchedIndices[ikp].second;
+
+            const cv::KeyPoint &kp1 = (mpCurrentKeyFrame -> NLeft == -1) ? mpCurrentKeyFrame->mvKeysUn[idx1]
+                                                                         : (idx1 < mpCurrentKeyFrame -> NLeft) ? mpCurrentKeyFrame -> mvKeys[idx1]
+                                                                                                               : mpCurrentKeyFrame -> mvKeysRight[idx1 - mpCurrentKeyFrame -> NLeft];
+            const float kp1_ur=mpCurrentKeyFrame->mvuRight[idx1];
+            bool bStereo1 = (!mpCurrentKeyFrame->mpCamera2 && kp1_ur>=0);
+            const bool bRight1 = (mpCurrentKeyFrame -> NLeft == -1 || idx1 < mpCurrentKeyFrame -> NLeft) ? false
+                                                                                                         : true;
+
+            const cv::KeyPoint &kp2 = (pKF2 -> NLeft == -1) ? pKF2->mvKeysUn[idx2]
+                                                            : (idx2 < pKF2 -> NLeft) ? pKF2 -> mvKeys[idx2]
+                                                                                     : pKF2 -> mvKeysRight[idx2 - pKF2 -> NLeft];
+
+            const float kp2_ur = pKF2->mvuRight[idx2];
+            bool bStereo2 = (!pKF2->mpCamera2 && kp2_ur>=0);
+            const bool bRight2 = (pKF2 -> NLeft == -1 || idx2 < pKF2 -> NLeft) ? false
+                                                                               : true;
+
+            if(mpCurrentKeyFrame->mpCamera2 && pKF2->mpCamera2){
+                if(bRight1 && bRight2){
+                    sophTcw1 = mpCurrentKeyFrame->GetRightPose();
+                    Ow1 = mpCurrentKeyFrame->GetRightCameraCenter();
+
+                    sophTcw2 = pKF2->GetRightPose();
+                    Ow2 = pKF2->GetRightCameraCenter();
+
+                    pCamera1 = mpCurrentKeyFrame->mpCamera2;
+                    pCamera2 = pKF2->mpCamera2;
+                }
+                else if(bRight1 && !bRight2){
+                    sophTcw1 = mpCurrentKeyFrame->GetRightPose();
+                    Ow1 = mpCurrentKeyFrame->GetRightCameraCenter();
+
+                    sophTcw2 = pKF2->GetPose();
+                    Ow2 = pKF2->GetCameraCenter();
+
+                    pCamera1 = mpCurrentKeyFrame->mpCamera2;
+                    pCamera2 = pKF2->mpCamera;
+                }
+                else if(!bRight1 && bRight2){
+                    sophTcw1 = mpCurrentKeyFrame->GetPose();
+                    Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+
+                    sophTcw2 = pKF2->GetRightPose();
+                    Ow2 = pKF2->GetRightCameraCenter();
+
+                    pCamera1 = mpCurrentKeyFrame->mpCamera;
+                    pCamera2 = pKF2->mpCamera2;
+                }
+                else{
+                    sophTcw1 = mpCurrentKeyFrame->GetPose();
+                    Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+
+                    sophTcw2 = pKF2->GetPose();
+                    Ow2 = pKF2->GetCameraCenter();
+
+                    pCamera1 = mpCurrentKeyFrame->mpCamera;
+                    pCamera2 = pKF2->mpCamera;
+                }
+                eigTcw1 = sophTcw1.matrix3x4();
+                Rcw1 = eigTcw1.block<3,3>(0,0);
+                Rwc1 = Rcw1.transpose();
+                tcw1 = sophTcw1.translation();
+
+                eigTcw2 = sophTcw2.matrix3x4();
+                Rcw2 = eigTcw2.block<3,3>(0,0);
+                Rwc2 = Rcw2.transpose();
+                tcw2 = sophTcw2.translation();
+            }
+
+            // Check parallax between rays
+            Eigen::Vector3f xn1 = pCamera1->unprojectEig(kp1.pt);
+            Eigen::Vector3f xn2 = pCamera2->unprojectEig(kp2.pt);
+
+            Eigen::Vector3f ray1 = Rwc1 * xn1;
+            Eigen::Vector3f ray2 = Rwc2 * xn2;
+            const float cosParallaxRays = ray1.dot(ray2)/(ray1.norm() * ray2.norm());
+
+            float cosParallaxStereo = cosParallaxRays+1;
+            float cosParallaxStereo1 = cosParallaxStereo;
+            float cosParallaxStereo2 = cosParallaxStereo;
+
+            if(bStereo1)
+                cosParallaxStereo1 = cos(2*atan2(mpCurrentKeyFrame->mb/2,mpCurrentKeyFrame->mvDepth[idx1]));
+            else if(bStereo2)
+                cosParallaxStereo2 = cos(2*atan2(pKF2->mb/2,pKF2->mvDepth[idx2]));
+
+            if (bStereo1 || bStereo2) totalStereoPts++;
+            
+            cosParallaxStereo = min(cosParallaxStereo1,cosParallaxStereo2);
+
+            Eigen::Vector3f x3D, colorRGB;
+
+            bool goodProj = false;
+            bool bPointStereo = false;
+            if(cosParallaxRays<cosParallaxStereo && cosParallaxRays>0 && (bStereo1 || bStereo2 ||
+                                                                          (cosParallaxRays<0.9996 && mbInertial) || (cosParallaxRays<0.9998 && !mbInertial)))
+            {
+                goodProj = GeometricTools::Triangulate(xn1, xn2, eigTcw1, eigTcw2, x3D);
+                if(!goodProj)
+                    continue;
+                if (mpCurrentKeyFrame->NLeft == -1)
+                {
+                    const cv::KeyPoint &kp1Ori = mpCurrentKeyFrame->mvKeys[idx1];
+                    const int u = static_cast<int>(std::round(kp1Ori.pt.x));
+                    const int v = static_cast<int>(std::round(kp1Ori.pt.y));
+                    const auto& color = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(v, u);
+                    colorRGB.x() = color[0];
+                    colorRGB.y() = color[1];
+                    colorRGB.z() = color[2];
+                }
+            }
+            else if(bStereo1 && cosParallaxStereo1<cosParallaxStereo2)
+            {
+                countStereoAttempt++;
+                bPointStereo = true;
+                goodProj = mpCurrentKeyFrame->UnprojectStereo(idx1, x3D, colorRGB);
+            }
+            else if(bStereo2 && cosParallaxStereo2<cosParallaxStereo1)
+            {
+                countStereoAttempt++;
+                bPointStereo = true;
+                goodProj = pKF2->UnprojectStereo(idx2, x3D, colorRGB);
+            }
+            else
+            {
+                continue; //No stereo and very low parallax
+            }
+
+            if(goodProj && bPointStereo)
+                countStereoGoodProj++;
+
+            if(!goodProj)
+                continue;
+
+            //Check triangulation in front of cameras
+            float z1 = Rcw1.row(2).dot(x3D) + tcw1(2);
+            if(z1<=0)
+                continue;
+
+            float z2 = Rcw2.row(2).dot(x3D) + tcw2(2);
+            if(z2<=0)
+                continue;
+
+            //Check reprojection error in first keyframe
+            const float &sigmaSquare1 = mpCurrentKeyFrame->mvLevelSigma2[kp1.octave];
+            const float x1 = Rcw1.row(0).dot(x3D)+tcw1(0);
+            const float y1 = Rcw1.row(1).dot(x3D)+tcw1(1);
+            const float invz1 = 1.0/z1;
+
+            if(!bStereo1)
+            {
+                cv::Point2f uv1 = pCamera1->project(cv::Point3f(x1,y1,z1));
+                float errX1 = uv1.x - kp1.pt.x;
+                float errY1 = uv1.y - kp1.pt.y;
+
+                if((errX1*errX1+errY1*errY1)>5.991*sigmaSquare1)
+                    continue;
+
+            }
+            else
+            {
+                float u1 = fx1*x1*invz1+cx1;
+                float u1_r = u1 - mpCurrentKeyFrame->mbf*invz1;
+                float v1 = fy1*y1*invz1+cy1;
+                float errX1 = u1 - kp1.pt.x;
+                float errY1 = v1 - kp1.pt.y;
+                float errX1_r = u1_r - kp1_ur;
+                if((errX1*errX1+errY1*errY1+errX1_r*errX1_r)>7.8*sigmaSquare1)
+                    continue;
+            }
+
+            //Check reprojection error in second keyframe
+            const float sigmaSquare2 = pKF2->mvLevelSigma2[kp2.octave];
+            const float x2 = Rcw2.row(0).dot(x3D)+tcw2(0);
+            const float y2 = Rcw2.row(1).dot(x3D)+tcw2(1);
+            const float invz2 = 1.0/z2;
+            if(!bStereo2)
+            {
+                cv::Point2f uv2 = pCamera2->project(cv::Point3f(x2,y2,z2));
+                float errX2 = uv2.x - kp2.pt.x;
+                float errY2 = uv2.y - kp2.pt.y;
+                if((errX2*errX2+errY2*errY2)>5.991*sigmaSquare2)
+                    continue;
+            }
+            else
+            {
+                float u2 = fx2*x2*invz2+cx2;
+                float u2_r = u2 - mpCurrentKeyFrame->mbf*invz2;
+                float v2 = fy2*y2*invz2+cy2;
+                float errX2 = u2 - kp2.pt.x;
+                float errY2 = v2 - kp2.pt.y;
+                float errX2_r = u2_r - kp2_ur;
+                if((errX2*errX2+errY2*errY2+errX2_r*errX2_r)>7.8*sigmaSquare2)
+                    continue;
+            }
+
+            //Check scale consistency
+            Eigen::Vector3f normal1 = x3D - Ow1;
+            float dist1 = normal1.norm();
+
+            Eigen::Vector3f normal2 = x3D - Ow2;
+            float dist2 = normal2.norm();
+
+            if(dist1==0 || dist2==0)
+                continue;
+
+            if(mbFarPoints && (dist1>=mThFarPoints||dist2>=mThFarPoints)) // MODIFICATION
+                continue;
+
+            const float ratioDist = dist2/dist1;
+            const float ratioOctave = mpCurrentKeyFrame->mvScaleFactors[kp1.octave]/pKF2->mvScaleFactors[kp2.octave];
+
+            if(ratioDist*ratioFactor<ratioOctave || ratioDist>ratioOctave*ratioFactor)
+                continue;
+
+            // Triangulation is succesfull
+            MapPoint* pMP = new MapPoint(x3D, colorRGB, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
+            if (bPointStereo)
+                countStereo++;
+            
+            pMP->AddObservation(mpCurrentKeyFrame,idx1);
+            pMP->AddObservation(pKF2,idx2);
+
+            mpCurrentKeyFrame->AddMapPoint(pMP,idx1);
+            pKF2->AddMapPoint(pMP,idx2);
+
+            pMP->ComputeDistinctiveDescriptors();
+
+            pMP->UpdateNormalAndDepth();
+
+            mpAtlas->AddMapPoint(pMP);
+            mlpRecentAddedMapPoints.push_back(pMP);
+        }
+    }    
+}
+
+
+#if 0
+void LocalMapping::CreateNewMapLines()
+{
+    // --- 1. 获取共视邻居关键帧 ---
+    int nn = mbMonocular ? 30 : 10;
+    vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+
+    if (mbInertial)
+    {
+        KeyFrame* pKF = mpCurrentKeyFrame;
+        int cnt = 0;
+        while ((vpNeighKFs.size() <= nn) && pKF->mPrevKF && cnt++ < nn)
+        {
+            if (find(vpNeighKFs.begin(), vpNeighKFs.end(), pKF->mPrevKF) == vpNeighKFs.end())
+                vpNeighKFs.push_back(pKF->mPrevKF);
+            pKF = pKF->mPrevKF;
+        }
+    }
+
+    LSDmatcher line_matcher(0.6f, true, 0.85f, 3.0f, 30.0f, 2.0f);
+
+    Sophus::SE3f Tcw1 = mpCurrentKeyFrame->GetPose();
+    Eigen::Matrix<float,3,4> eigTcw1 = Tcw1.matrix3x4();
+    Eigen::Matrix3f Rcw1 = eigTcw1.block<3,3>(0,0);
+    Eigen::Matrix3f Rwc1 = Rcw1.transpose(); 
+    Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+    Eigen::Matrix3f Kinv1 = mpCurrentKeyFrame->mpCamera->toK_().inverse();
+
+    // 各种阈值
+    const float minLinePixels = 5.0f;            
+    const float maxLenRatioHard = 1.5f;          
+    const float maxAngleDiff = 45.0f * M_PI / 180.0f;
+
+    for (KeyFrame* pKF2 : vpNeighKFs)
+    {
+        if (CheckNewKeyFrames()) return;
+
+        Sophus::SE3f Tcw2 = pKF2->GetPose();
+        Eigen::Matrix<float,3,4> eigTcw2 = Tcw2.matrix3x4();
+        Eigen::Matrix3f Rcw2 = eigTcw2.block<3,3>(0,0);
+        Eigen::Matrix3f Rwc2 = Rcw2.transpose();
+        Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
+        Eigen::Matrix3f Kinv2 = pKF2->mpCamera->toK_().inverse();
+
+        // 基线检查
+        float baseline = (Ow2 - Ow1).norm();
+        if (!mbMonocular)
+        {
+            if (baseline < pKF2->mb) continue;
+        }
+        else
+        {
+            float med = pKF2->ComputeSceneMedianDepth(2);
+            if (med <= 0) continue;
+            if (baseline / med < 0.01f) continue;
+        }
+
+        // 获取候选匹配
+        vector<pair<int,int>> vMatchedIdx;
+        line_matcher.SearchForTriangulationLinesRobust(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+        if (vMatchedIdx.empty()) continue;
+
+        for (const auto &pr : vMatchedIdx)
+        {
+            int idx1 = pr.first;
+            int idx2 = pr.second;
+            
+            const cv::line_descriptor::KeyLine &le1 = mpCurrentKeyFrame->mvKeyLinesUn[idx1];
+            const cv::line_descriptor::KeyLine &le2 = pKF2->mvKeyLinesUn[idx2];
+            
+            if (le1.lineLength < minLinePixels || le2.lineLength < minLinePixels) continue;
+            
+            float len1 = le1.lineLength;
+            float len2 = le2.lineLength;
+            float lenRatio = fabs(len1 - len2) / max(len1, len2);
+            if (lenRatio > maxLenRatioHard) continue;
+            
+            float a1 = atan2(le1.endPointY - le1.startPointY, le1.endPointX - le1.startPointX);
+            float a2 = atan2(le2.endPointY - le2.startPointY, le2.endPointX - le2.startPointX);
+            float angDiff = fabs(a1 - a2); 
+            if (angDiff > M_PI) angDiff = 2.0f*M_PI - angDiff;
+            if (angDiff > maxAngleDiff) continue;
+
+            bool created = false;
+            Eigen::Vector3f S3D, E3D;
+            Eigen::Vector3f colS(1,1,1), colE(1,1,1);
+
+            // ========================================================
+            // 1. RGB-D / Stereo 路径 (直接提取深度)
+            // ========================================================
+            //if (mSensor == System::RGBD || mSensor == System::IMU_RGBD || mSensor == System::STEREO || mSensor == System::IMU_STEREO)
+            if (!mbMonocular)
+            {
+                std::pair<Eigen::Vector3f, Eigen::Vector3f> line3D, colorRGB;
+                
+                // 调用我们在 Frame.cpp 中写好的获取深度函数
+                if(mpCurrentKeyFrame->UnprojectStereoLineSeg(idx1, line3D, colorRGB))
+                {
+                    if (CheckLineReprojection(pKF2, line3D.first, line3D.second, le2))
+                    {
+                        S3D = line3D.first;
+                        E3D = line3D.second;
+                        colS = colorRGB.first;
+                        colE = colorRGB.second;
+                        created = true;
+                    }
+                }
+                else if (pKF2->UnprojectStereoLineSeg(idx2, line3D, colorRGB))
+                {
+                    if (CheckLineReprojection(mpCurrentKeyFrame, line3D.first, line3D.second, le1))
+                    {
+                        S3D = line3D.first;
+                        E3D = line3D.second;
+                        colS = colorRGB.first;
+                        colE = colorRGB.second;
+                        created = true;
+                    }
+                }
+            }
+
+            // ========================================================
+            // 2. Monocular 路径 (严格的面-射线三角化)
+            // ========================================================
+            if (!created)
+            {
+                // KF2 中的线在相机坐标系下的射线
+                Eigen::Vector3f v2s = Kinv2 * Eigen::Vector3f(le2.startPointX, le2.startPointY, 1.0f);
+                Eigen::Vector3f v2e = Kinv2 * Eigen::Vector3f(le2.endPointX, le2.endPointY, 1.0f);
+                
+                // 由 KF2 原点和线段构成的平面法向量 (相机系)
+                Eigen::Vector3f n2 = v2s.cross(v2e).normalized();
+
+                // 将 KF2 的平面法向量转换到世界坐标系下
+                Eigen::Vector3f N2w = Rwc2 * n2;
+                float d2w = -N2w.dot(Ow2); 
+
+                // KF1 中的射线 (相机系)
+                Eigen::Vector3f v1s = Kinv1 * Eigen::Vector3f(le1.startPointX, le1.startPointY, 1.0f);
+                Eigen::Vector3f v1e = Kinv1 * Eigen::Vector3f(le1.endPointX, le1.endPointY, 1.0f);
+                
+                // 转到世界系
+                Eigen::Vector3f dir1s = Rwc1 * v1s;
+                Eigen::Vector3f dir1e = Rwc1 * v1e;
+
+                // --- 对极退化校验 ---
+                Eigen::Vector3f n1w = dir1s.cross(dir1e).normalized();
+                if(std::fabs(n1w.dot(N2w)) > 0.999f) continue; 
+
+                // 射线与平面的交点计算: Z = -(N2w * Ow1 + d2w) / (N2w * dir)
+                float num = -(N2w.dot(Ow1) + d2w);
+                float den_s = N2w.dot(dir1s);
+                float den_e = N2w.dot(dir1e);
+
+                if (std::fabs(den_s) > 1e-4f && std::fabs(den_e) > 1e-4f)
+                {
+                    float Zs = num / den_s;
+                    float Ze = num / den_e;
+
+                    // 必须在相机前方
+                    if (Zs > 0 && Ze > 0)
+                    {
+                        S3D = Ow1 + Zs * dir1s;
+                        E3D = Ow1 + Ze * dir1e;
+
+                        if (CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1) &&
+                            CheckLineReprojection(pKF2, S3D, E3D, le2))
+                        {
+                            // 提取颜色
+                            int us = std::max(0, std::min(static_cast<int>(std::round(le1.startPointX)), mpCurrentKeyFrame->imgLeftRGB.cols - 1));
+                            int vs = std::max(0, std::min(static_cast<int>(std::round(le1.startPointY)), mpCurrentKeyFrame->imgLeftRGB.rows - 1));
+                            int ue = std::max(0, std::min(static_cast<int>(std::round(le1.endPointX)),   mpCurrentKeyFrame->imgLeftRGB.cols - 1));
+                            int ve = std::max(0, std::min(static_cast<int>(std::round(le1.endPointY)),   mpCurrentKeyFrame->imgLeftRGB.rows - 1));
+                            
+                            const auto &cs = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(vs, us);
+                            const auto &ce = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(ve, ue);
+                            colS = Eigen::Vector3f(cs[0], cs[1], cs[2]);
+                            colE = Eigen::Vector3f(ce[0], ce[1], ce[2]);
+
+                            created = true;
+                        }
+                    }
+                }
+            }
+
+            if (!created) continue;
+
+            // 最终深度和尺度校验
+            float z1 = Rcw1.row(2).dot(S3D) + eigTcw1(2,3);
+            float z2 = Rcw2.row(2).dot(S3D) + eigTcw2(2,3);
+            if (z1 <= 0 || z2 <= 0) continue;
+
+            // 创建并插入地图线
+            MapLine* pML = new MapLine(S3D, E3D, colS, colE, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
+            pML->AddLineObservation(mpCurrentKeyFrame, idx1);
+            pML->AddLineObservation(pKF2, idx2);
+            mpCurrentKeyFrame->AddMapLine(pML, idx1);
+            pKF2->AddMapLine(pML, idx2);
+            
+            pML->ComputeDistinctiveDescriptors();
+            pML->UpdateNormalAndDepth();
+            
+            mpAtlas->AddMapLine(pML);
+            mlpRecentAddedMapLines.push_back(pML);
+
+            pML->UpdateEndpointsFromPluckerAndObservations();
+        } 
+    } 
+    //int created_map_line_num = (int)mlpRecentAddedMapLines.size();
+    // std::cerr << " created_map_line_num: " << created_map_line_num << std::endl;
+}
+
+#else
+
+void LocalMapping::CreateNewMapLines()
+{
+    // --- 1. neighbor keyframes (same as points) ---
+    int nn = mbMonocular ? 30 : 10;
+    vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+
+    if (mbInertial)
+    {
+        KeyFrame* pKF = mpCurrentKeyFrame;
+        int cnt = 0;
+        while ((vpNeighKFs.size() <= nn) && pKF->mPrevKF && cnt++ < nn)
+        {
+            if (find(vpNeighKFs.begin(), vpNeighKFs.end(), pKF->mPrevKF) == vpNeighKFs.end())
+                vpNeighKFs.push_back(pKF->mPrevKF);
+            pKF = pKF->mPrevKF;
+        }
+    }
+
+    // robust line matcher (you already have this)
+    LSDmatcher line_matcher(0.6f, true, 0.85f, 3.0f, 30.0f, 2.0f);
+
+    // current KF
+    Sophus::SE3f Tcw1 = mpCurrentKeyFrame->GetPose();
+    Eigen::Matrix<float,3,4> eigTcw1 = Tcw1.matrix3x4();
+    Eigen::Matrix3f Rcw1 = eigTcw1.block<3,3>(0,0);
+    Eigen::Matrix3f Rwc1 = Rcw1.transpose(); // 需要用到 Rwc1 将方向转回世界系
+    Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+    GeometricCamera* cam1_base = mpCurrentKeyFrame->mpCamera;
+
+    // thresholds (tunable)
+    const float minLinePixels = 2.0f;            // reject too short lines 5.0f
+    const float maxLenRatioHard = 1.5f;          // if > -> discard
+    const float maxLenRatioSoft = 0.7f;          // if > -> penalize but may accept
+    const float maxAngleDiff = 45.0f * M_PI / 180.0f;
+    const float MAX_EPIPOLAR = 4.0f;             // px
+    const float MAX_RAY_RES = 5.0f;              // normalized units (loose)
+    const float EPS = 1e-6f;
+
+    // Iterate neighbors
+    for (KeyFrame* pKF2 : vpNeighKFs)
+    {
+        if (CheckNewKeyFrames()) return;
+
+        Sophus::SE3f Tcw2 = pKF2->GetPose();
+        Eigen::Matrix<float,3,4> eigTcw2 = Tcw2.matrix3x4();
+        Eigen::Matrix3f Rcw2 = eigTcw2.block<3,3>(0,0);
+        Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
+        GeometricCamera* cam2_base = pKF2->mpCamera;
+
+        // baseline / scene depth test (same logic as points)
+        float baseline = (Ow2 - Ow1).norm();
+        if (!mbMonocular)
+        {
+            if (baseline < pKF2->mb) continue;
+        }
+        else
+        {
+            float med = pKF2->ComputeSceneMedianDepth(2);
+            if (med <= 0) continue;
+            if (baseline / med < 0.01f) continue;
+        }
+
+        // get candidate matches
+        vector<pair<int,int>> vMatchedIdx;
+        line_matcher.SearchForTriangulationLinesRobust(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+        // 可视化
+        //         //line_matcher.DebugShowTriangulationMatchesKF(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+        if (vMatchedIdx.empty()) continue;
+
+        // prepare camera intrinsics (for epipolar F if needed)
+        Eigen::Matrix3f K1 = cam1_base->toK_();
+        Eigen::Matrix3f K2 = cam2_base->toK_();
+        Eigen::Matrix3f K1inv = K1.inverse();
+        Eigen::Matrix3f K2inv = K2.inverse();
+
+        // precompute T poses for stereo cases later
+        Sophus::SE3f T1w = Tcw1;
+        Sophus::SE3f T2w = Tcw2;
+
+        // For each matched line pair
+        for (const auto &pr : vMatchedIdx)
+        {
+            int idx1 = pr.first;
+            int idx2 = pr.second;
+            // Avoid duplicate triangulation: if either KF already has MapLine for this keyline, skip
+            //if (mpCurrentKeyFrame->GetMapLine(idx1) || pKF2->GetMapLine(idx2))
+            //   continue;
+            const cv::line_descriptor::KeyLine &le1 = mpCurrentKeyFrame->mvKeyLines[idx1];
+            const cv::line_descriptor::KeyLine &le2 = pKF2->mvKeyLines[idx2];
+            // reject too short lines
+            if (le1.lineLength < minLinePixels || le2.lineLength < minLinePixels) continue;
+            // length & angle checks
+            float len1 = le1.lineLength;
+            float len2 = le2.lineLength;
+            float lenRatio = fabs(len1 - len2) / max(len1, len2);
+            if (lenRatio > maxLenRatioHard) continue;
+            float a1 = atan2(le1.endPointY - le1.startPointY, le1.endPointX - le1.startPointX);
+            float a2 = atan2(le2.endPointY - le2.startPointY, le2.endPointX - le2.startPointX);
+            float angDiff = fabs(a1 - a2); if (angDiff > M_PI) angDiff = 2*M_PI - angDiff;
+            if (angDiff > maxAngleDiff) continue;
+            // pixel endpoints
+            cv::Point2f p1s(le1.startPointX, le1.startPointY), p1e(le1.endPointX, le1.endPointY);
+            cv::Point2f p2s(le2.startPointX, le2.startPointY), p2e(le2.endPointX, le2.endPointY);
+            // Decide branch: Stereo (have stereo camera) -> RGB-D -> Mono
+            bool created = false;
+            Eigen::Vector3f S3D, E3D;
+            Eigen::Vector3f colS(1,1,1), colE(1,1,1);
+            // // -----------------------
+            // // 1) Stereo path (if stereo camera and stereo depth available)
+            // // -----------------------
+            // // NOTE: we assume KeyFrame provides UnprojectStereoLine(int idx, Eigen::Vector3f &Xs, Eigen::Vector3f &Xe, Eigen::Vector3f &colorS, Eigen::Vector3f &colorE)
+            // // If your KeyFrame API differs, replace with appropriate calls (UnprojectStereo for endpoints or use mvuRight/mvDepth arrays).
+            // bool didStereo = false;
+            // if (mpCurrentKeyFrame->mpCamera2 && pKF2->mpCamera2)
+            // {
+            //     // Try to unproject stereo for both KFs if possible
+            //     bool bStereo1 = false, bStereo2 = false;
+            //     Eigen::Vector3f X1s, X1e, X2s, X2e;
+            //     Eigen::Vector3f c1s, c1e, c2s, c2e;
+            //     // NOTE: below are placeholder interfaces - adapt if your KeyFrame uses different function names/params.
+            //     // e.g., mpCurrentKeyFrame->UnprojectStereoLine(idx1, X1s, X1e, c1s, c1e)
+            //     // If you don't have per-line stereo depth, but have per-pixel disparity/depth, sample endpoints and call UnprojectStereo or UnprojectDepth.
+            //     bool ok1 = false, ok2 = false;
+            //     try {
+            //         // If your KeyFrame supports per-line stereo unprojection, use it
+            //         ok1 = mpCurrentKeyFrame->UnprojectStereoLine(idx1, X1s, X1e, c1s, c1e); // NOTE: implement if not exist
+            //     } catch (...) { ok1 = false; }
+            //     try {
+            //         ok2 = pKF2->UnprojectStereoLine(idx2, X2s, X2e, c2s, c2e); // NOTE: implement if not exist
+            //     } catch (...) { ok2 = false; }
+            //     if (ok1 && ok2)
+            //     {
+            //         // choose the more reliable stereo (like points: compare cosParallaxStereo1/2)
+            //         // compute cos parallax of endpoints rays (as in CreateNewMapPoints)
+            //         Eigen::Vector3f xn1s = mpCurrentKeyFrame->mpCamera->unprojectEig(p1s);
+            //         Eigen::Vector3f xn1e = mpCurrentKeyFrame->mpCamera->unprojectEig(p1e);
+            //         Eigen::Vector3f xn2s = pKF2->mpCamera->unprojectEig(p2s);
+            //         Eigen::Vector3f xn2e = pKF2->mpCamera->unprojectEig(p2e);
+            //         Eigen::Vector3f ray1s = Rcw1 * xn1s;
+            //         Eigen::Vector3f ray1e = Rcw1 * xn1e;
+            //         Eigen::Vector3f ray2s = Rcw2 * xn2s;
+            //         Eigen::Vector3f ray2e = Rcw2 * xn2e;
+            //         float cosParallaxRays_s = ray1s.dot(ray2s)/(ray1s.norm()*ray2s.norm());
+            //         float cosParallaxRays_e = ray1e.dot(ray2e)/(ray1e.norm()*ray2e.norm());
+            //         float cosParallaxRays = min(cosParallaxRays_s, cosParallaxRays_e);
+            //         // Compute stereo parallax approximations (safe fallbacks)
+            //         float cosParallaxStereo1 = cos(2*atan2(mpCurrentKeyFrame->mb/2, max(0.0001f, le1.lineLength)));
+            //         float cosParallaxStereo2 = cos(2*atan2(pKF2->mb/2, max(0.0001f, le2.lineLength)));
+            //         float cosParallaxStereo = min(cosParallaxStereo1, cosParallaxStereo2);
+            //         // Accept stereo-derived 3D line if geometry decent (similar to points)
+            //         if (cosParallaxRays < cosParallaxStereo && (cosParallaxRays > 0 || mbInertial))
+            //         {
+            //             // Create 3D endpoints from stereo unprojection
+            //             // Choose the KF with better stereo reliability - for line we can average endpoints from that KF
+            //             // We'll choose KF1 if its stereo is more reliable (example rule)
+            //             if (cosParallaxStereo1 < cosParallaxStereo2)
+            //             {
+            //                 S3D = X1s; E3D = X1e;
+            //                 colS = c1s; colE = c1e;
+            //             }
+            //             else
+            //             {
+            //                 S3D = X2s; E3D = X2e;
+            //                 colS = c2s; colE = c2e;
+            //             }
+            //             // final reprojection checks
+            //             if (!CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1)) { /* fallthrough */ }
+            //             else if (!CheckLineReprojection(pKF2, S3D, E3D, le2)) { /* fallthrough */ }
+            //             else {
+            //                 created = true;
+            //                 didStereo = true;
+            //             }
+            //         }
+            //     }
+            // } // end stereo block (to do next)
+
+            if (!created)
+            {
+                // -----------------------
+                // 2) RGB-D path (depth images)
+                // -----------------------
+                // NOTE: assume KeyFrame can provide per-endpoint depth or per-pixel depth access.
+                // Example placeholders: UnprojectDepthLine(idx, Xs, Xe) or sample depth map at endpoints and unproject.
+                bool didRGBD = false;
+                Eigen::Vector3f Xd1s, Xd1e, Xd2s, Xd2e;
+                bool okd1 = false, okd2 = false;
+                try {
+                    okd1 = mpCurrentKeyFrame->UnprojectDepthLine(idx1, Xd1s, Xd1e); // implement if needed
+                } catch (...) { okd1 = false; }
+                try {
+                    okd2 = pKF2->UnprojectDepthLine(idx2, Xd2s, Xd2e);
+                } catch (...) { okd2 = false; }
+
+                if (okd1 || okd2)
+                {
+                    // Use whichever KF has valid depth (choose the more reliable)
+                    Eigen::Vector3f chosenS, chosenE;
+                    if (okd1 && !okd2) { chosenS = Xd1s; chosenE = Xd1e; }
+                    else if (!okd1 && okd2) { chosenS = Xd2s; chosenE = Xd2e; }
+                    else {
+                        // both exist: choose by parallax (use one with larger baseline->depth ratio)
+                        float dist1 = (Xd1s - Ow1).norm();
+                        float dist2 = (Xd2s - Ow2).norm();
+                        if (dist1 < dist2) { chosenS = Xd1s; chosenE = Xd1e; } else { chosenS = Xd2s; chosenE = Xd2e; }
+                    }
+                    // Reprojection checks
+                    if (CheckLineReprojection(mpCurrentKeyFrame, chosenS, chosenE, le1) &&
+                        CheckLineReprojection(pKF2, chosenS, chosenE, le2))
+                    {
+                        S3D = chosenS; E3D = chosenE;
+                        // optional color sampling
+                        didRGBD = true;
+                        created = true;
+                    }
+                }
+            } // end RGB-D
+
+            // -----------------------
+            // [CRITICAL FIX] 3) Mono path Fallback (Geometric Triangulation)
+            // -----------------------
+            // 即使是 RGB-D 模式，如果深度图在边缘处无效（常见情况），必须回退到几何三角化
+            // 否则会丢失大量结构线
+            if (!created)
+            {
+                // Method B fallback: midpoint triangulation (if A failed)
+                // [已激活] 这是一种简单且鲁棒的保底策略
+                if (!created)
+                {
+                    // 1. 计算图像中点
+                    cv::Point2f mid1((p1s.x + p1e.x) * 0.5f, (p1s.y + p1e.y) * 0.5f);
+                    cv::Point2f mid2((p2s.x + p2e.x) * 0.5f, (p2s.y + p2e.y) * 0.5f);
+                    
+                    // 2. 反投影为归一化射线
+                    Eigen::Vector3f xu1 = cam1_base->unprojectEig(mid1);
+                    Eigen::Vector3f xu2 = cam2_base->unprojectEig(mid2);
+                    xu1.normalize(); xu2.normalize();
+                    
+                    Eigen::Vector3f x3Dmid;
+                    // 3. 几何三角化中点
+                    if (GeometricTools::Triangulate(xu1, xu2, eigTcw1, eigTcw2, x3Dmid))
+                    {
+                        // 4. 确定 3D 线段方向和长度
+                        // [MODIFIED] 原来的注释代码 dir = (x3Dmid - Ow1) 是错误的（那是视线方向）。
+                        // 修正逻辑：计算图像上线段的方向，旋转到世界坐标系。
+                        Eigen::Vector3f rayS = cam1_base->unprojectEig(p1s);
+                        Eigen::Vector3f rayE = cam1_base->unprojectEig(p1e);
+                        // 在相机系下的近似方向
+                        Eigen::Vector3f dirCam = (rayE - rayS).normalized();
+                        // 转到世界系
+                        Eigen::Vector3f dirWorld = Rwc1 * dirCam; 
+                        dirWorld.normalize();
+
+                        // 长度估计：如果没有深度，长度很难精确。
+                        // 这里使用一个经验值或者 heuristic，例如 0.5米，或者根据视差估算。
+                        // 这里先沿用你代码里的 heuristic 0.5f (半长)，后续可由 BA 优化。
+                        float half_len = 0.5f; 
+                        
+                        S3D = x3Dmid - half_len * dirWorld;
+                        E3D = x3Dmid + half_len * dirWorld;
+
+                        // 5. 重投影检查
+                        if (CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1) &&
+                            CheckLineReprojection(pKF2, S3D, E3D, le2))
+                        {
+                            created = true;
+                            // std::cerr << "Debug: Created line via Mono-Midpoint!" << std::endl;
+                        }
+                    }
+                }
+
+                // if (!created)
+                // {
+                //     cv::Point2f mid1((p1s.x + p1e.x) * 0.5f, (p1s.y + p1e.y) * 0.5f);
+                //     cv::Point2f mid2((p2s.x + p2e.x) * 0.5f, (p2s.y + p2e.y) * 0.5f);
+                //     Eigen::Vector3f xu1 = cam1_base->unprojectEig(mid1);
+                //     Eigen::Vector3f xu2 = cam2_base->unprojectEig(mid2);
+                //     xu1.normalize(); xu2.normalize();
+                //     Eigen::Vector3f x3Dmid;
+                //     if (GeometricTools::Triangulate(xu1, xu2, eigTcw1, eigTcw2, x3Dmid))
+                //     {
+                //         // form a small 3D segment along the local line direction (heuristic)
+                //         Eigen::Vector3f dir = (x3Dmid - Ow1).normalized();
+                //         float half = 0.5f; // 0.5 m fallback, consider adaptive based on scene depth
+                //         S3D = x3Dmid - half * dir;
+                //         E3D = x3Dmid + half * dir;
+                //         if (CheckLineReprojection(mpCurrentKeyFrame, S3D, E3D, le1) &&
+                //             CheckLineReprojection(pKF2, S3D, E3D, le2))
+                //         {
+                //             created = true;
+                //         }
+                //     }
+                // }
+
+                // // Method C fallback: Plücker triangulation (if available)
+                // if (!created)
+                // {
+                //     Eigen::Vector3f L0_p, d_p;
+                //     if (GeometricTools::TriangulatePlückerLine(xn1s, xn1e, xn2s, xn2e, T1w, T2w, L0_p, d_p))
+                //     {
+                //         d_p.normalize();
+                //         Eigen::Vector3f Sp = GeometricTools::ProjectRayToLine(xn1s, Ow1, L0_p, d_p);
+                //         Eigen::Vector3f Ep = GeometricTools::ProjectRayToLine(xn1e, Ow1, L0_p, d_p);
+                //         if (CheckLineReprojection(mpCurrentKeyFrame, Sp, Ep, le1) &&
+                //             CheckLineReprojection(pKF2, Sp, Ep, le2))
+                //         {
+                //             S3D = Sp; E3D = Ep;
+                //             created = true;
+                //         }
+                //     }
+                // }
+            } // end Mono branch
+
+            if (!created) continue;
+
+            // Final checks - front of cameras & scale consistency (copying the structure from CreateNewMapPoints)
+            float z1 = Rcw1.row(2).dot(S3D) + eigTcw1(2,3);
+            if (z1 <= 0) continue;
+            float z2 = Rcw2.row(2).dot(S3D) + eigTcw2(2,3);
+            if (z2 <= 0) continue;
+
+            // scale/length consistency - compute distances from cameras to one endpoint (S3D)
+            Eigen::Vector3f normal1 = S3D - Ow1;
+            Eigen::Vector3f normal2 = S3D - Ow2;
+            float dist1 = normal1.norm();
+            float dist2 = normal2.norm();
+            if (dist1 <= 0 || dist2 <= 0) continue;
+
+            // optional: avoid extremely far points if you have mThFarPoints like points code
+            if (mbFarPoints && (dist1 >= mThFarPoints || dist2 >= mThFarPoints)) continue;
+
+            // possible scale consistency check (soft)
+            const float ratioFactor = 1.5f * mpCurrentKeyFrame->mfScaleFactor;
+            // compute octave ratio using line's angle/scale? We'll reuse keyline octave if available:
+            float ratioOctave = 1.0f;
+            if (le1.octave >= 0 && le2.octave >= 0)
+                ratioOctave = mpCurrentKeyFrame->mvScaleFactors[le1.octave] / pKF2->mvScaleFactors[le2.octave];
+
+            float ratioDist = dist2 / dist1;
+            if (ratioDist * ratioFactor < ratioOctave || ratioDist > ratioOctave * ratioFactor)
+                continue;
+
+            // sample color from current KF endpoints (clamped)
+            try {
+                //int us = std::clamp((int)std::round(le1.startPointX), 0, mpCurrentKeyFrame->imgLeftRGB.cols - 1);
+                //int vs = std::clamp((int)std::round(le1.startPointY), 0, mpCurrentKeyFrame->imgLeftRGB.rows - 1);
+                //int ue = std::clamp((int)std::round(le1.endPointX),   0, mpCurrentKeyFrame->imgLeftRGB.cols - 1);
+                //int ve = std::clamp((int)std::round(le1.endPointY),   0, mpCurrentKeyFrame->imgLeftRGB.rows - 1);
+                int us = std::max(0, std::min(static_cast<int>(std::round(le1.startPointX)), mpCurrentKeyFrame->imgLeftRGB.cols - 1));
+                int vs = std::max(0, std::min(static_cast<int>(std::round(le1.startPointY)), mpCurrentKeyFrame->imgLeftRGB.rows - 1));
+                int ue = std::max(0, std::min(static_cast<int>(std::round(le1.endPointX)),   mpCurrentKeyFrame->imgLeftRGB.cols - 1));
+                int ve = std::max(0, std::min(static_cast<int>(std::round(le1.endPointY)),   mpCurrentKeyFrame->imgLeftRGB.rows - 1));
+                const auto &cs = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(vs, us);
+                const auto &ce = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(ve, ue);
+                colS = Eigen::Vector3f(cs[0], cs[1], cs[2]);
+                colE = Eigen::Vector3f(ce[0], ce[1], ce[2]);
+            } catch(...) {}
+
+            //// Final duplicate check before insertion (race conditions) to do next...
+            //if (mpCurrentKeyFrame->GetMapLine(idx1) || pKF2->GetMapLine(idx2)) continue;
+
+            // Create MapLine and register observations
+            MapLine* pML = new MapLine(S3D, E3D, colS, colE, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
+            pML->AddLineObservation(mpCurrentKeyFrame, idx1);
+            pML->AddLineObservation(pKF2, idx2);
+            mpCurrentKeyFrame->AddMapLine(pML, idx1);
+            pKF2->AddMapLine(pML, idx2);
+            pML->ComputeDistinctiveDescriptors();
+            pML->UpdateNormalAndDepth();
+            mpAtlas->AddMapLine(pML);
+            mlpRecentAddedMapLines.push_back(pML);
+
+
+            // 🌟 [新增初始化刷新] 刚出生的单目/RGB-D线段，立刻利用多帧深度信息进行骨架和端点纠正
+            pML->UpdateEndpointsFromPluckerAndObservations();
+
+        } // end for each matched idxPair
+    } // end for each neighbor KF
+
+    // debug visualization
+    int created_map_line_num = (int)mlpRecentAddedMapLines.size();
+    std::cerr << " created_map_line_num: " << created_map_line_num << std::endl;
+    // if(created_map_line_num < 10)
+    // {
+    //     DebugRecentAddedMapLinesProjection();
+    // }
+    //DebugRecentAddedMapLinesProjection();
+}
+
+#endif
+
+
+// void LocalMapping::CreateNewMapLines()
+// {
+//     int nn = mbMonocular ? 30 : 10;
+//     vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+//     if (mbInertial)
+//     {
+//         KeyFrame* pKF = mpCurrentKeyFrame;
+//         int cnt = 0;
+//         while ((vpNeighKFs.size() <= nn) && pKF->mPrevKF && cnt++ < nn)
+//         {
+//             if (find(vpNeighKFs.begin(), vpNeighKFs.end(), pKF->mPrevKF) == vpNeighKFs.end())
+//                 vpNeighKFs.push_back(pKF->mPrevKF);
+//             pKF = pKF->mPrevKF;
+//         }
+//     }
+//     LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f,2.0f); // 类似 ORBmatcher 的线版本
+//     Sophus::SE3f Tcw1 = mpCurrentKeyFrame->GetPose();
+//     Eigen::Matrix<float,3,4> eigTcw1 = Tcw1.matrix3x4();
+//     Eigen::Vector3f Ow1 = mpCurrentKeyFrame->GetCameraCenter();
+//     Eigen::Matrix3f Rcw1 = eigTcw1.block<3,3>(0,0);
+//     for (KeyFrame* pKF2 : vpNeighKFs)
+//     {
+//         if (CheckNewKeyFrames()) return;
+//         Sophus::SE3f Tcw2 = pKF2->GetPose();
+//         Eigen::Matrix<float,3,4> eigTcw2 = Tcw2.matrix3x4();
+//         Eigen::Vector3f Ow2 = pKF2->GetCameraCenter();
+//         Eigen::Matrix3f Rcw2 = eigTcw2.block<3,3>(0,0);
+//         float baseline = (Ow2 - Ow1).norm();
+//         if (mbMonocular)
+//         {
+//             float med = pKF2->ComputeSceneMedianDepth(2);
+//             if (baseline / med < 0.01f) continue;
+//         }
+//         else
+//         {
+//             if (baseline < pKF2->mb) continue;
+//         }
+//         std::vector<pair<int,int>> vMatchedIdx;
+//         //line_matcher.SearchForTriangulationLine(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         line_matcher.SearchForTriangulationLinesRobust(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         //line_matcher.SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         //line_matcher.SearchForTriangulationFused(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         //debug 线段匹配
+//         // 可视化
+//         //line_matcher.DebugShowTriangulationMatchesKF(mpCurrentKeyFrame, pKF2, vMatchedIdx);
+//         for (auto &idxPair : vMatchedIdx)
+//         {
+//             int idx1 = idxPair.first;
+//             int idx2 = idxPair.second;
+//             const cv::line_descriptor::KeyLine &le1 = mpCurrentKeyFrame->mvKeyLines[idx1];
+//             const cv::line_descriptor::KeyLine &le2 = pKF2->mvKeyLines[idx2];
+//             cv::Point2f le1_startPt = cv::Point2f(le1.startPointX, le1.startPointY);
+//             cv::Point2f le1_endPt = cv::Point2f(le1.endPointX, le1.endPointY);
+//             cv::Point2f le2_startPt = cv::Point2f(le2.startPointX, le2.startPointY);
+//             cv::Point2f le2_endPt = cv::Point2f(le2.endPointX, le2.endPointY);
+//             //Get Color
+//             // === Step A：反投影两个端点 ===
+//             Eigen::Vector3f x1s = mpCurrentKeyFrame->mpCamera->unprojectEig(le1_startPt);
+//             Eigen::Vector3f x1e = mpCurrentKeyFrame->mpCamera->unprojectEig(le1_endPt);
+//             Eigen::Vector3f x2s = pKF2->mpCamera->unprojectEig(le2_startPt);
+//             Eigen::Vector3f x2e = pKF2->mpCamera->unprojectEig(le2_endPt);
+//             // === Step B：构造两个平面（两个 KeyFrame 中的两个图像线段）===
+//             Eigen::Vector4f pi1 = GeometricTools::ComputeLinePlane(x1s, x1e, Ow1);
+//             Eigen::Vector4f pi2 = GeometricTools::ComputeLinePlane(x2s, x2e, Ow2);
+//             // === Step C：求平面交线 ===
+//             Eigen::Vector3f L0, d;
+//             if (!GeometricTools::IntersectPlanes(pi1, pi2, L0, d))
+//                 continue;
+//             d.normalize();
+//             // === Step D：投影端点射线到交线上 ===
+//             Eigen::Vector3f s3D =
+//                 GeometricTools::ProjectRayToLine(x1s, Ow1, L0, d);
+//             Eigen::Vector3f e3D =
+//                 GeometricTools::ProjectRayToLine(x1e, Ow1, L0, d);
+//             // 检查：深度必须为正
+//             float z1s = Rcw1.row(2).dot(s3D) + eigTcw1(2,3);
+//             float z1e = Rcw1.row(2).dot(e3D) + eigTcw1(2,3);
+//             float z2s = Rcw2.row(2).dot(s3D) + eigTcw2(2,3);
+//             float z2e = Rcw2.row(2).dot(e3D) + eigTcw2(2,3);
+//             if (z1s<=0 || z1e<=0 || z2s<=0 || z2e<=0)
+//                 continue;
+//             // 重投影误差检查
+//             if (!CheckLineReprojection(mpCurrentKeyFrame, s3D, e3D, le1))
+//                 continue;
+//             if (!CheckLineReprojection(pKF2, s3D, e3D, le2))
+//                 continue;            
+//             std::pair<Eigen::Vector3f, Eigen::Vector3f> line_seg_color;
+//             const int ls_u = static_cast<int>(std::round(le1.startPointX));
+//             const int ls_v = static_cast<int>(std::round(le1.startPointY));
+//             const int le_u = static_cast<int>(std::round(le1.endPointX));
+//             const int le_v = static_cast<int>(std::round(le1.endPointY));
+//             const auto& ls_color = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(ls_v, ls_u);
+//             const auto& le_color = mpCurrentKeyFrame->imgLeftRGB.at<cv::Vec3f>(le_v, le_u);
+//             line_seg_color.first.x() = ls_color[0];
+//             line_seg_color.first.y() = ls_color[1];
+//             line_seg_color.first.z() = ls_color[2];
+//             line_seg_color.second.x() = le_color[0];
+//             line_seg_color.second.y() = le_color[1];
+//             line_seg_color.second.z() = le_color[2];
+//             // === Step E：创建 MapLine ===
+//             MapLine* pML = new MapLine(s3D, e3D, line_seg_color.first, line_seg_color.second, mpCurrentKeyFrame, mpAtlas->GetCurrentMap());
+//             pML->AddLineObservation(mpCurrentKeyFrame, idx1);
+//             pML->AddLineObservation(pKF2, idx2);
+//             mpCurrentKeyFrame->AddMapLine(pML, idx1);
+//             pKF2->AddMapLine(pML, idx2);
+//             pML->ComputeDistinctiveDescriptors();
+//             mpAtlas->AddMapLine(pML);
+//             mlpRecentAddedMapLines.push_back(pML);
+//         }
+//     }
+//     //debug the line 3D
+//     //line_matcher.DebugDrawLineMatchesFrame
+//     DebugRecentAddedMapLines();
+// }
+
+bool LocalMapping::CheckLineReprojection(
+        KeyFrame* pKF,
+        const Eigen::Vector3f &X3Ds,
+        const Eigen::Vector3f &X3De,
+        const cv::line_descriptor::KeyLine &kline)
+{
+    // Step 1: 投影 3D 端点到像素坐标
+    Eigen::Vector2f pxStart = pKF->mpCamera->project(X3Ds);
+    Eigen::Vector2f pxEnd   = pKF->mpCamera->project(X3De);
+
+    // Step 2: KeyLine 的中点和方向
+    Eigen::Vector2f lMid(kline.pt.x, kline.pt.y);
+    Eigen::Vector2f lDir(std::cos(kline.angle), std::sin(kline.angle));
+
+    // Step 3: 计算端点到线段的垂直距离
+    auto pointLineDistance = [](const Eigen::Vector2f &pt, 
+                                const Eigen::Vector2f &lineMid,
+                                const Eigen::Vector2f &lineDir) -> float
+    {
+        Eigen::Vector2f v = pt - lineMid;
+        Eigen::Vector2f perp = v - v.dot(lineDir) * lineDir;
+        return perp.norm();
+    };
+
+    float dStart = pointLineDistance(pxStart, lMid, lDir);
+    float dEnd   = pointLineDistance(pxEnd,   lMid, lDir);
+
+    // Step 4: 判断重投影误差阈值
+    const float reprojTh = 15.0f; // 像素级, 和ORBSLAM的顶点类似，多了0.5倍
+    if (dStart > reprojTh || dEnd > reprojTh)
+        return false;
+
+    // Step 5: 检查方向误差
+    Eigen::Vector2f projDir = (pxEnd - pxStart).normalized();
+    float cosAngle = projDir.dot(lDir);
+    const float cosAngleTh = std::cos(20.0f * M_PI / 180.0f); // 方向差 20°
+    if (fabs(cosAngle) < cosAngleTh) 
+        return false;
+
+    // Step 6: 可选：投影线长度太短过滤
+    float lenProj = (pxEnd - pxStart).norm();
+    if (lenProj < 1.0f)
+        return false;
+
+    return true;
+}
+
+
+
+void LocalMapping::SearchInNeighbors()
+{
+    // Retrieve neighbor keyframes
+    int nn = 10;
+    if(mbMonocular)
+        nn=30;
+    const vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+    vector<KeyFrame*> vpTargetKFs;
+    for(vector<KeyFrame*>::const_iterator vit=vpNeighKFs.begin(), vend=vpNeighKFs.end(); vit!=vend; vit++)
+    {
+        KeyFrame* pKFi = *vit;
+        if(pKFi->isBad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->mnId)
+            continue;
+        vpTargetKFs.push_back(pKFi);
+        pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+    }
+
+    // Add some covisible of covisible
+    // Extend to some second neighbors if abort is not requested
+    for(int i=0, imax=vpTargetKFs.size(); i<imax; i++)
+    {
+        const vector<KeyFrame*> vpSecondNeighKFs = vpTargetKFs[i]->GetBestCovisibilityKeyFrames(20);
+        for(vector<KeyFrame*>::const_iterator vit2=vpSecondNeighKFs.begin(), vend2=vpSecondNeighKFs.end(); vit2!=vend2; vit2++)
+        {
+            KeyFrame* pKFi2 = *vit2;
+            if(pKFi2->isBad() || pKFi2->mnFuseTargetForKF==mpCurrentKeyFrame->mnId || pKFi2->mnId==mpCurrentKeyFrame->mnId)
+                continue;
+            vpTargetKFs.push_back(pKFi2);
+            pKFi2->mnFuseTargetForKF=mpCurrentKeyFrame->mnId;
+        }
+        if (mbAbortBA)
+            break;
+    }
+
+    // Extend to temporal neighbors
+    if(mbInertial)
+    {
+        KeyFrame* pKFi = mpCurrentKeyFrame->mPrevKF;
+        while(vpTargetKFs.size()<20 && pKFi)
+        {
+            if(pKFi->isBad() || pKFi->mnFuseTargetForKF==mpCurrentKeyFrame->mnId)
+            {
+                pKFi = pKFi->mPrevKF;
+                continue;
+            }
+            vpTargetKFs.push_back(pKFi);
+            pKFi->mnFuseTargetForKF=mpCurrentKeyFrame->mnId;
+            pKFi = pKFi->mPrevKF;
+        }
+    }
+
+    // Search matches by projection from current KF in target KFs
+    ORBmatcher matcher;
+    vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+    for(vector<KeyFrame*>::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
+    {
+        KeyFrame* pKFi = *vit;
+
+        matcher.Fuse(pKFi,vpMapPointMatches);
+        if(pKFi->NLeft != -1) matcher.Fuse(pKFi,vpMapPointMatches,true);
+    }
+
+
+    if (mbAbortBA)
+        return;
+
+    // Search matches by projection from target KFs in current KF
+    vector<MapPoint*> vpFuseCandidates;
+    vpFuseCandidates.reserve(vpTargetKFs.size()*vpMapPointMatches.size());
+
+    for(vector<KeyFrame*>::iterator vitKF=vpTargetKFs.begin(), vendKF=vpTargetKFs.end(); vitKF!=vendKF; vitKF++)
+    {
+        KeyFrame* pKFi = *vitKF;
+
+        vector<MapPoint*> vpMapPointsKFi = pKFi->GetMapPointMatches();
+
+        for(vector<MapPoint*>::iterator vitMP=vpMapPointsKFi.begin(), vendMP=vpMapPointsKFi.end(); vitMP!=vendMP; vitMP++)
+        {
+            MapPoint* pMP = *vitMP;
+            if(!pMP)
+                continue;
+            if(pMP->isBad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+            vpFuseCandidates.push_back(pMP);
+        }
+    }
+
+    matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates);
+    if(mpCurrentKeyFrame->NLeft != -1) matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates,true);
+
+
+    // Update points
+    vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+    for(size_t i=0, iend=vpMapPointMatches.size(); i<iend; i++)
+    {
+        MapPoint* pMP=vpMapPointMatches[i];
+        if(pMP)
+        {
+            if(!pMP->isBad())
+            {
+                pMP->ComputeDistinctiveDescriptors();
+                pMP->UpdateNormalAndDepth();
+            }
+        }
+    }
+
+    // Update connections in covisibility graph
+    mpCurrentKeyFrame->UpdateConnections();
+}
+
+void LocalMapping::SearchInNeighborsWithLine()
+{
+    if(!mpCurrentKeyFrame) return;
+
+    // 1. 获取当前 KeyFrame 的邻居 KeyFrames
+    int nn = mbMonocular ? 30 : 10;
+    const std::vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+    std::vector<KeyFrame*> vpTargetKFs;
+
+    for(KeyFrame* pKFi : vpNeighKFs)
+    {
+        if(pKFi->isBad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->mnId)
+            continue;
+        vpTargetKFs.push_back(pKFi);
+        pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+    }
+
+    // 可选：拓展二级邻居
+    for(size_t i = 0; i < vpTargetKFs.size(); ++i)
+    {
+        if(mbAbortBA) break;
+        const std::vector<KeyFrame*> vpSecondNeighKFs = vpTargetKFs[i]->GetBestCovisibilityKeyFrames(20);
+        for(KeyFrame* pKFi2 : vpSecondNeighKFs)
+        {
+            if(pKFi2->isBad() || pKFi2->mnFuseTargetForKF == mpCurrentKeyFrame->mnId || pKFi2->mnId == mpCurrentKeyFrame->mnId)
+                continue;
+            vpTargetKFs.push_back(pKFi2);
+            pKFi2->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+        }
+    }
+
+    // 可选：拓展时间邻居（惯性相机）
+    if(mbInertial)
+    {
+        KeyFrame* pKFi = mpCurrentKeyFrame->mPrevKF;
+        while(vpTargetKFs.size() < 20 && pKFi)
+        {
+            if(!pKFi->isBad() && pKFi->mnFuseTargetForKF != mpCurrentKeyFrame->mnId)
+            {
+                vpTargetKFs.push_back(pKFi);
+                pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+            }
+            pKFi = pKFi->mPrevKF;
+        }
+    }
+
+    if(mbAbortBA) return;
+
+    // === 2. MapPoint 融合 ===
+    ORBmatcher matcher;
+    std::vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+
+    // 从邻居 KeyFrame 融合到当前 KeyFrame
+    for(KeyFrame* pKFi : vpTargetKFs)
+    {
+        matcher.Fuse(pKFi, vpMapPointMatches);
+        if(pKFi->NLeft != -1)
+            matcher.Fuse(pKFi, vpMapPointMatches, true);
+    }
+
+    if(mbAbortBA) return;
+
+    // 从当前 KeyFrame 融合到邻居 KeyFrame（候选点机制）
+    std::vector<MapPoint*> vpFusePointCandidates;
+    vpFusePointCandidates.reserve(vpTargetKFs.size() * vpMapPointMatches.size());
+
+    for(KeyFrame* pKFi : vpTargetKFs)
+    {
+        const std::vector<MapPoint*> vpMapPointsKFi = pKFi->GetMapPointMatches();
+        for(MapPoint* pMP : vpMapPointsKFi)
+        {
+            if(!pMP || pMP->isBad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+            vpFusePointCandidates.push_back(pMP);
+        }
+    }
+
+    matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates);
+    if(mpCurrentKeyFrame->NLeft != -1)
+        matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates, true);
+
+    // 更新 MapPoint 描述子和法向量
+    vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+    for(MapPoint* pMP : vpMapPointMatches)
+    {
+        if(pMP && !pMP->isBad())
+        {
+            pMP->ComputeDistinctiveDescriptors();
+            pMP->UpdateNormalAndDepth();
+        }
+    }
+
+    if(mbAbortBA) return;
+
+    // === 3. MapLine 融合 ===
+    LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f, 2.0f);
+    std::vector<MapLine*> vpMapLinesCurKF = mpCurrentKeyFrame->GetMapLineMatches();
+
+    // 收集候选 MapLine
+    std::vector<MapLine*> vpFuseLineCandidates;
+    vpFuseLineCandidates.reserve(vpTargetKFs.size() * vpMapLinesCurKF.size());
+
+    for(KeyFrame* pKFi : vpTargetKFs)
+    {
+        if(mbAbortBA) return;
+        const std::vector<MapLine*> vpMapLinesKFi = pKFi->GetMapLineMatches();
+        for(MapLine* pML : vpMapLinesKFi)
+        {
+            if(!pML || pML->isBad() || pML->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            pML->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+            vpFuseLineCandidates.push_back(pML);
+        }
+    }
+
+    // 统计融合前的状态
+    int nMapLinesBefore = mpCurrentKeyFrame->GetMapLineMatches().size();
+
+    // 融合候选 MapLine 到当前 KeyFrame
+    int nFused = line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f); // th 可调整
+
+    // 统计融合后的状态
+    int nMapLinesAfter = mpCurrentKeyFrame->GetMapLineMatches().size();
+
+    std::cerr << "[LocalMapping Fuse] Candidates: " << vpFuseLineCandidates.size() 
+              << " | Fused: " << nFused 
+              << " | KF Lines: " << nMapLinesBefore << " -> " << nMapLinesAfter << std::endl;
+
+    //to do next
+    //if(mpCurrentKeyFrame->NLeft != -1)
+    //    line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f, true);
+    // 更新 MapLine 描述子
+    for(MapLine* pML : vpMapLinesCurKF)
+    {
+       if(pML && !pML->isBad())
+       {
+           pML->ComputeDistinctiveDescriptors();
+           pML->UpdateNormalAndDepth();
+       }           
+    }
+
+    //if(mpAtlas->KeyFramesInMap()>2)
+    //{
+    //    DebugCurrentFrameMapLinesProjection(mpCurrentKeyFrame->GetMapLineMatches());
+    //}
+    //算法没有问题，到这里是正确的。
+    //debug一下线段匹配的情况
+    ////debug draw
+    //std::cerr << "TrackWithMotionModelWithLine->Point Matches: " <<  nmatches  << ";   TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
+    // line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
+    // std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+    // MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+    // std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+    // MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
+    // if(nLinematches<8)
+    // {
+    //     Verbose::PrintMess("Not enough Line matches after debug draw!!", Verbose::VERBOSITY_NORMAL); //TO DO NEXT
+    //     std::string last_win_proj_name = "LineProj_LastFrame_" + std::to_string(mLastFrame.mnId);
+    //     std::string current_win_proj_name = "LineProj_CurrentFrame_" + std::to_string(mCurrentFrame.mnId);
+    //     line_matcher.DebugDrawProjectedLineFrame(mLastFrame, last_win_proj_name);
+    //     line_matcher.DebugDrawProjectedLineFrame(mCurrentFrame, current_win_proj_name);
+    //     std::string last_win_name = "LineMatches_LastFrame_" + std::to_string(mLastFrame.mnId);
+    //     std::string current_win_name = "LineMatches_CurrentFrame_" + std::to_string(mCurrentFrame.mnId);
+    //     line_matcher.DebugDrawLineMatchesFrame(mLastFrame, last_win_name);
+    //     line_matcher.DebugDrawLineMatchesFrame(mCurrentFrame, current_win_name);
+    //     line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
+    //     line_matcher.DebugLineProjectionNew(mCurrentFrame, mLastFrame.mvpMapLines, "ProjectedLinesBeforeOpti");
+    //     std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
+    //     MapExporter::ExportMapPointsWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapPoints, map_points_filename);
+    //     std::string map_lines_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapLines.obj";
+    //     MapExporter::ExportMapLinesWithCameraAxesOBJ(mCurrentFrame, mLastFrame.mvpMapLines, map_lines_filename); //added for MapLine
+    // }
+
+    // 更新共视连接
+    mpCurrentKeyFrame->UpdateConnections();
+
+    // 🌟 [新增多视融合刷新] 观测关系改变后，利用新加入的帧深度数据，重新拉伸/裁剪线段物理长度
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(MapLine* pML : mpCurrentKeyFrame->GetMapLineMatches())
+        {
+            if(pML && !pML->isBad())
+            {
+                //pML->UpdateWorldEndpointsFromObservationLineDepth();
+                pML->UpdateEndpointsFromPluckerAndObservations();
+            }
+        }
+    }
+}
+
+void LocalMapping::SearchInNeighborsWithLineNew()
+{
+    if(!mpCurrentKeyFrame) return;
+
+    // 1. 获取当前 KeyFrame 的邻居 KeyFrames (短时拷贝，带锁)
+    std::vector<KeyFrame*> vpTargetKFs;
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        int nn = mbMonocular ? 30 : 10;
+        const std::vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+        for(KeyFrame* pKFi : vpNeighKFs)
+        {
+            if(pKFi->isBad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            vpTargetKFs.push_back(pKFi);
+            pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+        }
+
+        // 二级邻居（短时复制）
+        for(size_t i = 0; i < vpTargetKFs.size(); ++i)
+        {
+            if(mbAbortBA) break;
+            const std::vector<KeyFrame*> vpSecondNeighKFs = vpTargetKFs[i]->GetBestCovisibilityKeyFrames(20);
+            for(KeyFrame* pKFi2 : vpSecondNeighKFs)
+            {
+                if(pKFi2->isBad() || pKFi2->mnFuseTargetForKF == mpCurrentKeyFrame->mnId || pKFi2->mnId == mpCurrentKeyFrame->mnId)
+                    continue;
+                vpTargetKFs.push_back(pKFi2);
+                pKFi2->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+            }
+        }
+
+        // 时间邻居（若有）
+        if(mbInertial)
+        {
+            KeyFrame* pKFi = mpCurrentKeyFrame->mPrevKF;
+            while(vpTargetKFs.size() < 20 && pKFi)
+            {
+                if(!pKFi->isBad() && pKFi->mnFuseTargetForKF != mpCurrentKeyFrame->mnId)
+                {
+                    vpTargetKFs.push_back(pKFi);
+                    pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->mnId;
+                }
+                pKFi = pKFi->mPrevKF;
+            }
+        }
+    } // release lock after collecting and marking targets
+
+    if(mbAbortBA) return;
+
+    // === 2. MapPoint 融合 ===
+    ORBmatcher matcher;
+    std::vector<MapPoint*> vpMapPointMatches;
+    {
+        // 拷贝当前 KF 的 MapPoints（短时锁）
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+    }
+
+    // 从邻居 KeyFrame 融合到当前 KeyFrame
+    for(KeyFrame* pKFi : vpTargetKFs)
+    {
+        if(mbAbortBA) break;
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        matcher.Fuse(pKFi, vpMapPointMatches);
+        if(pKFi->NLeft != -1)
+            matcher.Fuse(pKFi, vpMapPointMatches, true);
+    }
+
+    if(mbAbortBA) return;
+
+    // 从当前 KeyFrame 融合到邻居 KeyFrame（候选点机制）
+    std::vector<MapPoint*> vpFusePointCandidates;
+    vpFusePointCandidates.reserve(vpTargetKFs.size() * vpMapPointMatches.size());
+
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(KeyFrame* pKFi : vpTargetKFs)
+        {
+            const std::vector<MapPoint*> vpMapPointsKFi = pKFi->GetMapPointMatches();
+            for(MapPoint* pMP : vpMapPointsKFi)
+            {
+                if(!pMP || pMP->isBad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                    continue;
+                pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+                vpFusePointCandidates.push_back(pMP);
+            }
+        }
+    }
+
+    // 融合（持锁以防 Fuse 修改 Map）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates);
+        if(mpCurrentKeyFrame->NLeft != -1)
+            matcher.Fuse(mpCurrentKeyFrame, vpFusePointCandidates, true);
+    }
+
+    // 更新 MapPoint 描述子和法向量（在锁内写回，确保线程安全）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
+        for(MapPoint* pMP : vpMapPointMatches)
+        {
+            if(pMP && !pMP->isBad())
+            {
+                pMP->ComputeDistinctiveDescriptors();
+                pMP->UpdateNormalAndDepth();
+            }
+        }
+    }
+
+    if(mbAbortBA) return;
+
+    // === 3. MapLine 融合 ===
+    LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f, 2.0f);
+
+    // 拷贝当前 KF 的线（短时锁）
+    std::vector<MapLine*> vpMapLinesCurKF;
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        vpMapLinesCurKF = mpCurrentKeyFrame->GetMapLineMatches();
+    }
+
+    // 收集候选 MapLine（短时拷贝）
+    std::vector<MapLine*> vpFuseLineCandidates;
+    vpFuseLineCandidates.reserve(vpTargetKFs.size() * vpMapLinesCurKF.size());
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(KeyFrame* pKFi : vpTargetKFs)
+        {
+            if(mbAbortBA) return;
+            const std::vector<MapLine*> vpMapLinesKFi = pKFi->GetMapLineMatches();
+            for(MapLine* pML : vpMapLinesKFi)
+            {
+                if(!pML || pML->isBad() || pML->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                    continue;
+                pML->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+                vpFuseLineCandidates.push_back(pML);
+            }
+        }
+    }
+
+    // 执行融合：line_matcher.Fuse 可能会修改 MapLine/KeyFrame 的观测，需持锁
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f);
+        // if(mpCurrentKeyFrame->NLeft != -1) line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f, true);
+    }
+
+    // 更新 MapLine 描述子（持锁）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(MapLine* pML : vpMapLinesCurKF)
+        {
+            if(pML && !pML->isBad())
+            {
+                pML->ComputeDistinctiveDescriptors();
+                pML->UpdateNormalAndDepth();
+            }
+        }
+    }
+
+    // 更新共视连接（持锁，因为可能更新 KeyFrame 内部结构）
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        mpCurrentKeyFrame->UpdateConnections();
+    }
+}
+
+void LocalMapping::DebugRecentAddedMapLines()
+{
+    if (mlpRecentAddedMapLines.empty())
+    {
+        std::cout << "[DebugRecentAddedMapLines] No recent added map lines." << std::endl;
+        return;
+    }
+
+    int line_id = 0;
+
+    for (MapLine* pML : mlpRecentAddedMapLines)
+    {
+        if (!pML || pML->isBad())
+            continue;
+
+        std::cout << "\n===============================" << std::endl;
+        std::cout << "MapLine ID: " << line_id++ << std::endl;
+
+        // ---- 1. 打印 3D 端点 ----
+        auto X3D = pML->GetLineWorldPos();
+        Eigen::Vector3f P1 = X3D.first;
+        Eigen::Vector3f P2 = X3D.second;
+
+        std::cout << "  P1 = " << P1.transpose() << std::endl;
+        std::cout << "  P2 = " << P2.transpose() << std::endl;
+
+        // ---- 2. 打印颜色 ----
+        Eigen::Vector3f C1 = pML->GetLineColorRGB().first;
+        Eigen::Vector3f C2 = pML->GetLineColorRGB().second;
+
+        std::cout << "  ColorStart = " << C1.transpose() << std::endl;
+        std::cout << "  ColorEnd   = " << C2.transpose() << std::endl;
+
+        // ---- 3. 获取观测 ----
+        auto obs = pML->GetLineObservations();
+        std::cout << "  Observations (#KF) = " << obs.size() << std::endl;
+
+        // ---- 4. 遍历所有观察的 KeyFrame ----
+        int obs_idx = 0;
+        for (auto &kv : obs)
+        {
+            KeyFrame* pKF = kv.first;
+            std::tuple<int,int> tup = kv.second;
+
+            int idx_line = std::get<0>(tup);  // tuple 第一个：KeyLine index
+
+            std::cout << "    KF[" << obs_idx++ << "] ID = " << pKF->mnId
+                      << " idxLine = " << idx_line << std::endl;
+
+            if (!pKF) continue;
+
+            // ---- A. 获取 KeyLine ----
+            if (idx_line < 0 || idx_line >= pKF->mvKeyLines.size())
+            {
+                std::cout << "    [WARN] Invalid KeyLine index." << std::endl;
+                continue;
+            }
+            const auto &KL = pKF->mvKeyLines[idx_line];
+
+            // ---- B. 获取图像（RGB）----
+            cv::Mat img;
+            if (pKF->imgLeftRGB.channels() == 3)
+                img = pKF->imgLeftRGB.clone();
+            else
+                cv::cvtColor(pKF->imgLeftRGB, img, cv::COLOR_GRAY2BGR);
+
+            // ---- C. 画线，使用 MapLine 的颜色 ----
+            cv::Scalar col(
+                (int)(C2.x()*255),
+                (int)(C2.y()*255),
+                (int)(C2.z()*255)
+            );
+
+            cv::line(img,
+                     cv::Point2f(KL.startPointX, KL.startPointY),
+                     cv::Point2f(KL.endPointX, KL.endPointY),
+                     col, 2);
+
+            // ---- D. 显示 ----
+            std::string win_name = "ML " + std::to_string(line_id-1)
+                                   + " KF " + std::to_string(pKF->mnId)
+                                   + " idx " + std::to_string(idx_line);
+
+            cv::imshow(win_name, img);
+            cv::waitKey(0);
+        }
+    }
+
+    std::cout << "[DebugRecentAddedMapLines] Finished visualization." << std::endl;
+}
+
+void LocalMapping::DebugCurrentFrameMapLinesProjection(const std::vector<MapLine*>& current_keyframe_maplines)
+{
+    if (current_keyframe_maplines.empty())
+    {
+        std::cout << "[DebugCurrentFrameMapLinesProjection] No current_keyframe_maplines existed." << std::endl;
+        return;
+    }
+
+    int line_id = 0;
+
+    for (MapLine* pML : current_keyframe_maplines)
+    {
+        if (!pML || pML->isBad())
+            continue;
+
+        std::cout << "\n===============================" << std::endl;
+        std::cout << "MapLine ID: " << line_id++ << std::endl;
+
+        // 1. 取 3D 端点
+        auto X3D = pML->GetLineWorldPos();
+        Eigen::Vector3f P1 = X3D.first;
+        Eigen::Vector3f P2 = X3D.second;
+
+        std::cout << "  P1 = " << P1.transpose() << ", P2 = " << P2.transpose() << std::endl;
+
+        // 2. 取颜色
+        Eigen::Vector3f C1 = pML->GetLineColorRGB().first;
+        Eigen::Vector3f C2 = pML->GetLineColorRGB().second;
+
+        // 3. 获取观察 KeyFrames
+        auto obs = pML->GetLineObservations();
+        std::cout << "  Observations (#KF) = " << obs.size() << std::endl;
+
+        int obs_idx = 0;
+        for (auto &kv : obs)
+        {
+            KeyFrame* pKF = kv.first;
+            std::tuple<int,int> tup = kv.second;
+            int idx_line = std::get<0>(tup);
+
+            if (!pKF) continue;
+            if (idx_line < 0 || idx_line >= pKF->mvKeyLines.size()) continue;
+
+            const auto &KL = pKF->mvKeyLines[idx_line];
+
+            // 4. 投影 MapLine 到该 KeyFrame 图像
+            Sophus::SE3f Tcw = pKF->GetPose();
+            Eigen::Vector3f P1_cam = Tcw * P1; // P1 in camera coords
+            Eigen::Vector3f P2_cam = Tcw * P2;
+
+            cv::Point2f uv1 = pKF->mpCamera->project(cv::Point3f(P1_cam.x(), P1_cam.y(), P1_cam.z()));
+            cv::Point2f uv2 = pKF->mpCamera->project(cv::Point3f(P2_cam.x(), P2_cam.y(), P2_cam.z()));
+
+            // 5. 计算端点误差
+            cv::Point2f kpt_start(KL.startPointX, KL.startPointY);
+            cv::Point2f kpt_end(KL.endPointX, KL.endPointY);
+
+            float err_start = cv::norm(uv1 - kpt_start);
+            float err_end   = cv::norm(uv2 - kpt_end);
+
+            std::cout << "    KF[" << obs_idx++ << "] ID = " << pKF->mnId
+                      << " idxLine = " << idx_line
+                      << " errStart = " << err_start
+                      << " errEnd = " << err_end << std::endl;
+
+            // 6. 获取显示图像
+            cv::Mat img;
+            if (pKF->imgLeftRGB.channels() == 3)
+                img = pKF->imgLeftRGB.clone();
+            else
+                cv::cvtColor(pKF->imgLeftRGB, img, cv::COLOR_GRAY2BGR);
+
+            // 7. 画 KeyLine 原线段（红色）
+            cv::line(img, kpt_start, kpt_end, cv::Scalar(0,0,255), 1);
+
+            // 8. 画 MapLine 投影线（绿色）
+            cv::line(img, uv1, uv2, cv::Scalar(0,255,0), 2);
+
+
+            // 9. 显示端点颜色
+            cv::circle(img, uv1, 2, cv::Scalar(C1.x()*255,C1.y()*255,C1.z()*255), -1);
+            cv::circle(img, uv2, 2, cv::Scalar(C2.x()*255,C2.y()*255,C2.z()*255), -1);
+
+            // 10. 显示窗口
+            std::string win_name = "ML " + std::to_string(line_id-1)
+                                   + " KF " + std::to_string(pKF->mnId)
+                                   + " idx " + std::to_string(idx_line);
+            cv::imshow(win_name, img);
+            cv::waitKey(0);
+        }
+    }
+
+    std::cout << "[DebugRecentAddedMapLinesProjection] Finished visualization." << std::endl;
+}
+
+void LocalMapping::DebugRecentAddedMapLinesProjection()
+{
+    if (mlpRecentAddedMapLines.empty())
+    {
+        std::cout << "[DebugRecentAddedMapLinesProjection] No recent added map lines." << std::endl;
+        return;
+    }
+
+    int line_id = 0;
+
+    for (MapLine* pML : mlpRecentAddedMapLines)
+    {
+        if (!pML || pML->isBad())
+            continue;
+
+        std::cout << "\n===============================" << std::endl;
+        std::cout << "MapLine ID: " << line_id++ << std::endl;
+
+        // 1. 取 3D 端点
+        auto X3D = pML->GetLineWorldPos();
+        Eigen::Vector3f P1 = X3D.first;
+        Eigen::Vector3f P2 = X3D.second;
+
+        std::cout << "  P1 = " << P1.transpose() << ", P2 = " << P2.transpose() << std::endl;
+
+        // 2. 取颜色
+        Eigen::Vector3f C1 = pML->GetLineColorRGB().first;
+        Eigen::Vector3f C2 = pML->GetLineColorRGB().second;
+
+        // 3. 获取观察 KeyFrames
+        auto obs = pML->GetLineObservations();
+        std::cout << "  Observations (#KF) = " << obs.size() << std::endl;
+
+        int obs_idx = 0;
+        for (auto &kv : obs)
+        {
+            KeyFrame* pKF = kv.first;
+            std::tuple<int,int> tup = kv.second;
+            int idx_line = std::get<0>(tup);
+
+            if (!pKF) continue;
+            if (idx_line < 0 || idx_line >= pKF->mvKeyLines.size()) continue;
+
+            const auto &KL = pKF->mvKeyLines[idx_line];
+
+            // 4. 投影 MapLine 到该 KeyFrame 图像
+            Sophus::SE3f Tcw = pKF->GetPose();
+            Eigen::Vector3f P1_cam = Tcw * P1; // P1 in camera coords
+            Eigen::Vector3f P2_cam = Tcw * P2;
+
+            cv::Point2f uv1 = pKF->mpCamera->project(cv::Point3f(P1_cam.x(), P1_cam.y(), P1_cam.z()));
+            cv::Point2f uv2 = pKF->mpCamera->project(cv::Point3f(P2_cam.x(), P2_cam.y(), P2_cam.z()));
+
+            // 5. 计算端点误差
+            cv::Point2f kpt_start(KL.startPointX, KL.startPointY);
+            cv::Point2f kpt_end(KL.endPointX, KL.endPointY);
+
+            float err_start = cv::norm(uv1 - kpt_start);
+            float err_end   = cv::norm(uv2 - kpt_end);
+
+            std::cout << "    KF[" << obs_idx++ << "] ID = " << pKF->mnId
+                      << " idxLine = " << idx_line
+                      << " errStart = " << err_start
+                      << " errEnd = " << err_end << std::endl;
+
+            // 6. 获取显示图像
+            cv::Mat img;
+            if (pKF->imgLeftRGB.channels() == 3)
+                img = pKF->imgLeftRGB.clone();
+            else
+                cv::cvtColor(pKF->imgLeftRGB, img, cv::COLOR_GRAY2BGR);
+
+            // 7. 画 KeyLine 原线段（红色）
+            cv::line(img, kpt_start, kpt_end, cv::Scalar(0,0,255), 1);
+
+            // 8. 画 MapLine 投影线（绿色）
+            cv::line(img, uv1, uv2, cv::Scalar(0,255,0), 2);
+
+
+            // 9. 显示端点颜色
+            cv::circle(img, uv1, 2, cv::Scalar(C1.x()*255,C1.y()*255,C1.z()*255), -1);
+            cv::circle(img, uv2, 2, cv::Scalar(C2.x()*255,C2.y()*255,C2.z()*255), -1);
+
+            // 10. 显示窗口
+            std::string win_name = "ML " + std::to_string(line_id-1)
+                                   + " KF " + std::to_string(pKF->mnId)
+                                   + " idx " + std::to_string(idx_line);
+            cv::imshow(win_name, img);
+            cv::waitKey(0);
+        }
+    }
+
+    std::cout << "[DebugRecentAddedMapLinesProjection] Finished visualization." << std::endl;
+}
+
+
+
+// 需要传入参与优化的关键帧列表和地图线列表
+void LocalMapping::DebugProjectOptimizedLines(const list<KeyFrame*>& lKFs, const list<MapLine*>& lMapLines)
+{
+    std::cout << "\n[DebugProjectOptimizedLines] Visualizing LBA Result..." << std::endl;
+    std::cout << "  Red   = Measurement (2D LSD Feature)" << std::endl;
+    std::cout << "  Green = Optimized Projection (3D MapLine)" << std::endl;
+    std::cout << "  Blue  = Drift Vector (Endpoint Error)" << std::endl;
+
+    int kf_count = 0;
+    
+    // 1. 遍历每一个参与优化的关键帧 (以帧为单位显示，更直观)
+    for(KeyFrame* pKF : lKFs)
+    {
+        if(!pKF || pKF->isBad()) continue;
+
+        // 准备画布：转为彩色以便画线
+        cv::Mat img_show;
+        if(pKF->imgLeftRGB.empty()) {
+             // 如果存的是灰度图，转BGR
+             // 注意：根据你的版本，可能是 GetImage(0) 或 mImg
+            cv::Mat img_gray = pKF->imgAuxiliary;   //to check next...
+            cv::cvtColor(img_gray, img_show, cv::COLOR_GRAY2BGR);
+        } else {
+            img_show = pKF->imgLeftRGB.clone();
+            if(img_show.channels()==1) cv::cvtColor(img_show, img_show, cv::COLOR_GRAY2BGR);
+        }
+
+        int lines_drawn = 0;
+        
+        // 获取该帧的相机参数
+        const float fx = pKF->fx;
+        const float fy = pKF->fy;
+        const float cx = pKF->cx;
+        const float cy = pKF->cy;
+        Sophus::SE3f Tcw = pKF->GetPose(); // 优化后的位姿
+
+        // 2. 遍历所有参与优化的线，看它是否在当前帧有观测
+        for(MapLine* pML : lMapLines)
+        {
+            if(!pML || pML->isBad()) continue;
+
+            // 检查该 MapLine 是否被当前 KeyFrame 观测到
+            if(!pML->IsInKeyFrame(pKF)) 
+                continue;
+
+            // 获取观测信息 (为了拿到原始的 2D LSD 线段)
+            const auto& observations = pML->GetLineObservations();
+            auto it = observations.find(pKF);
+            if(it == observations.end()) continue;
+
+            // 获取原始测量值 (Observed)
+            int idx_line = std::get<0>(it->second);
+            const cv::line_descriptor::KeyLine& kl = pKF->mvKeyLines[idx_line];
+            cv::Point2f pt_obs_1(kl.startPointX, kl.startPointY);
+            cv::Point2f pt_obs_2(kl.endPointX, kl.endPointY);
+
+            // 获取优化后的 3D 位置 (Optimized)
+            auto endpoints_3d = pML->GetLineWorldPos();
+            Eigen::Vector3f P1_w = endpoints_3d.first;
+            Eigen::Vector3f P2_w = endpoints_3d.second;
+
+            // 投影到当前帧
+            Eigen::Vector3f P1_c = Tcw * P1_w;
+            Eigen::Vector3f P2_c = Tcw * P2_w;
+
+            // 深度检查
+            if(P1_c.z() <= 0.1 || P2_c.z() <= 0.1) continue; // 在相机后面
+
+            float u1 = fx * P1_c.x() / P1_c.z() + cx;
+            float v1 = fy * P1_c.y() / P1_c.z() + cy;
+            float u2 = fx * P2_c.x() / P2_c.z() + cx;
+            float v2 = fy * P2_c.y() / P2_c.z() + cy;
+            
+            cv::Point2f pt_proj_1(u1, v1);
+            cv::Point2f pt_proj_2(u2, v2);
+
+            // --- 绘制 ---
+            
+            // A. 画原始观测 (红色，稍粗)
+            cv::line(img_show, pt_obs_1, pt_obs_2, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+            
+            // B. 画优化后投影 (绿色，细)
+            cv::line(img_show, pt_proj_1, pt_proj_2, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+
+            // C. 画误差连线 (蓝色，连接端点) - 关键！看它是滑移了还是偏离了
+            cv::line(img_show, pt_obs_1, pt_proj_1, cv::Scalar(255, 0, 0), 1);
+            cv::line(img_show, pt_obs_2, pt_proj_2, cv::Scalar(255, 0, 0), 1);
+
+            // D. 标记 ID (可选，定位特定线段)
+            // cv::putText(img_show, std::to_string(pML->mnId), (pt_proj_1+pt_proj_2)/2, 
+            //             cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255,255,0), 1);
+
+            lines_drawn++;
+        }
+
+        // 3. 显示当前帧的结果
+        if(lines_drawn > 0)
+        {
+            std::string win_name = "LBA Check KF:" + std::to_string(pKF->mnId);
+            cv::imshow(win_name, img_show);
+            
+            std::cout << "Showing KF " << pKF->mnId << " with " << lines_drawn << " optimized lines." << std::endl;
+            std::cout << "Press [Space] for next KF, [ESC] to stop." << std::endl;
+            
+            int key = cv::waitKey(0);
+            if(key == 27) break; // ESC
+            
+            // 防止窗口堆积，可以手动 destroy
+            cv::destroyWindow(win_name); 
+        }
+        kf_count++;
+    }
+}
+
+
+void LocalMapping::RequestStop()
+{
+    unique_lock<mutex> lock(mMutexStop);
+    mbStopRequested = true;
+    unique_lock<mutex> lock2(mMutexNewKFs);
+    mbAbortBA = true;
+}
+
+bool LocalMapping::Stop()
+{
+    unique_lock<mutex> lock(mMutexStop);
+    if(mbStopRequested && !mbNotStop)
+    {
+        mbStopped = true;
+        cout << "Local Mapping STOP" << endl;
+        return true;
+    }
+
+    return false;
+}
+
+bool LocalMapping::isStopped()
+{
+    unique_lock<mutex> lock(mMutexStop);
+    return mbStopped;
+}
+
+bool LocalMapping::stopRequested()
+{
+    unique_lock<mutex> lock(mMutexStop);
+    return mbStopRequested;
+}
+
+void LocalMapping::Release()
+{
+    unique_lock<mutex> lock(mMutexStop);
+    unique_lock<mutex> lock2(mMutexFinish);
+    if(mbFinished)
+        return;
+    mbStopped = false;
+    mbStopRequested = false;
+    for(list<KeyFrame*>::iterator lit = mlNewKeyFrames.begin(), lend=mlNewKeyFrames.end(); lit!=lend; lit++)
+        delete *lit;
+    mlNewKeyFrames.clear();
+
+    cout << "Local Mapping RELEASE" << endl;
+}
+
+bool LocalMapping::AcceptKeyFrames()
+{
+    unique_lock<mutex> lock(mMutexAccept);
+    return mbAcceptKeyFrames;
+}
+
+void LocalMapping::SetAcceptKeyFrames(bool flag)
+{
+    unique_lock<mutex> lock(mMutexAccept);
+    mbAcceptKeyFrames=flag;
+}
+
+bool LocalMapping::SetNotStop(bool flag)
+{
+    unique_lock<mutex> lock(mMutexStop);
+
+    if(flag && mbStopped)
+        return false;
+
+    mbNotStop = flag;
+
+    return true;
+}
+
+void LocalMapping::InterruptBA()
+{
+    mbAbortBA = true;
+}
+
+void LocalMapping::KeyFrameCulling()
+{
+    // Check redundant keyframes (only local keyframes)
+    // A keyframe is considered redundant if the 90% of the MapPoints it sees, are seen
+    // in at least other 3 keyframes (in the same or finer scale)
+    // We only consider close stereo points
+    const int Nd = 21;
+    mpCurrentKeyFrame->UpdateBestCovisibles();
+    vector<KeyFrame*> vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+
+    float redundant_th;
+    if(!mbInertial)
+        redundant_th = 0.9;
+    else if (mbMonocular)
+        redundant_th = 0.9;
+    else
+        redundant_th = 0.5;
+
+    const bool bInitImu = mpAtlas->isImuInitialized();
+    int count=0;
+
+    // Compoute last KF from optimizable window:
+    unsigned int last_ID;
+    if (mbInertial)
+    {
+        int count = 0;
+        KeyFrame* aux_KF = mpCurrentKeyFrame;
+        while(count<Nd && aux_KF->mPrevKF)
+        {
+            aux_KF = aux_KF->mPrevKF;
+            count++;
+        }
+        last_ID = aux_KF->mnId;
+    }
+
+
+
+    for(vector<KeyFrame*>::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
+    {
+        count++;
+        KeyFrame* pKF = *vit;
+
+        if((pKF->mnId==pKF->GetMap()->GetInitKFid()) || pKF->isBad())
+            continue;
+        const vector<MapPoint*> vpMapPoints = pKF->GetMapPointMatches();
+
+        int nObs = 3;
+        const int thObs=nObs;
+        int nRedundantObservations=0;
+        int nMPs=0;
+        for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
+        {
+            MapPoint* pMP = vpMapPoints[i];
+            if(pMP)
+            {
+                if(!pMP->isBad())
+                {
+                    if(!mbMonocular)
+                    {
+                        if(pKF->mvDepth[i]>pKF->mThDepth || pKF->mvDepth[i]<0)
+                            continue;
+                    }
+
+                    nMPs++;
+                    if(pMP->Observations()>thObs)
+                    {
+                        const int &scaleLevel = (pKF -> NLeft == -1) ? pKF->mvKeysUn[i].octave
+                                                                     : (i < pKF -> NLeft) ? pKF -> mvKeys[i].octave
+                                                                                          : pKF -> mvKeysRight[i].octave;
+                        const map<KeyFrame*, tuple<int,int>> observations = pMP->GetObservations();
+                        int nObs=0;
+                        for(map<KeyFrame*, tuple<int,int>>::const_iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
+                        {
+                            KeyFrame* pKFi = mit->first;
+                            if(pKFi==pKF)
+                                continue;
+                            tuple<int,int> indexes = mit->second;
+                            int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
+                            int scaleLeveli = -1;
+                            if(pKFi -> NLeft == -1)
+                                scaleLeveli = pKFi->mvKeysUn[leftIndex].octave;
+                            else {
+                                if (leftIndex != -1) {
+                                    scaleLeveli = pKFi->mvKeys[leftIndex].octave;
+                                }
+                                if (rightIndex != -1) {
+                                    int rightLevel = pKFi->mvKeysRight[rightIndex - pKFi->NLeft].octave;
+                                    scaleLeveli = (scaleLeveli == -1 || scaleLeveli > rightLevel) ? rightLevel
+                                                                                                  : scaleLeveli;
+                                }
+                            }
+
+                            if(scaleLeveli<=scaleLevel+1)
+                            {
+                                nObs++;
+                                if(nObs>thObs)
+                                    break;
+                            }
+                        }
+                        if(nObs>thObs)
+                        {
+                            nRedundantObservations++;
+                        }
+                    }
+                }
+            }
+        }
+
+        if(nRedundantObservations>redundant_th*nMPs)
+        {
+            if (mbInertial)
+            {
+                if (mpAtlas->KeyFramesInMap()<=Nd)
+                    continue;
+
+                if(pKF->mnId>(mpCurrentKeyFrame->mnId-2))
+                    continue;
+
+                if(pKF->mPrevKF && pKF->mNextKF)
+                {
+                    const float t = pKF->mNextKF->mTimeStamp-pKF->mPrevKF->mTimeStamp;
+
+                    if((bInitImu && (pKF->mnId<last_ID) && t<3.) || (t<0.5))
+                    {
+                        pKF->mNextKF->mpImuPreintegrated->MergePrevious(pKF->mpImuPreintegrated);
+                        pKF->mNextKF->mPrevKF = pKF->mPrevKF;
+                        pKF->mPrevKF->mNextKF = pKF->mNextKF;
+                        pKF->mNextKF = NULL;
+                        pKF->mPrevKF = NULL;
+                        pKF->SetBadFlag();
+                    }
+                    else if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA2() && ((pKF->GetImuPosition()-pKF->mPrevKF->GetImuPosition()).norm()<0.02) && (t<3))
+                    {
+                        pKF->mNextKF->mpImuPreintegrated->MergePrevious(pKF->mpImuPreintegrated);
+                        pKF->mNextKF->mPrevKF = pKF->mPrevKF;
+                        pKF->mPrevKF->mNextKF = pKF->mNextKF;
+                        pKF->mNextKF = NULL;
+                        pKF->mPrevKF = NULL;
+                        pKF->SetBadFlag();
+                    }
+                }
+            }
+            else
+            {
+                pKF->SetBadFlag();
+            }
+        }
+        if((count > 20 && mbAbortBA) || count>100)
+        {
+            break;
+        }
+    }
+}
+
+void LocalMapping::RequestReset()
+{
+    {
+        unique_lock<mutex> lock(mMutexReset);
+        cout << "LM: Map reset recieved" << endl;
+        mbResetRequested = true;
+    }
+    cout << "LM: Map reset, waiting..." << endl;
+
+    while(1)
+    {
+        {
+            unique_lock<mutex> lock2(mMutexReset);
+            if(!mbResetRequested)
+                break;
+        }
+        usleep(3000);
+    }
+    cout << "LM: Map reset, Done!!!" << endl;
+}
+
+void LocalMapping::RequestResetActiveMap(Map* pMap)
+{
+    {
+        unique_lock<mutex> lock(mMutexReset);
+        cout << "LM: Active map reset recieved" << endl;
+        mbResetRequestedActiveMap = true;
+        mpMapToReset = pMap;
+    }
+    cout << "LM: Active map reset, waiting..." << endl;
+
+    while(1)
+    {
+        {
+            unique_lock<mutex> lock2(mMutexReset);
+            if(!mbResetRequestedActiveMap)
+                break;
+        }
+        usleep(3000);
+    }
+    cout << "LM: Active map reset, Done!!!" << endl;
+}
+
+void LocalMapping::ResetIfRequested()
+{
+    bool executed_reset = false;
+    {
+        unique_lock<mutex> lock(mMutexReset);
+        if(mbResetRequested)
+        {
+            executed_reset = true;
+
+            cout << "LM: Reseting Atlas in Local Mapping..." << endl;
+            mlNewKeyFrames.clear();
+            mlpRecentAddedMapPoints.clear();
+            mbResetRequested = false;
+            mbResetRequestedActiveMap = false;
+
+            // Inertial parameters
+            mTinit = 0.f;
+            mbNotBA2 = true;
+            mbNotBA1 = true;
+            mbBadImu=false;
+
+            mIdxInit=0;
+
+            cout << "LM: End reseting Local Mapping..." << endl;
+        }
+
+        if(mbResetRequestedActiveMap) {
+            executed_reset = true;
+            cout << "LM: Reseting current map in Local Mapping..." << endl;
+            mlNewKeyFrames.clear();
+            mlpRecentAddedMapPoints.clear();
+
+            // Inertial parameters
+            mTinit = 0.f;
+            mbNotBA2 = true;
+            mbNotBA1 = true;
+            mbBadImu=false;
+
+            mbResetRequested = false;
+            mbResetRequestedActiveMap = false;
+            cout << "LM: End reseting Local Mapping..." << endl;
+        }
+    }
+    if(executed_reset)
+        cout << "LM: Reset free the mutex" << endl;
+
+}
+
+void LocalMapping::RequestFinish()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    mbFinishRequested = true;
+}
+
+bool LocalMapping::CheckFinish()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    return mbFinishRequested;
+}
+
+void LocalMapping::SetFinish()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    mbFinished = true;    
+    unique_lock<mutex> lock2(mMutexStop);
+    mbStopped = true;
+}
+
+bool LocalMapping::isFinished()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    return mbFinished;
+}
+
+void LocalMapping::InitializeIMU(float priorG, float priorA, bool bFIBA)
+{
+    if (mbResetRequested)
+        return;
+
+    float minTime;
+    int nMinKF;
+    if (mbMonocular)
+    {
+        minTime = 2.0;
+        nMinKF = 10;
+    }
+    else
+    {
+        minTime = 1.0;
+        nMinKF = 10;
+    }
+
+
+    if(mpAtlas->KeyFramesInMap()<nMinKF)
+        return;
+
+    // Retrieve all keyframe in temporal order
+    list<KeyFrame*> lpKF;
+    KeyFrame* pKF = mpCurrentKeyFrame;
+    while(pKF->mPrevKF)
+    {
+        lpKF.push_front(pKF);
+        pKF = pKF->mPrevKF;
+    }
+    lpKF.push_front(pKF);
+    vector<KeyFrame*> vpKF(lpKF.begin(),lpKF.end());
+
+    if(vpKF.size()<nMinKF)
+        return;
+
+    mFirstTs=vpKF.front()->mTimeStamp;
+    if(mpCurrentKeyFrame->mTimeStamp-mFirstTs<minTime)
+        return;
+
+    bInitializing = true;
+
+    while(CheckNewKeyFrames())
+    {
+        ProcessNewKeyFrame();
+        vpKF.push_back(mpCurrentKeyFrame);
+        lpKF.push_back(mpCurrentKeyFrame);
+    }
+
+    const int N = vpKF.size();
+    IMU::Bias b(0,0,0,0,0,0);
+
+    // Compute and KF velocities mRwg estimation
+    if (!mpCurrentKeyFrame->GetMap()->isImuInitialized())
+    {
+        Eigen::Matrix3f Rwg;
+        Eigen::Vector3f dirG;
+        dirG.setZero();
+        for(vector<KeyFrame*>::iterator itKF = vpKF.begin(); itKF!=vpKF.end(); itKF++)
+        {
+            if (!(*itKF)->mpImuPreintegrated)
+                continue;
+            if (!(*itKF)->mPrevKF)
+                continue;
+
+            dirG -= (*itKF)->mPrevKF->GetImuRotation() * (*itKF)->mpImuPreintegrated->GetUpdatedDeltaVelocity();
+            Eigen::Vector3f _vel = ((*itKF)->GetImuPosition() - (*itKF)->mPrevKF->GetImuPosition())/(*itKF)->mpImuPreintegrated->dT;
+            (*itKF)->SetVelocity(_vel);
+            (*itKF)->mPrevKF->SetVelocity(_vel);
+        }
+
+        dirG = dirG/dirG.norm();
+        Eigen::Vector3f gI(0.0f, 0.0f, -1.0f);
+        Eigen::Vector3f v = gI.cross(dirG);
+        const float nv = v.norm();
+        const float cosg = gI.dot(dirG);
+        const float ang = acos(cosg);
+        Eigen::Vector3f vzg = v*ang/nv;
+        Rwg = Sophus::SO3f::exp(vzg).matrix();
+        mRwg = Rwg.cast<double>();
+        mTinit = mpCurrentKeyFrame->mTimeStamp-mFirstTs;
+    }
+    else
+    {
+        mRwg = Eigen::Matrix3d::Identity();
+        mbg = mpCurrentKeyFrame->GetGyroBias().cast<double>();
+        mba = mpCurrentKeyFrame->GetAccBias().cast<double>();
+    }
+
+    mScale=1.0;
+
+    mInitTime = mpTracker->mLastFrame.mTimeStamp-vpKF.front()->mTimeStamp;
+
+    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    Optimizer::InertialOptimization(mpAtlas->GetCurrentMap(), mRwg, mScale, mbg, mba, mbMonocular, infoInertial, false, false, priorG, priorA);
+
+    std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+
+    if (mScale<1e-1)
+    {
+        cout << "scale too small" << endl;
+        bInitializing=false;
+        return;
+    }
+
+    // Before this line we are not changing the map
+    {
+        unique_lock<mutex> lock(mpAtlas->GetCurrentMap()->mMutexMapUpdate);
+        if ((fabs(mScale - 1.f) > 0.00001) || !mbMonocular) {
+            Sophus::SE3f Twg(mRwg.cast<float>().transpose(), Eigen::Vector3f::Zero());
+            mpAtlas->GetCurrentMap()->ApplyScaledRotation(Twg, mScale, true);
+            mpTracker->UpdateFrameIMU(mScale, vpKF[0]->GetImuBias(), mpCurrentKeyFrame);
+
+            MappingOperation opr(
+                /*type=*/MappingOperation::OprType::ScaleRefinement,
+                /*scale=*/mScale,
+                /*T=*/Twg);
+            mpAtlas->pushMappingOperation(opr);
+        }
+
+        // Check if initialization OK
+        if (!mpAtlas->isImuInitialized())
+            for (int i = 0; i < N; i++) {
+                KeyFrame *pKF2 = vpKF[i];
+                pKF2->bImu = true;
+            }
+    }
+
+    mpTracker->UpdateFrameIMU(1.0,vpKF[0]->GetImuBias(),mpCurrentKeyFrame);
+    if (!mpAtlas->isImuInitialized())
+    {
+        mpAtlas->SetImuInitialized();
+        mpTracker->t0IMU = mpTracker->mCurrentFrame.mTimeStamp;
+        mpCurrentKeyFrame->bImu = true;
+    }
+
+    std::chrono::steady_clock::time_point t4 = std::chrono::steady_clock::now();
+    if (bFIBA)
+    {
+        if (priorA!=0.f)
+            Optimizer::FullInertialBA(mpAtlas->GetCurrentMap(), 100, false, mpCurrentKeyFrame->mnId, NULL, true, priorG, priorA);
+        else
+            Optimizer::FullInertialBA(mpAtlas->GetCurrentMap(), 100, false, mpCurrentKeyFrame->mnId, NULL, false);
+    }
+
+    std::chrono::steady_clock::time_point t5 = std::chrono::steady_clock::now();
+
+    Verbose::PrintMess("Global Bundle Adjustment finished\nUpdating map ...", Verbose::VERBOSITY_NORMAL);
+
+    // Get Map Mutex
+    unique_lock<mutex> lock(mpAtlas->GetCurrentMap()->mMutexMapUpdate);
+
+    unsigned long GBAid = mpCurrentKeyFrame->mnId;
+
+    // Process keyframes in the queue
+    while(CheckNewKeyFrames())
+    {
+        ProcessNewKeyFrame();
+        vpKF.push_back(mpCurrentKeyFrame);
+        lpKF.push_back(mpCurrentKeyFrame);
+    }
+
+    // Correct keyframes starting at map first keyframe
+    list<KeyFrame*> lpKFtoCheck(mpAtlas->GetCurrentMap()->mvpKeyFrameOrigins.begin(),mpAtlas->GetCurrentMap()->mvpKeyFrameOrigins.end());
+
+    while(!lpKFtoCheck.empty())
+    {
+        KeyFrame* pKF = lpKFtoCheck.front();
+        const set<KeyFrame*> sChilds = pKF->GetChilds();
+        Sophus::SE3f Twc = pKF->GetPoseInverse();
+        for(set<KeyFrame*>::const_iterator sit=sChilds.begin();sit!=sChilds.end();sit++)
+        {
+            KeyFrame* pChild = *sit;
+            if(!pChild || pChild->isBad())
+                continue;
+
+            if(pChild->mnBAGlobalForKF!=GBAid)
+            {
+                Sophus::SE3f Tchildc = pChild->GetPose() * Twc;
+                pChild->mTcwGBA = Tchildc * pKF->mTcwGBA;
+
+                Sophus::SO3f Rcor = pChild->mTcwGBA.so3().inverse() * pChild->GetPose().so3();
+                if(pChild->isVelocitySet()){
+                    pChild->mVwbGBA = Rcor * pChild->GetVelocity();
+                }
+                else {
+                    Verbose::PrintMess("Child velocity empty!! ", Verbose::VERBOSITY_NORMAL);
+                }
+
+                pChild->mBiasGBA = pChild->GetImuBias();
+                pChild->mnBAGlobalForKF = GBAid;
+
+            }
+            lpKFtoCheck.push_back(pChild);
+        }
+
+        pKF->mTcwBefGBA = pKF->GetPose();
+        pKF->SetPose(pKF->mTcwGBA);
+
+        if(pKF->bImu)
+        {
+            pKF->mVwbBefGBA = pKF->GetVelocity();
+            pKF->SetVelocity(pKF->mVwbGBA);
+            pKF->SetNewBias(pKF->mBiasGBA);
+        } else {
+            cout << "KF " << pKF->mnId << " not set to inertial!! \n";
+        }
+
+        lpKFtoCheck.pop_front();
+    }
+
+    // Correct MapPoints
+    const vector<MapPoint*> vpMPs = mpAtlas->GetCurrentMap()->GetAllMapPoints();
+
+    for(size_t i=0; i<vpMPs.size(); i++)
+    {
+        MapPoint* pMP = vpMPs[i];
+
+        if(pMP->isBad())
+            continue;
+
+        if(pMP->mnBAGlobalForKF==GBAid)
+        {
+            // If optimized by Global BA, just update
+            pMP->SetWorldPos(pMP->mPosGBA);
+        }
+        else
+        {
+            // Update according to the correction of its reference keyframe
+            KeyFrame* pRefKF = pMP->GetReferenceKeyFrame();
+
+            if(pRefKF->mnBAGlobalForKF!=GBAid)
+                continue;
+
+            // Map to non-corrected camera
+            Eigen::Vector3f Xc = pRefKF->mTcwBefGBA * pMP->GetWorldPos();
+
+            // Backproject using corrected camera
+            pMP->SetWorldPos(pRefKF->GetPoseInverse() * Xc);
+        }
+    }
+
+    Verbose::PrintMess("Map updated!", Verbose::VERBOSITY_NORMAL);
+
+    mnKFs=vpKF.size();
+    mIdxInit++;
+
+    for(list<KeyFrame*>::iterator lit = mlNewKeyFrames.begin(), lend=mlNewKeyFrames.end(); lit!=lend; lit++)
+    {
+        (*lit)->SetBadFlag();
+        delete *lit;
+    }
+    mlNewKeyFrames.clear();
+
+    mpTracker->mState=Tracking::OK;
+    bInitializing = false;
+
+    mpCurrentKeyFrame->GetMap()->IncreaseChangeIndex();
+
+    return;
+}
+
+void LocalMapping::ScaleRefinement()
+{
+    // Minimum number of keyframes to compute a solution
+    // Minimum time (seconds) between first and last keyframe to compute a solution. Make the difference between monocular and stereo
+    // unique_lock<mutex> lock0(mMutexImuInit);
+    if (mbResetRequested)
+        return;
+
+    // Retrieve all keyframes in temporal order
+    list<KeyFrame*> lpKF;
+    KeyFrame* pKF = mpCurrentKeyFrame;
+    while(pKF->mPrevKF)
+    {
+        lpKF.push_front(pKF);
+        pKF = pKF->mPrevKF;
+    }
+    lpKF.push_front(pKF);
+    vector<KeyFrame*> vpKF(lpKF.begin(),lpKF.end());
+
+    while(CheckNewKeyFrames())
+    {
+        ProcessNewKeyFrame();
+        vpKF.push_back(mpCurrentKeyFrame);
+        lpKF.push_back(mpCurrentKeyFrame);
+    }
+
+    const int N = vpKF.size();
+
+    mRwg = Eigen::Matrix3d::Identity();
+    mScale=1.0;
+
+    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    Optimizer::InertialOptimization(mpAtlas->GetCurrentMap(), mRwg, mScale);
+    std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+
+    if (mScale<1e-1) // 1e-1
+    {
+        cout << "scale too small" << endl;
+        bInitializing=false;
+        return;
+    }
+    
+    Sophus::SO3d so3wg(mRwg);
+    // Before this line we are not changing the map
+    unique_lock<mutex> lock(mpAtlas->GetCurrentMap()->mMutexMapUpdate);
+    std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+    if ((fabs(mScale-1.f)>0.002)||!mbMonocular)
+    {
+        Sophus::SE3f Tgw(mRwg.cast<float>().transpose(),Eigen::Vector3f::Zero());
+        mpAtlas->GetCurrentMap()->ApplyScaledRotation(Tgw,mScale,true);
+        mpTracker->UpdateFrameIMU(mScale,mpCurrentKeyFrame->GetImuBias(),mpCurrentKeyFrame);
+
+        MappingOperation opr(
+            /*type=*/MappingOperation::OprType::ScaleRefinement,
+            /*scale=*/mScale,
+            /*T=*/Tgw);
+        mpAtlas->pushMappingOperation(opr);
+    }
+    std::chrono::steady_clock::time_point t3 = std::chrono::steady_clock::now();
+
+    for(list<KeyFrame*>::iterator lit = mlNewKeyFrames.begin(), lend=mlNewKeyFrames.end(); lit!=lend; lit++)
+    {
+        (*lit)->SetBadFlag();
+        delete *lit;
+    }
+    mlNewKeyFrames.clear();
+
+    double t_inertial_only = std::chrono::duration_cast<std::chrono::duration<double> >(t1 - t0).count();
+
+    // To perform pose-inertial opt w.r.t. last keyframe
+    mpCurrentKeyFrame->GetMap()->IncreaseChangeIndex();
+
+    return;
+}
+
+
+
+bool LocalMapping::IsInitializing()
+{
+    return bInitializing;
+}
+
+
+double LocalMapping::GetCurrKFTime()
+{
+
+    if (mpCurrentKeyFrame)
+    {
+        return mpCurrentKeyFrame->mTimeStamp;
+    }
+    else
+        return 0.0;
+}
+
+KeyFrame* LocalMapping::GetCurrKF()
+{
+    return mpCurrentKeyFrame;
+}
+
+} //namespace ORB_SLAM
