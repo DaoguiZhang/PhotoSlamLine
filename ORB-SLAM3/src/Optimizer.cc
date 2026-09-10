@@ -41,6 +41,7 @@
 
 #include "G2oTypes.h"
 #include "Converter.h"
+#include "StereoLineDebug.h"
 #include <unordered_map>
 
 #include<mutex>
@@ -2588,6 +2589,21 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         }
 
         // === NEW: Line edges ===
+        // Helper: 2D line equation (a,b,c) with (a,b) unit-normalized, from two endpoints.
+        auto makeLineEq = [](double u1, double v1, double u2, double v2) -> Eigen::Vector3d
+        {
+            const double dx = u2 - u1;
+            const double dy = v2 - v1;
+            const double na = dy;
+            const double nb = -dx;
+            const double norm = std::sqrt(na*na + nb*nb);
+            if (norm < 1e-12)
+                return Eigen::Vector3d(0.0, 0.0, 0.0);
+            const double a = na / norm;
+            const double b = nb / norm;
+            return Eigen::Vector3d(a, b, -(a*u1 + b*v1));
+        };
+
         for (int iL = 0; iL < pFrame->NL; ++iL)
         {
             MapLine* pML = pFrame->mvpMapLines[iL];
@@ -2603,27 +2619,76 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
             if ((Xw2 - Xw1).norm() < 1e-6)
                 continue;
 
-            // === 单目线段边 ===
-            auto *eLine = new ORB_SLAM3::EdgeSE3ProjectLineXYZOnlyPose_PointToLine();
-            eLine->setVertex(0, optimizer.vertex(0));
-            eLine->SetObservedLineByEndpoints(kl.startPointX, kl.startPointY,
-                                              kl.endPointX, kl.endPointY);
-            eLine->SetXw(Xw1, Xw2);
-            eLine->SetCameraIntrinsics(pFrame->fx, pFrame->fy, pFrame->cx, pFrame->cy);
+            // === Stereo line edge: use right observation when a valid stereo match exists ===
+            // NOTE: mvKeyLinesRight is only non-empty for true stereo frames;
+            // RGB-D frames synthesize mvuLineRight from depth but have no right
+            // keylines, so they must keep using the monocular point-to-line edge.
+            const bool bValidStereoLine =
+                !pFrame->mpCamera2 &&
+                !pFrame->mvKeyLinesRight.empty() &&
+                (iL < (int)pFrame->mvuLineRight.size()) &&
+                (pFrame->mvuLineRight[iL].first >= 0.0f) &&
+                (pFrame->mvuLineRight[iL].second >= 0.0f);
 
-            const float invSigma2 = pFrame->mvInvLevelSigma2[kl.octave];
-            eLine->setInformation(Eigen::Matrix2d::Identity() * invSigma2 * 0.1);   // 线段边的观测信息
-            g2o::RobustKernelHuber* rkL = new g2o::RobustKernelHuber;
-            rkL->setDelta(deltaLineMono);
-            eLine->setRobustKernel(rkL);
+            if (bValidStereoLine)
+            {
+                const float uR1 = pFrame->mvuLineRight[iL].first;
+                const float uR2 = pFrame->mvuLineRight[iL].second;
 
-            optimizer.addEdge(eLine);
-            vpEdgesLineMono.push_back(eLine);
-            vnIndexEdgeLineMono.push_back(iL);
-            pFrame->mvbLineOutlier[iL] = false;
-            ++nInitialCorrespondences;
+                const Eigen::Vector3d lineL = makeLineEq(kl.startPointX, kl.startPointY,
+                                                         kl.endPointX, kl.endPointY);
+                // Rectified horizontal stereo: vR == vL
+                const Eigen::Vector3d lineR = makeLineEq(uR1, kl.startPointY,
+                                                         uR2, kl.endPointY);
+
+                auto *eLine = new ORB_SLAM3::EdgeStereoSE3ProjectLineXYZOnlyPose_PointToLine(
+                    Xw1, Xw2, pFrame->mpCamera->toK(), pFrame->mbf);
+                eLine->setVertex(0, optimizer.vertex(0));
+                eLine->SetObservedLines(lineL, lineR);
+
+                const float invSigma2 = pFrame->mvInvLevelSigma2[kl.octave];
+                eLine->setInformation(Eigen::Matrix4d::Identity() * invSigma2 * 0.1);
+                g2o::RobustKernelHuber* rkLs = new g2o::RobustKernelHuber;
+                rkLs->setDelta(deltaLineStereo);
+                eLine->setRobustKernel(rkLs);
+
+                optimizer.addEdge(eLine);
+                vpEdgesLineStereo.push_back(eLine);
+                vnIndexEdgeLineStereo.push_back(iL);
+                pFrame->mvbLineOutlier[iL] = false;
+                ++nInitialCorrespondences;
+            }
+            else
+            {
+                // === Monocular point-to-line edge (fallback, also used by Mono/RGB-D) ===
+                auto *eLine = new ORB_SLAM3::EdgeSE3ProjectLineXYZOnlyPose_PointToLine();
+                eLine->setVertex(0, optimizer.vertex(0));
+                eLine->SetObservedLineByEndpoints(kl.startPointX, kl.startPointY,
+                                                  kl.endPointX, kl.endPointY);
+                eLine->SetXw(Xw1, Xw2);
+                eLine->SetCameraIntrinsics(pFrame->fx, pFrame->fy, pFrame->cx, pFrame->cy);
+
+                const float invSigma2 = pFrame->mvInvLevelSigma2[kl.octave];
+                eLine->setInformation(Eigen::Matrix2d::Identity() * invSigma2 * 0.1);   // 线段边的观测信息
+                g2o::RobustKernelHuber* rkL = new g2o::RobustKernelHuber;
+                rkL->setDelta(deltaLineMono);
+                eLine->setRobustKernel(rkL);
+
+                optimizer.addEdge(eLine);
+                vpEdgesLineMono.push_back(eLine);
+                vnIndexEdgeLineMono.push_back(iL);
+                pFrame->mvbLineOutlier[iL] = false;
+                ++nInitialCorrespondences;
+            }
         }
     } // lock结束
+
+    if (IsStereoLineDebugEnabled())
+    {
+        std::cerr << "[StereoLineDebug] Pose-optimization line edges: mono=" << vpEdgesLineMono.size()
+                  << " stereo=" << vpEdgesLineStereo.size()
+                  << " tracked MapLines=" << pFrame->NL << std::endl;
+    }
 
     if (nInitialCorrespondences < 3)
         return 0;
@@ -2695,6 +2760,23 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
             size_t idx = vnIndexEdgeLineMono[i];
             const float chi2 = e->chi2();
             if (chi2 > chi2LineMono[it]) {
+                pFrame->mvbLineOutlier[idx] = true;
+                e->setLevel(1);
+                nBad++;
+            } else {
+                pFrame->mvbLineOutlier[idx] = false;
+                e->setLevel(0);
+            }
+            if (it==2) e->setRobustKernel(0);
+        }
+
+        // === 立体线段 outlier 检查 ===
+        for (size_t i = 0; i < vpEdgesLineStereo.size(); i++)
+        {
+            auto *e = vpEdgesLineStereo[i];
+            size_t idx = vnIndexEdgeLineStereo[i];
+            const float chi2 = e->chi2();
+            if (chi2 > chi2LineStereo[it]) {
                 pFrame->mvbLineOutlier[idx] = true;
                 e->setLevel(1);
                 nBad++;
@@ -5559,6 +5641,13 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     num_MPs = lLocalMapPoints.size();
     num_edges = nEdges;
     num_Lines = lLocalMapLines.size();
+
+    if (IsStereoLineDebugEnabled())
+    {
+        std::cerr << "[StereoLineDebug] Local-BA line edges=" << vpEdgesLineMono.size()
+                  << " MapLines in BA=" << num_Lines
+                  << " total edges=" << num_edges << std::endl;
+    }
 }
 
 

@@ -25,6 +25,7 @@
 #include "Converter.h"
 #include "ORBmatcher.h"
 #include "GeometricCamera.h"
+#include "StereoLineDebug.h"
 
 #include <thread>
 #include <include/CameraModels/Pinhole.h>
@@ -213,6 +214,132 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const cv::Mat &imRGB
     monoRight = -1;
 
     AssignFeaturesToGrid();
+}
+
+Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const cv::Mat &imRGB, const cv::Mat &imRightRGB, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, LSDextractor* lsdExtractorLeft, LSDextractor* lsdExtractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera, Frame* pPrevF, const IMU::Calib &ImuCalib)
+    :mpcpi(NULL), mpORBvocabulary(voc), mpORBextractorLeft(extractorLeft), mpORBextractorRight(extractorRight),
+     mpLineExtractorLeft(lsdExtractorLeft), mpLineExtractorRight(lsdExtractorRight),
+     mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
+     mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
+     mpCamera(pCamera), mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false),
+     mLineSampleStep(0.1f), mLineViewWeight(2.0f), mLineSigma(3.0f), mLineTopK(2)
+{
+    // Frame ID
+    mnId=nNextId++;
+
+    // Save RGB images for Gaussian Mapping
+    this->imgLeftRGB = imRGB.clone();
+    this->imgAuxiliary = imRightRGB.clone();
+
+    // Scale Level Info
+    mnScaleLevels = mpORBextractorLeft->GetLevels();
+    mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
+    mfLogScaleFactor = log(mfScaleFactor);
+    mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
+    mvInvScaleFactors = mpORBextractorLeft->GetInverseScaleFactors();
+    mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
+    mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
+
+    // ORB extraction
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
+#endif
+    thread threadLeft(&Frame::ExtractORB,this,0,imLeft,0,0);
+    thread threadRight(&Frame::ExtractORB,this,1,imRight,0,0);
+    threadLeft.join();
+    threadRight.join();
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
+
+    mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
+#endif
+
+    // Line extraction (left + right), using RGB images (CV_32FC3, same as RGB-D path)
+    thread threadLineLeft(&Frame::ExtractLSD,this,0,this->imgLeftRGB);
+    thread threadLineRight(&Frame::ExtractLSD,this,1,this->imgAuxiliary);
+    threadLineLeft.join();
+    threadLineRight.join();
+
+    N = mvKeys.size();
+    if(mvKeys.empty())
+        return;
+
+    UndistortKeyPoints();
+
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_StartStereoMatches = std::chrono::steady_clock::now();
+#endif
+    ComputeStereoMatches();
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_EndStereoMatches = std::chrono::steady_clock::now();
+
+    mTimeStereoMatch = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndStereoMatches - time_StartStereoMatches).count();
+#endif
+
+    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
+    mvbOutlier = vector<bool>(N,false);
+    mmProjectPoints.clear();
+    mmMatchedInImage.clear();
+    mmProjectLines.clear();
+    mmMatchedLineInImage.clear();
+
+    // Store line features
+    NL = static_cast<int>(mvKeyLines.size());
+    UndistortKeyLines();
+    // Stereo line matching + per-endpoint depth (rectified horizontal stereo)
+    ComputeStereoLineMatchesRobustEndpoints();
+    mvLineDepthOpti = std::vector<std::pair<float,float>>(NL, {-1.0f,-1.0f});
+    mvpMapLines = std::vector<MapLine*>(NL, static_cast<MapLine*>(NULL));
+    mvbLineOutlier = std::vector<bool>(NL, false);
+    mvbOutlierLines = std::vector<bool>(NL, false);
+
+    // This is done only for the first Frame (or after a change in the calibration)
+    if(mbInitialComputations)
+    {
+        ComputeImageBounds(imLeft);
+
+        mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/(mnMaxX-mnMinX);
+        mfGridElementHeightInv=static_cast<float>(FRAME_GRID_ROWS)/(mnMaxY-mnMinY);
+
+        fx = K.at<float>(0,0);
+        fy = K.at<float>(1,1);
+        cx = K.at<float>(0,2);
+        cy = K.at<float>(1,2);
+        invfx = 1.0f/fx;
+        invfy = 1.0f/fy;
+
+        mbInitialComputations=false;
+    }
+
+    mb = mbf/fx;
+
+    if(pPrevF)
+    {
+        if(pPrevF->HasVelocity())
+            SetVelocity(pPrevF->GetVelocity());
+    }
+    else
+    {
+        mVw.setZero();
+    }
+
+    mpMutexImu = new std::mutex();
+
+    //Set no stereo fisheye information
+    Nleft = -1;
+    Nright = -1;
+    mvLeftToRightMatch = vector<int>(0);
+    mvRightToLeftMatch = vector<int>(0);
+    mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
+    monoLeft = -1;
+    monoRight = -1;
+    monoLineLeft = -1;
+    monoLineRight = -1;
+    NLleft = -1;
+    NLright = -1;
+
+    AssignFeaturesToGrid();
+    ComputeAdaptiveSteps();
 }
 
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF, const IMU::Calib &ImuCalib)
@@ -2329,6 +2456,25 @@ void Frame::ComputeStereoLineMatchesRobustEndpoints()
             mvLineDepthConfidenceEndpoints[idxL]={0.0f,0.0f};
             mvLineDepthConfidence[idxL]=0.0f;
         }
+    }
+
+    // Debug statistics (gated, off by default)
+    if (IsStereoLineDebugEnabled())
+    {
+        int nValidMatches = 0;
+        int nValidEndpointDisparities = 0;
+        for (int i = 0; i < NL; ++i)
+        {
+            if (mvuLineRight[i].first >= 0.0f && mvuLineRight[i].second >= 0.0f)
+                ++nValidMatches;
+            if (mvLineDepth[i].first > 0.0f && mvLineDepth[i].second > 0.0f)
+                ++nValidEndpointDisparities;
+        }
+        std::cerr << "[StereoLineDebug] left lines=" << NL
+                  << " right lines=" << (int)mvKeyLinesRight.size()
+                  << " matches=" << nValidMatches
+                  << " valid endpoint disparities=" << nValidEndpointDisparities
+                  << std::endl;
     }
 }
 

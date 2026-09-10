@@ -199,6 +199,26 @@ add_slam_executable(rover_rgbd examples/rover_rgbd.cpp)
 #rover mono
 add_slam_executable(rover_mono examples/rover_mono.cpp)
 
+##################################################################################
+##  Unit tests (deterministic, no dataset required)
+##################################################################################
+
+# g2o analytic-Jacobian vs finite-difference check for Stereo line edges
+add_executable(test_stereo_line_jacobian tests/test_stereo_line_jacobian.cpp)
+target_link_libraries(test_stereo_line_jacobian PRIVATE
+    ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
+    ${ORB_SLAM3_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+    ${OpenCV_LIBRARIES}
+    Eigen3::Eigen)
+
+# Line structural loss autograd vs finite-difference check
+add_executable(test_line_structure_loss tests/test_line_structure_loss.cpp)
+target_link_libraries(test_line_structure_loss PRIVATE
+    gaussian_mapper
+    ${OpenCV_LIBRARIES}
+    "${TORCH_LIBRARIES}"
+    Eigen3::Eigen)
+
 
 
 if(realsense2_FOUND)

@@ -28,6 +28,7 @@
 #include "KannalaBrandt8.h"
 #include "MLPnPsolver.h"
 #include "GeometricTools.h"
+#include "StereoLineDebug.h"
 
 #include <iostream>
 
@@ -673,6 +674,15 @@ void Tracking::newParameterLoader(Settings *settings) {
     std::cout << "\t-View weight: " << mLineViewWeight << std::endl;
     std::cout << "\t-Sigma: " << mLineSigma << std::endl;
     std::cout << "\t-Top-K: " << mLineTopK << std::endl;
+
+    // Startup summary for the Stereo + Line pipeline (printed once).
+    if (mSensor == System::STEREO || mSensor == System::IMU_STEREO)
+    {
+        std::cout << "[StereoLine] Stereo line pipeline enabled."
+                  << " right LSD extractor=" << (mpLSDextractorRight ? "yes" : "no")
+                  << " debug=" << (IsStereoLineDebugEnabled() ? "on" : "off")
+                  << std::endl;
+    }
 
     //IMU parameters
     Sophus::SE3f Tbc = settings->Tbc();
@@ -1666,6 +1676,122 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
     //cout << "Tracking start" << endl;
     Track();
     //cout << "Tracking end" << endl;
+
+    return mCurrentFrame.GetPose();
+}
+
+
+Sophus::SE3f Tracking::GrabImageStereoWithLine(const cv::Mat &imRectLeft,const cv::Mat &imRectRight, const double &timestamp, string filename)
+{
+    mImGray = imRectLeft;
+    cv::Mat imGrayRight = imRectRight;
+    mImRight = imRectRight;
+    cv::Mat imRightRGB;
+
+    if(mImGray.channels()==3)
+    {
+        if(mbRGB)
+        {
+            // Left
+            mImGray.copyTo(mImRGB);
+            cvtColor(mImGray, mImGray, cv::COLOR_RGB2GRAY);
+            // Right
+            imGrayRight.copyTo(imRightRGB);
+            cvtColor(imGrayRight, imGrayRight, cv::COLOR_RGB2GRAY);
+        }
+        else
+        {
+            // Left
+            cvtColor(mImGray, mImRGB, cv::COLOR_BGR2RGB);
+            cvtColor(mImGray, mImGray, cv::COLOR_BGR2GRAY);
+            // Right
+            cvtColor(imGrayRight, imRightRGB, cv::COLOR_BGR2RGB);
+            cvtColor(imGrayRight, imGrayRight, cv::COLOR_BGR2GRAY);
+        }
+    }
+    else if (mImGray.channels() == 4)
+    {
+        if (mbRGB)
+        {
+            // Left
+            cvtColor(mImGray, mImRGB, cv::COLOR_RGBA2RGB);
+            cvtColor(mImGray, mImGray, cv::COLOR_RGBA2GRAY);
+            // Right
+            cvtColor(imGrayRight, imRightRGB, cv::COLOR_RGBA2RGB);
+            cvtColor(imGrayRight, imGrayRight, cv::COLOR_RGBA2GRAY);
+        }
+        else
+        {
+            // Left
+            cvtColor(mImGray, mImRGB, cv::COLOR_BGRA2RGB);
+            cvtColor(mImGray, mImGray, cv::COLOR_BGRA2GRAY);
+            // Right
+            cvtColor(imGrayRight, imRightRGB, cv::COLOR_BGRA2RGB);
+            cvtColor(imGrayRight, imGrayRight, cv::COLOR_BGRA2GRAY);
+        }
+    }
+    else if(mImGray.channels() == 1)
+    {
+        // Left
+        cvtColor(mImGray, mImRGB, cv::COLOR_GRAY2RGB);
+        // Right
+        cvtColor(imGrayRight, imRightRGB, cv::COLOR_GRAY2RGB);
+    }
+
+    if (mImRGB.type() == CV_8UC3)
+        mImRGB.convertTo(mImRGB, CV_32FC3, 1.0 / 255.0);
+    else if (mImRGB.type() == CV_16UC3)
+        mImRGB.convertTo(mImRGB, CV_32FC3, 1.0 / 65535.0);
+    else if (mImRGB.type() == CV_16FC3 || mImRGB.type() == CV_64FC3)
+        mImRGB.convertTo(mImRGB, CV_32FC3, 1.0);
+
+    if (imRightRGB.type() == CV_8UC3)
+        imRightRGB.convertTo(imRightRGB, CV_32FC3, 1.0 / 255.0);
+    else if (imRightRGB.type() == CV_16UC3)
+        imRightRGB.convertTo(imRightRGB, CV_32FC3, 1.0 / 65535.0);
+    else if (imRightRGB.type() == CV_16FC3 || imRightRGB.type() == CV_64FC3)
+        imRightRGB.convertTo(imRightRGB, CV_32FC3, 1.0);
+
+    // Build Stereo + Line Frame. Only the single-camera (rectified horizontal
+    // stereo) path is supported for line features; the two-camera/fisheye path
+    // is left to the point-only pipeline.
+    if (mSensor == System::STEREO && !mpCamera2)
+        mCurrentFrame = Frame(mImGray,imGrayRight,mImRGB,imRightRGB,timestamp,mpORBextractorLeft,mpORBextractorRight,mpLSDextractorLeft,mpLSDextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera);
+    else if(mSensor == System::STEREO && mpCamera2)
+    {
+        // Fisheye/two-camera stereo: line features not wired yet. Fall back to
+        // point-only frame construction but still run the line tracking entry
+        // so the caller can rely on a consistent interface.
+        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr);
+    }
+    else if(mSensor == System::IMU_STEREO && !mpCamera2)
+        mCurrentFrame = Frame(mImGray,imGrayRight,mImRGB,imRightRGB,timestamp,mpORBextractorLeft,mpORBextractorRight,mpLSDextractorLeft,mpLSDextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,&mLastFrame,*mpImuCalib);
+    else if(mSensor == System::IMU_STEREO && mpCamera2)
+        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr,&mLastFrame,*mpImuCalib);
+
+    // Two-camera (fisheye) stereo fallback: line features are not extracted, so
+    // initialize empty line state to keep the line tracking path safe.
+    if ((mSensor == System::STEREO || mSensor == System::IMU_STEREO) && mpCamera2)
+    {
+        mCurrentFrame.NL = 0;
+        mCurrentFrame.mvpMapLines.clear();
+        mCurrentFrame.mvuLineRight.clear();
+        mCurrentFrame.mvLineDepth.clear();
+        mCurrentFrame.mvbLineOutlier.clear();
+    }
+
+    // Set line segment sampling parameters (used for Gaussian line association)
+    mCurrentFrame.setLineSegmentSamplingParams(mLineSampleStep, mLineViewWeight, mLineSigma, mLineTopK);
+
+    mCurrentFrame.mNameFile = filename;
+    mCurrentFrame.mnDataset = mnNumDataset;
+
+#ifdef REGISTER_TIMES
+    vdORBExtract_ms.push_back(mCurrentFrame.mTimeORB_Ext);
+    vdStereoMatch_ms.push_back(mCurrentFrame.mTimeStereoMatch);
+#endif
+
+    TrackWithLine();
 
     return mCurrentFrame.GetPose();
 }
@@ -3570,6 +3696,12 @@ void Tracking::StereoInitializationWithLine()
         Verbose::PrintMess("New Map created with " + to_string(mpAtlas->MapPointsInMap()) + " points", Verbose::VERBOSITY_QUIET);
         //std::cerr << "New Map created with " << std::to_string(mpAtlas->MapPointsInMap()) << " points..." << std::endl;
         std::cerr << "New Map created with " << std::to_string(mpAtlas->MapLinesInMap()) << " lines..." << std::endl;
+
+        if (IsStereoLineDebugEnabled())
+        {
+            std::cerr << "[StereoLineDebug] Stereo MapLines created=" << mpAtlas->MapLinesInMap()
+                      << " (left lines=" << mCurrentFrame.NL << ")" << std::endl;
+        }
 
         //cout << "Active map: " << mpAtlas->GetCurrentMap()->GetId() << endl;
         //std::string frame_depth_line_filename = std::to_string(mCurrentFrame.mnId) + "_FrameDepthAndLines.obj";

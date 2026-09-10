@@ -33,7 +33,11 @@
 #include "ORB-SLAM3/include/System.h"
 
 #include "include/gaussian_mapper.h"
+#include "include/gaussian_mapper_line.h"
 #include "viewer/imgui_viewer.h"
+#include "viewer/imgui_viewer_line.h"
+
+#define USE_LINE_GAUSSIAN 1
 
 void LoadImages(const std::string &strPathLeft, const std::string &strPathRight, const std::string &strPathTimes,
                 std::vector<std::string> &vstrImageLeft, std::vector<std::string> &vstrImageRight, std::vector<double> &vTimeStamps);
@@ -110,6 +114,21 @@ int main(int argc, char **argv)
 
     // Create GaussianMapper
     std::filesystem::path gaussian_cfg_path(argv[3]);
+#if USE_LINE_GAUSSIAN
+    std::shared_ptr<GaussianMapperLine> pGausMapper =
+        std::make_shared<GaussianMapperLine>(
+            pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
+    std::thread training_thd(&GaussianMapperLine::run, pGausMapper.get());
+
+    // Create Gaussian Viewer
+    std::thread viewer_thd;
+    std::shared_ptr<ImGuiViewerLine> pViewer;
+    if (use_viewer)
+    {
+        pViewer = std::make_shared<ImGuiViewerLine>(pSLAM, pGausMapper);
+        viewer_thd = std::thread(&ImGuiViewerLine::run, pViewer.get());
+    }
+#else
     std::shared_ptr<GaussianMapper> pGausMapper =
         std::make_shared<GaussianMapper>(
             pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
@@ -123,6 +142,7 @@ int main(int argc, char **argv)
         pViewer = std::make_shared<ImGuiViewer>(pSLAM, pGausMapper);
         viewer_thd = std::thread(&ImGuiViewer::run, pViewer.get());
     }
+#endif
 
     // Vector for tracking time statistics
     std::vector<float> vTimesTrack;
@@ -172,8 +192,8 @@ int main(int argc, char **argv)
 
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
-        // Pass the images to the SLAM system
-        pSLAM->TrackStereo(imLeft, imRight, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageLeft[ni]);
+        // Pass the images to the SLAM system (line-aware stereo tracking)
+        pSLAM->TrackStereoWithLine(imLeft, imRight, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageLeft[ni]);
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
@@ -209,6 +229,9 @@ int main(int argc, char **argv)
     pSLAM->SaveTrajectoryEuRoC((output_dir / "CameraTrajectory_EuRoC.txt").string());
     pSLAM->SaveKeyFrameTrajectoryEuRoC((output_dir / "KeyFrameTrajectory_EuRoC.txt").string());
     pSLAM->SaveTrajectoryKITTI((output_dir / "CameraTrajectory_KITTI.txt").string());
+
+    // Export global point + line map (OBJ)
+    pSLAM->SaveGlobalMapOBJ(output_dir / "Global_Final_Map");
 
     return 0;
 }

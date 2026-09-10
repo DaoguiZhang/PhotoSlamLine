@@ -74,6 +74,25 @@ Optimization.densify_until_iter: 60000
 Optimization.densify_grad_threshold: 0.001
 
 #--------------------------------------------------------------------------------------------
+# Line-aware Gaussian Splatting Parameters (Photo-SLAM-L)
+#--------------------------------------------------------------------------------------------
+Optimization.weight_line_coherence: 0.001   # omega_1: line direction coherence
+Optimization.weight_line_shape_ecc: 0.002   # omega_2: shape eccentricity
+Optimization.weight_line_shape_ori: 0.005   # omega_3: shape orientation
+Optimization.max_anisotropy_threshold: 100.0
+Optimization.lambda_anisotropy: 0.01
+Optimization.absolute_max_ratio: 100.0
+
+# Line segment sampling (3D line -> Gaussian association)
+Optimization.line_sample_step: 0.15
+Optimization.line_view_weight: 2.0
+Optimization.line_sigma: 3.0
+Optimization.line_top_k: 3
+
+# Line point voxel size
+Optimization.voxel_size: 0.10
+
+#--------------------------------------------------------------------------------------------
 # Viewer Parameters
 #--------------------------------------------------------------------------------------------
 

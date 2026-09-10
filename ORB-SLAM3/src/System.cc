@@ -327,6 +327,86 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
     return Tcw;
 }
 
+Sophus::SE3f System::TrackStereoWithLine(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp, const vector<IMU::Point>& vImuMeas, string filename)
+{
+    if(mSensor!=STEREO && mSensor!=IMU_STEREO)
+    {
+        cerr << "ERROR: you called TrackStereoWithLine but input sensor was not set to Stereo nor Stereo-Inertial." << endl;
+        exit(-1);
+    }
+
+    cv::Mat imLeftToFeed = preprocessImage(imLeft);
+    cv::Mat imRightToFeed = preprocessImage(imRight);
+    if(settings_ && settings_->needToRectify()){
+        cv::Mat M1l = settings_->M1l();
+        cv::Mat M2l = settings_->M2l();
+        cv::Mat M1r = settings_->M1r();
+        cv::Mat M2r = settings_->M2r();
+
+        cv::remap(imLeftToFeed, imLeftToFeed, M1l, M2l, cv::INTER_LINEAR);
+        cv::remap(imRightToFeed, imRightToFeed, M1r, M2r, cv::INTER_LINEAR);
+    }
+    else if(settings_ && settings_->needToResize()){
+        cv::resize(imLeftToFeed,imLeftToFeed,settings_->newImSize());
+        cv::resize(imRightToFeed,imRightToFeed,settings_->newImSize());
+    }
+
+    // Check mode change
+    {
+        unique_lock<mutex> lock(mMutexMode);
+        if(mbActivateLocalizationMode)
+        {
+            mpLocalMapper->RequestStop();
+
+            // Wait until Local Mapping has effectively stopped
+            while(!mpLocalMapper->isStopped())
+            {
+                usleep(1000);
+            }
+
+            mpTracker->InformOnlyTracking(true);
+            mbActivateLocalizationMode = false;
+        }
+        if(mbDeactivateLocalizationMode)
+        {
+            mpTracker->InformOnlyTracking(false);
+            mpLocalMapper->Release();
+            mbDeactivateLocalizationMode = false;
+        }
+    }
+
+    // Check reset
+    {
+        unique_lock<mutex> lock(mMutexReset);
+        if(mbReset)
+        {
+            mpTracker->Reset();
+            mbReset = false;
+            mbResetActiveMap = false;
+        }
+        else if(mbResetActiveMap)
+        {
+            mpTracker->ResetActiveMap();
+            mbResetActiveMap = false;
+        }
+    }
+
+    if (mSensor == System::IMU_STEREO)
+        for(size_t i_imu = 0; i_imu < vImuMeas.size(); i_imu++)
+            mpTracker->GrabImuData(vImuMeas[i_imu]);
+
+    Sophus::SE3f Tcw = mpTracker->GrabImageStereoWithLine(imLeftToFeed,imRightToFeed,timestamp,filename);
+
+    unique_lock<mutex> lock2(mMutexState);
+    mTrackingState = mpTracker->mState;
+    mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
+    mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
+    mTrackedMapline = mpTracker->mCurrentFrame.mvpMapLines;
+    mTrackedKeylineUn = mpTracker->mCurrentFrame.mvKeyLinesUn;
+
+    return Tcw;
+}
+
 Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp, const vector<IMU::Point>& vImuMeas, string filename)
 {
     if(mSensor!=RGBD  && mSensor!=IMU_RGBD)

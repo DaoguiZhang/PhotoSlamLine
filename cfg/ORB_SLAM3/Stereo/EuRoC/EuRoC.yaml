@@ -50,6 +50,15 @@ Camera.fps: 20
 Camera.RGB: 1
 
 Stereo.ThDepth: 60.0
+
+#--------------------------------------------------------------------------------------------
+# Line Feature Parameters (LSD + LBD)
+#--------------------------------------------------------------------------------------------
+Line.SampleStep: 0.15      # line sampling step (meters), for Gaussian association
+Line.ViewWeight: 2.0       # view-angle weight factor
+Line.Sigma: 3.0            # pixel consistency sigma
+Line.TopK: 3               # top-K views for line fusion
+
 Stereo.T_c1_c2: !!opencv-matrix
   rows: 4
   cols: 4

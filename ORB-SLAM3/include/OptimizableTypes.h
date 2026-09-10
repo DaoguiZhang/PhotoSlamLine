@@ -1219,10 +1219,20 @@ public:
                                                     const double bf)
         : Pw1(p1w), Pw2(p2w), mK(K.clone()), m_bf(bf)
     {
-        fx = mK.at<double>(0, 0);
-        fy = mK.at<double>(1, 1);
-        cx = mK.at<double>(0, 2);
-        cy = mK.at<double>(1, 2);
+        if (mK.type() == CV_64F)
+        {
+            fx = mK.at<double>(0, 0);
+            fy = mK.at<double>(1, 1);
+            cx = mK.at<double>(0, 2);
+            cy = mK.at<double>(1, 2);
+        }
+        else
+        {
+            fx = static_cast<double>(mK.at<float>(0, 0));
+            fy = static_cast<double>(mK.at<float>(1, 1));
+            cx = static_cast<double>(mK.at<float>(0, 2));
+            cy = static_cast<double>(mK.at<float>(1, 2));
+        }
 
         obsLineLeft.setZero();
         obsLineRight.setZero();
