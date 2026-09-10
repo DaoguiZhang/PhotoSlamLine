@@ -32,8 +32,12 @@
 
 #include "ORB-SLAM3/include/System.h"
 
+#define USE_LINE_GAUSSIAN 1
+
 #include "include/gaussian_mapper.h"
 #include "viewer/imgui_viewer.h"
+#include "include/gaussian_mapper_line.h"
+#include "viewer/imgui_viewer_line.h"
 
 void LoadImages(const std::filesystem::path &pathImageDir, std::vector<std::string> &vstrImageFilenames,
                 const std::string &prefix);
@@ -100,6 +104,21 @@ int main(int argc, char **argv)
 
     // Create GaussianMapper
     std::filesystem::path gaussian_cfg_path(argv[3]);
+#if USE_LINE_GAUSSIAN
+    std::shared_ptr<GaussianMapperLine> pGausMapper =
+        std::make_shared<GaussianMapperLine>(
+            pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
+    std::thread training_thd(&GaussianMapperLine::run, pGausMapper.get());
+
+    // Create Gaussian Viewer
+    std::thread viewer_thd;
+    std::shared_ptr<ImGuiViewerLine> pViewer;
+    if (use_viewer)
+    {
+        pViewer = std::make_shared<ImGuiViewerLine>(pSLAM, pGausMapper);
+        viewer_thd = std::thread(&ImGuiViewerLine::run, pViewer.get());
+    }
+#else
     std::shared_ptr<GaussianMapper> pGausMapper =
         std::make_shared<GaussianMapper>(
             pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
@@ -113,6 +132,7 @@ int main(int argc, char **argv)
         pViewer = std::make_shared<ImGuiViewer>(pSLAM, pGausMapper);
         viewer_thd = std::thread(&ImGuiViewer::run, pViewer.get());
     }
+#endif
 
     // Vector for tracking time statistics
     std::vector<float> vTimesTrack;
@@ -150,7 +170,7 @@ int main(int argc, char **argv)
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
         // Pass the image to the SLAM system
-        pSLAM->TrackMonocular(im, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        pSLAM->TrackMonocularWithLine(im, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 

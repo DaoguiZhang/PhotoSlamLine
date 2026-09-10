@@ -73,6 +73,8 @@ Optimization.densify_from_iter: 1000
 Optimization.densify_until_iter: 30000
 Optimization.densify_grad_threshold: 0.001
 
+Optimization.refined_gaussian_max_iter_num: 1000 #25000
+
 #Line Weight Setting
 Optimization.weight_line_coherence: 0.005
 Optimization.weight_line_shape_ecc: 0.002

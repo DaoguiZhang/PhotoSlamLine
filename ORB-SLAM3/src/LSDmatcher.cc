@@ -7,6 +7,7 @@
 #include "Converter.h"
 #include "LSDVisualizer.h"
 #include <unordered_set>
+#include <cstdlib>
 
 using namespace std;
 using namespace cv;
@@ -17,6 +18,21 @@ using namespace Eigen;
 
 namespace ORB_SLAM3
 {
+    // Debug-only statistics for Mono line initialization (env var
+    // PHOTO_SLAM_DEBUG_MONO_INIT=1). Dormant otherwise; no algorithmic change.
+    static bool MonoInitLineDebug()
+    {
+        static bool initialized = false;
+        static bool enabled = false;
+        if (!initialized)
+        {
+            const char* e = std::getenv("PHOTO_SLAM_DEBUG_MONO_INIT");
+            enabled = (e != nullptr && std::string(e) == "1");
+            initialized = true;
+        }
+        return enabled;
+    }
+
     const int LSDmatcher::TH_HIGH = 60;
     const int LSDmatcher::TH_LOW = 50;
 
@@ -3081,12 +3097,17 @@ int LSDmatcher::SearchForInitialization(Frame &F1, Frame &F2, std::vector<cv::Po
     std::vector<int> vMatchedDistance(F2.mvKeyLinesUn.size(), INT_MAX);
     std::vector<int> vnMatches21(F2.mvKeyLinesUn.size(), -1);
 
+    // Debug counters (dormant unless PHOTO_SLAM_DEBUG_MONO_INIT=1)
+    int nLevelKeep = 0, nBoxEmpty = 0, nPerpReject = 0;
+    int nDescReject = 0, nRatioReject = 0, nAngleReject = 0;
+
     for(size_t i1=0, iend1=F1.mvKeyLinesUn.size(); i1<iend1; i1++)
     {
         cv::line_descriptor::KeyLine kl1 = F1.mvKeyLinesUn[i1];
         int level1 = kl1.octave;
         
         if(level1 > 0) continue;
+        nLevelKeep++;
 
         // ==========================================
         // 1. BOUNDING BOX OVERLAP SEARCH
@@ -3107,7 +3128,7 @@ int LSDmatcher::SearchForInitialization(Frame &F1, Frame &F2, std::vector<cv::Po
         // Use your Frame::GetLinesInRegion for Bounding Box spatial hashing!
         std::vector<size_t> vIndices2 = F2.GetLinesInRegion(pred_sX, pred_sY, pred_eX, pred_eY, windowSize);
 
-        if(vIndices2.empty()) continue;
+        if(vIndices2.empty()) { nBoxEmpty++; continue; }
 
         cv::Mat d1 = F1.mLineDescriptors.row(i1);
 
@@ -3139,7 +3160,10 @@ int LSDmatcher::SearchForInitialization(Frame &F1, Frame &F2, std::vector<cv::Po
 
             // If the lines are parallel but shifted apart by more than 15 pixels, they aren't the same edge
             if (perp_dist > 15.0f) 
+            {
+                nPerpReject++;
                 continue;
+            }
 
             // 3. Descriptor Matching
             cv::Mat d2 = F2.mLineDescriptors.row(i2);
@@ -3172,7 +3196,10 @@ int LSDmatcher::SearchForInitialization(Frame &F1, Frame &F2, std::vector<cv::Po
                 if (angle_diff > M_PI_2) angle_diff = M_PI - angle_diff;
                 
                 if (angle_diff > (30.0f * M_PI / 180.0f)) 
+                {
+                    nAngleReject++;
                     continue;
+                }
 
                 if(vnMatches21[bestIdx2] >= 0)
                 {
@@ -3198,6 +3225,14 @@ int LSDmatcher::SearchForInitialization(Frame &F1, Frame &F2, std::vector<cv::Po
                     rotHist[bin].push_back(i1);
                 }
             }
+            else
+            {
+                nRatioReject++;
+            }
+        }
+        else
+        {
+            nDescReject++;
         }
     }
 
@@ -3231,6 +3266,19 @@ int LSDmatcher::SearchForInitialization(Frame &F1, Frame &F2, std::vector<cv::Po
             float mid_y = (matched_kl.startPointY + matched_kl.endPointY) * 0.5f;
             vbPrevMatched[i1] = cv::Point2f(mid_x, mid_y);
         }
+    }
+
+    if (MonoInitLineDebug())
+    {
+        std::cerr << "[MONO-INIT-DBG] LSDmatcher.SearchForInitialization:"
+                  << " F1.total=" << F1.mvKeyLinesUn.size()
+                  << " level0Kept=" << nLevelKeep
+                  << " boxEmpty=" << nBoxEmpty
+                  << " perpReject=" << nPerpReject
+                  << " descReject=" << nDescReject
+                  << " ratioReject=" << nRatioReject
+                  << " angleReject=" << nAngleReject
+                  << " matched=" << nmatches << std::endl;
     }
 
     return nmatches;

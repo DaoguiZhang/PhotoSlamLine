@@ -33,6 +33,8 @@
 
 #include <mutex>
 #include <chrono>
+#include <cstdlib>
+#include <algorithm>
 #include "MapExporter.h"
 
 
@@ -40,6 +42,41 @@ using namespace std;
 
 namespace ORB_SLAM3
 {
+
+// ============================================================================
+// Debug-only statistics for Mono line initialization.
+// Enabled at runtime via environment variable PHOTO_SLAM_DEBUG_MONO_INIT=1.
+// These helpers do not change any algorithmic behavior; when the env var is
+// unset they are completely dormant (a single static check).
+// ============================================================================
+static bool MonoInitLineDebug()
+{
+    static bool initialized = false;
+    static bool enabled = false;
+    if (!initialized)
+    {
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_MONO_INIT");
+        enabled = (e != nullptr && std::string(e) == "1");
+        initialized = true;
+    }
+    return enabled;
+}
+
+static void MonoInitLinePrintDistribution(const std::vector<float>& v, const char* name)
+{
+    if (v.empty())
+    {
+        std::cerr << "[MONO-INIT-DBG] " << name << " n=0" << std::endl;
+        return;
+    }
+    std::vector<float> s = v;
+    std::sort(s.begin(), s.end());
+    float med = (s.size() % 2 == 1) ? s[s.size() / 2]
+                                    : 0.5f * (s[s.size() / 2 - 1] + s[s.size() / 2]);
+    std::cerr << "[MONO-INIT-DBG] " << name << " n=" << s.size()
+              << " min=" << s.front() << " median=" << med
+              << " max=" << s.back() << std::endl;
+}
 
 
 Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Atlas *pAtlas, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor, Settings* settings, const string &_nameSeq):
@@ -1765,7 +1802,10 @@ Sophus::SE3f Tracking::GrabImageRGBDWithLine(const cv::Mat &imRGB,const cv::Mat 
 
     mCurrentFrame.mNameFile = filename;
     mCurrentFrame.mnDataset = mnNumDataset;
-    std::cerr << "Frame id: " << mCurrentFrame.mnId << std::endl;
+    if(mCurrentFrame.mnId % 100 == 0)
+    {
+        std::cerr << "Frame id: " << mCurrentFrame.mnId << std::endl;
+    }
     //std::cerr << "mCurrentFrame.mNameFile: " << mCurrentFrame.mNameFile << std::endl;
 
 #ifdef REGISTER_TIMES
@@ -3828,6 +3868,14 @@ void Tracking::MonocularInitializationWithLine()
         LSDmatcher line_matcher(0.9, true, 0.85f, 3.0f, 30.0f, 2.0f);
         int nLineMatches = line_matcher.SearchForInitialization(mInitialFrame, mCurrentFrame, mvbPrevLineMatched, mvIniLineMatches, 100);
 
+        if (MonoInitLineDebug())
+        {
+            std::cerr << "[MONO-INIT-DBG] InitLineMatch: nPointMatches=" << nmatches
+                      << " F1.numLines=" << mInitialFrame.mvKeyLinesUn.size()
+                      << " F2.numLines=" << mCurrentFrame.mvKeyLinesUn.size()
+                      << " nLineMatches=" << nLineMatches << std::endl;
+        }
+
         Sophus::SE3f Tcw;
         vector<bool> vbTriangulated; // 用于标记点是否被成功三角化
 
@@ -4076,10 +4124,27 @@ void Tracking::CreateInitialMapMonocularWithLine()
     const float cx = mCurrentFrame.cx;
     const float cy = mCurrentFrame.cy;
 
+    // =========================================================================
+    // Debug counters — dormant unless PHOTO_SLAM_DEBUG_MONO_INIT=1.
+    // They only aggregate per-stage counts / value distributions.
+    // =========================================================================
+    int nLineCand = 0, nParallaxReject = 0, nDenomReject = 0;
+    int nDepth1Reject = 0, nDepth2Reject = 0, nReprojReject = 0, nCreated = 0;
+    std::vector<float> vCosParallax, vMinDenom, vDepthS, vDepthE, vReprojErr, vLen3D;
+
+    // Plane-plane parallax threshold (cosine of the angle between the two
+    // back-projected planes). 1.0 = fully parallel (degenerate). This matches
+    // the point-triangulation parallax used in TwoViewReconstruction.cc
+    // (0.99998, i.e. ~0.36 deg), so Mono line triangulation is no stricter than
+    // Mono point triangulation at initialization.
+    const float maxCosParallax = 0.99998f;
+
     for(size_t i=0; i<mvIniLineMatches.size(); i++)
     {
         int j = mvIniLineMatches[i]; // index in current frame
         if(j < 0) continue;
+
+        nLineCand++;
 
         cv::line_descriptor::KeyLine kl1 = mInitialFrame.mvKeyLinesUn[i];
         cv::line_descriptor::KeyLine kl2 = mCurrentFrame.mvKeyLinesUn[j];
@@ -4104,20 +4169,23 @@ void Tracking::CreateInitialMapMonocularWithLine()
         Eigen::Vector3f n1w = v1s.cross(v1e).normalized();
         // 计算两个投影平面的夹角余弦值
         float cosParallax = std::fabs(n1w.dot(N2w));
-        // 如果夹角过小（cos值接近1，比如 > 0.999，即夹角小于 2.5 度），说明基线不足或发生纯前向运动退化
-        if(cosParallax > 0.999f) continue; 
+        if (MonoInitLineDebug()) vCosParallax.push_back(cosParallax);
+        // 如果夹角过小（cos值接近1），说明基线不足或发生纯前向运动退化
+        if(cosParallax > maxCosParallax) { nParallaxReject++; continue; }
 
         // Plane-Ray 交点计算
         float denom_s = N2w.dot(v1s);
         float denom_e = N2w.dot(v1e);
 
-        if(std::fabs(denom_s) < 1e-4f || std::fabs(denom_e) < 1e-4f) continue;
+        if (MonoInitLineDebug()) vMinDenom.push_back(std::min(std::fabs(denom_s), std::fabs(denom_e)));
+        if(std::fabs(denom_s) < 1e-4f || std::fabs(denom_e) < 1e-4f) { nDenomReject++; continue; }
 
         float z_s = -d2w / denom_s;
         float z_e = -d2w / denom_e;
 
+        if (MonoInitLineDebug()) { vDepthS.push_back(z_s); vDepthE.push_back(z_e); }
         // 深度校验：必须在 Camera 1 前方
-        if(z_s <= 0.0f || z_e <= 0.0f) continue; 
+        if(z_s <= 0.0f || z_e <= 0.0f) { nDepth1Reject++; continue; }
 
         Eigen::Vector3f SP = v1s * z_s;
         Eigen::Vector3f EP = v1e * z_e;
@@ -4125,7 +4193,7 @@ void Tracking::CreateInitialMapMonocularWithLine()
         // 深度校验：必须在 Camera 2 前方
         Eigen::Vector3f SPc2 = R2w * SP + t2w;
         Eigen::Vector3f EPc2 = R2w * EP + t2w;
-        if(SPc2(2) <= 0.0f || EPc2(2) <= 0.0f) continue;
+        if(SPc2(2) <= 0.0f || EPc2(2) <= 0.0f) { nDepth2Reject++; continue; }
 
         // --- 工业级校验 2：重投影误差校验 (Reprojection Error Check) ---
         // 将计算出的 3D 线段端点投影回 Frame 2 的像素平面
@@ -4146,16 +4214,19 @@ void Tracking::CreateInitialMapMonocularWithLine()
         float err_s = std::fabs(a * u1_proj + b * v1_proj + c);
         float err_e = std::fabs(a * u2_proj + b * v2_proj + c);
 
+        if (MonoInitLineDebug()) vReprojErr.push_back(std::max(err_s, err_e));
         // 如果重投影误差大于 3 个像素，说明三角化结果极差，直接丢弃！
         if(err_s > 3.0f || err_e > 3.0f) 
         {
             mCurrentFrame.mvbLineOutlier[j] = true; // 标记为 Outlier
+            nReprojReject++;
             continue;
         }
 
         // ==========================================
         // 校验全部通过，创建并注册 MapLine
         // ==========================================
+        if (MonoInitLineDebug()) vLen3D.push_back((SP - EP).norm());
         Eigen::Vector3f color = mvIniLineColorRGB[i];
         MapLine* pML = new MapLine(SP, EP, color, color, pKFcur, mpAtlas->GetCurrentMap());
 
@@ -4172,6 +4243,25 @@ void Tracking::CreateInitialMapMonocularWithLine()
         mCurrentFrame.mvbLineOutlier[j] = false;
 
         mpAtlas->AddMapLine(pML);
+        nCreated++;
+    }
+
+    if (MonoInitLineDebug())
+    {
+        std::cerr << "[MONO-INIT-DBG] InitLineTriangulate:"
+                  << " candidates=" << nLineCand
+                  << " parallaxReject=" << nParallaxReject
+                  << " denomReject=" << nDenomReject
+                  << " depth1Reject=" << nDepth1Reject
+                  << " depth2Reject=" << nDepth2Reject
+                  << " reprojReject=" << nReprojReject
+                  << " created=" << nCreated << std::endl;
+        MonoInitLinePrintDistribution(vCosParallax, "cosParallax (0=orthogonal planes, 1=parallel)");
+        MonoInitLinePrintDistribution(vMinDenom, "min|denom|");
+        MonoInitLinePrintDistribution(vDepthS, "depthS (camera1 frame)");
+        MonoInitLinePrintDistribution(vDepthE, "depthE (camera1 frame)");
+        MonoInitLinePrintDistribution(vReprojErr, "reprojErrPx (max endpoint)");
+        MonoInitLinePrintDistribution(vLen3D, "lineLen3D (m)");
     }
 
     // Update Connections

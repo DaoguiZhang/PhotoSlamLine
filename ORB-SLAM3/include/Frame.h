@@ -71,25 +71,18 @@ public:
 
     // Constructor for RGB-D cameras.
     Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
+
     // Constructor for RGB-D cameras. add line featrue
     Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
     
     // Constructor for Monocular cameras.
     Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
 
-     // Constructor for Monocular cameras, with line feature. IMU-Monocular with Line
-    Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor,  ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF = static_cast<Frame*>(NULL), const IMU::Calib &ImuCalib = IMU::Calib());
+    // Constructor for Monocular cameras, with line feature. (No IMU)
+    Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth);
 
-    // Monocular with Line (No IMU)
-    Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, 
-      ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, 
-      GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth);
-
-    // IMU-Monocular with Line
-    //Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, 
-    //  ORBextractor* extractor, LSDextractor* lsd_extractor, ORBVocabulary* voc, 
-    //  GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, 
-    //  Frame* pPrevF, const IMU::Calib &ImuCalib);
+    // Constructor for Monocular cameras, with line feature. IMU-Monocular with Line
+    Frame(const cv::Mat &imGray, const cv::Mat &imRGB, const double &timeStamp, ORBextractor* extractor, LSDextractor* lsd_extractor,  ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF, const IMU::Calib &ImuCalib);
 
     // Destructor
     // ~Frame();

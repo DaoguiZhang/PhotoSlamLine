@@ -2648,9 +2648,9 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     // =========================================================================
     // [DEBUG 1] 检查函数入口时的 Rotation 状态
     // =========================================================================
-    std::cerr << "\n[DEBUG SPLIT] Step 1: Entry" << std::endl;
-    std::cerr << "  > Global Rotation Shape: " << this->rotation_.sizes() << std::endl;
-    std::cerr << "  > Global Scaling Shape:  " << this->getScalingActivation().sizes() << std::endl;
+    //std::cerr << "\n[DEBUG SPLIT] Step 1: Entry" << std::endl;
+    //std::cerr << "  > Global Rotation Shape: " << this->rotation_.sizes() << std::endl;
+    //std::cerr << "  > Global Scaling Shape:  " << this->getScalingActivation().sizes() << std::endl;
 
     // 如果这里 Rotation 的第1维是 3，说明在上一帧（Clone步骤）就被 Scaling 覆盖了
     if (this->rotation_.dim() == 2 && this->rotation_.size(1) == 3) {
@@ -2673,7 +2673,7 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     );
 
     const int64_t M = selected_mask.sum().item<int64_t>();
-    std::cerr << "[DEBUG SPLIT] Step 2: Selection. Selected M = " << M << std::endl;
+    //std::cerr << "[DEBUG SPLIT] Step 2: Selection. Selected M = " << M << std::endl;
     if (M == 0) return;
 
     // =========================================================================
@@ -2688,11 +2688,11 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     // =========================================================================
     // [DEBUG 2] 检查提取出来的 rot_sel 形状
     // =========================================================================
-    std::cerr << "[DEBUG SPLIT] Step 3: Indexing" << std::endl;
-    std::cerr << "  > rot_sel Shape: " << rot_sel.sizes() << " (Numel: " << rot_sel.numel() << ")" << std::endl;
+    //std::cerr << "[DEBUG SPLIT] Step 3: Indexing" << std::endl;
+    //std::cerr << "  > rot_sel Shape: " << rot_sel.sizes() << " (Numel: " << rot_sel.numel() << ")" << std::endl;
 
     if (rot_sel.dim() != 2 || rot_sel.size(1) != 4) {
-        std::cerr << "[Warning] Fixing rot_sel shape in Split: " << rot_sel.sizes() << std::endl;
+        //std::cerr << "[Warning] Fixing rot_sel shape in Split: " << rot_sel.sizes() << std::endl;
         rot_sel = rot_sel.reshape({-1, 4}).contiguous();
     }
 
@@ -3016,8 +3016,8 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     auto new_xyz_init = xyz_init_sel.index({combined_indices}); // 对应生成的 new_xyz
 
     // ================= [DEBUG PROBE 3] =================
-    std::cerr << "[DEBUG FLOW] Inside densifyAndClone. Prepared tensors:" << std::endl;
-    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
+    // std::cerr << "[DEBUG FLOW] Inside densifyAndClone. Prepared tensors:" << std::endl;
+    // std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
     // ============================================================
 
     // =========================================================================

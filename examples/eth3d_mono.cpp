@@ -21,8 +21,12 @@
 #include <opencv2/imgproc.hpp>
 
 #include "ORB-SLAM3/include/System.h"
+#define USE_LINE_GAUSSIAN 1
+
 #include "include/gaussian_mapper.h"
 #include "viewer/imgui_viewer.h"
+#include "include/gaussian_mapper_line.h"
+#include "viewer/imgui_viewer_line.h"
 
 // 稳健的 ETH3D 图像列表读取器
 void LoadImages(const std::string &strFile, std::vector<std::string> &vstrImageFilenames,
@@ -79,6 +83,20 @@ int main(int argc, char **argv)
 
     // 启动 3DGS 后端建图线程
     std::filesystem::path gaussian_cfg_path(argv[3]);
+#if USE_LINE_GAUSSIAN
+    std::shared_ptr<GaussianMapperLine> pGausMapper =
+        std::make_shared<GaussianMapperLine>(pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
+    std::thread training_thd(&GaussianMapperLine::run, pGausMapper.get());
+
+    // 可视化器线程控制
+    std::thread viewer_thd;
+    std::shared_ptr<ImGuiViewerLine> pViewer;
+    if (use_viewer)
+    {
+        pViewer = std::make_shared<ImGuiViewerLine>(pSLAM, pGausMapper);
+        viewer_thd = std::thread(&ImGuiViewerLine::run, pViewer.get());
+    }
+#else
     std::shared_ptr<GaussianMapper> pGausMapper =
         std::make_shared<GaussianMapper>(pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
     std::thread training_thd(&GaussianMapper::run, pGausMapper.get());
@@ -91,6 +109,7 @@ int main(int argc, char **argv)
         pViewer = std::make_shared<ImGuiViewer>(pSLAM, pGausMapper);
         viewer_thd = std::thread(&ImGuiViewer::run, pViewer.get());
     }
+#endif
 
     std::vector<float> vTimesTrack;
     vTimesTrack.resize(nImages);
@@ -133,7 +152,7 @@ int main(int argc, char **argv)
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
         // 将图像送入单目前端核心
-        pSLAM->TrackMonocular(im, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        pSLAM->TrackMonocularWithLine(im, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 

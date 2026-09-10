@@ -1,69 +1,48 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -u
+
+# Resolve the project root from this script's location so it can be invoked
+# from any working directory (also safe for paths containing spaces).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+BIN_DIR="${PROJECT_ROOT}/bin"
+VOCAB="${PROJECT_ROOT}/ORB-SLAM3/Vocabulary/ORBvoc.txt"
+RESULTS_ROOT="${PROJECT_ROOT}/results"
+
+# Dataset root. Override with:
+#   DATASET_ROOT=/path/to/dataset bash scripts/replica_rgbd.sh
+DATASET_ROOT="${DATASET_ROOT:-/workspace/code/SEGS-SLAM/datasets}"
+
+require_dataset() {
+    if [ ! -d "$1" ]; then
+        echo "ERROR: dataset directory not found: $1" >&2
+        echo "       Set DATASET_ROOT to the parent of the 'replica' folder." >&2
+        exit 1
+    fi
+}
+
+REPLICA_ROOT="${DATASET_ROOT}/replica"
+SEQS="office0 office1 office2 office3 office4 room0 room1 room2"
+
 for i in 0 1 2 3 4
 do
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/office0.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-    /workspace/code/SEGS-SLAM/datasets/replica/office0 \
-    ../results/replica_rgbd_$i/office0 \
-    no_viewer
+    for seq in ${SEQS}
+    do
+        dataset_dir="${REPLICA_ROOT}/${seq}"
+        require_dataset "${dataset_dir}"
 
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/office1.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-    /workspace/code/SEGS-SLAM/datasets/replica/office1 \
-    ../results/replica_rgbd_$i/office1 \
-    no_viewer
+        out_dir="${RESULTS_ROOT}/replica_rgbd_${i}/${seq}"
+        mkdir -p "${out_dir}"
 
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/office2.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-     /workspace/code/SEGS-SLAM/datasets/replica/office2 \
-    ../results/replica_rgbd_$i/office2 \
-    no_viewer
-
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/office3.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-     /workspace/code/SEGS-SLAM/datasets/replica/office3 \
-    ../results/replica_rgbd_$i/office3 \
-    no_viewer
-
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/office4.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-     /workspace/code/SEGS-SLAM/datasets/replica/office4 \
-    ../results/replica_rgbd_$i/office4 \
-    no_viewer
-
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/room0.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-     /workspace/code/SEGS-SLAM/datasets/replica/room0 \
-    ../results/replica_rgbd_$i/room0 \
-    no_viewer
-
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/room1.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-     /workspace/code/SEGS-SLAM/datasets/replica/room1 \
-    ../results/replica_rgbd_$i/room1 \
-    no_viewer
-
-../bin/replica_rgbd \
-    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    ../cfg/ORB_SLAM3/RGB-D/Replica/room2.yaml \
-    ../cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
-     /workspace/code/SEGS-SLAM/datasets/replica/room2 \
-    ../results/replica_rgbd_$i/room2 \
-    no_viewer
+        "${BIN_DIR}/replica_rgbd" \
+            "${VOCAB}" \
+            "${PROJECT_ROOT}/cfg/ORB_SLAM3/RGB-D/Replica/${seq}.yaml" \
+            "${PROJECT_ROOT}/cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml" \
+            "${dataset_dir}" \
+            "${out_dir}" \
+            no_viewer
+    done
 done
 
 #cd .. 

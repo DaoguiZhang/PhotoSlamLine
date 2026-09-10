@@ -52,7 +52,7 @@ Record.record_loop_ply: 0 # 0:false, 1 or other integer:true
 #--------------------------------------------------------------------------------------------
 
 # Learning rate
-Optimization.max_num_iterations: 30100
+Optimization.max_num_iterations: 50100
 Optimization.position_lr_init: 0.00032 #0.00016
 Optimization.position_lr_final: 0.00016
 Optimization.position_lr_delay_mult: 0.01
@@ -73,6 +73,7 @@ Optimization.densify_from_iter: 600
 Optimization.densify_until_iter: 15000
 Optimization.densify_grad_threshold: 0.0004 #0.001
 Optimization.refined_max_iter_num: 10000
+Optimization.refined_gaussian_max_iter_num: 100 #1000 #25000
 
 #Line Weight Setting
 Optimization.weight_line_coherence: 0.001

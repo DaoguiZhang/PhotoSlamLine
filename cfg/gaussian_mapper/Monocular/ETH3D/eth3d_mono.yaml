@@ -73,6 +73,15 @@ Optimization.densify_from_iter: 800
 Optimization.densify_until_iter: 30000
 Optimization.densify_grad_threshold: 0.001
 
+# Line Weight Setting (for line-aware Gaussian mapper)
+Optimization.weight_line_coherence: 0.001
+Optimization.weight_line_shape_ecc: 0.002
+Optimization.weight_line_shape_ori: 0.005
+Optimization.line_sample_step: 0.15
+Optimization.line_view_weight: 2.0
+Optimization.line_sigma: 3.0
+Optimization.line_top_k: 3
+
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters
 #--------------------------------------------------------------------------------------------
