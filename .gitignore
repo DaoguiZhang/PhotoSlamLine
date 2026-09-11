@@ -44,3 +44,24 @@
 
 # ImGui .ini
 *imgui.ini
+
+
+# Local datasets and experimental outputs
+/scripts/rgbd_dataset_freiburg1_desk/
+/scripts/*.tgz
+/data/
+/data_new/
+/mono_results/
+/parameter_test/
+/result_replica/
+/result_tum_rgbd/
+
+# Downloaded datasets and generated diagnostics
+/scripts/rgbd_dataset_freiburg1_desk/
+/scripts/*.tgz
+/scripts/2_Keyframe_Camera_*.txt
+/scripts/debug.txt
+/scripts/texput.log
+
+# Editor temporary files
+*.swp
