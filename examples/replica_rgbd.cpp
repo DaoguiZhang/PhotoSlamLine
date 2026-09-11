@@ -271,6 +271,10 @@ int main(int argc, char **argv)
     pSLAM->SaveKeyFrameTrajectoryEuRoC((output_dir / "KeyFrameTrajectory_EuRoC.txt").string());
     pSLAM->SaveTrajectoryKITTI((output_dir / "CameraTrajectory_KITTI.txt").string());
 
+    // 🌟🌟🌟 最终绝杀：在这里调用全局地图导出！🌟🌟🌟
+    // 给它一个帅气的文件名，比如输出到你的 results 文件夹
+    std::string global_map_prefix = "Global_Final_Map";
+    pSLAM->SaveGlobalMapOBJ(output_dir / "Global_Final_Map");
     return 0;
 }
 

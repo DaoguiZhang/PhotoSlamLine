@@ -151,9 +151,12 @@ public:
     }
 
     void ComputeDistinctiveDescriptors();
-    void ComputePluckerLineFromWorldLine(); //initial, if world line end pnts exist
+    //void ComputePluckerLineFromWorldLine();
+    // 在 MapLine.h 中修改为：
+    void ComputePluckerLineFromWorldLine(const Eigen::Vector3f& pCamCenter = Eigen::Vector3f::Zero());  //initial, if world line end pnts exist
 
     void UpdateWorldEndpointsMonoFallback();
+    void UpdateEndpointsFromPluckerAndObservations();
 
     cv::Mat GetDescriptor();
     cv::Mat GetDescriptorAt(int i);

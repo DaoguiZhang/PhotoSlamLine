@@ -5057,22 +5057,22 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         float old_len = (old_P1 - old_P2).norm();
 
         // 🌟 [新增] 打印前后对比日志
-        Eigen::Matrix<double, 6, 1> Lw_init = initial_plucker_map[pML->mnId];
-        double diff_norm = (Lw_opt - Lw_init).norm();
-        
-        // 为了防止刷屏太严重，只打印发生了微小移动的线（过滤掉完全没变的或者变化极小的）
-        if (diff_norm > 1e-6) 
-        {
-            std::cout << "--------------------------------------------------------\n";
-            std::cout << "[LBA Plucker Line ID: " << pML->mnId << "]\n";
-            std::cout << "  [Before] n: " << Lw_init.head<3>().transpose() << " | v: " << Lw_init.tail<3>().transpose() << "\n";
-            std::cout << "  [After ] n: " << Lw_opt.head<3>().transpose()  << " | v: " << Lw_opt.tail<3>().transpose()  << "\n";
-            std::cout << "  [Diff Norm] : " << diff_norm << "\n";
-        }
+        //Eigen::Matrix<double, 6, 1> Lw_init = initial_plucker_map[pML->mnId];
+        //double diff_norm = (Lw_opt - Lw_init).norm();
+        // // 为了防止刷屏太严重，只打印发生了微小移动的线（过滤掉完全没变的或者变化极小的）
+        // if (diff_norm > 1e-6)
+        // {
+        //     std::cout << "--------------------------------------------------------\n";
+        //     std::cout << "[LBA Plucker Line ID: " << pML->mnId << "]\n";
+        //     std::cout << "  [Before] n: " << Lw_init.head<3>().transpose() << " | v: " << Lw_init.tail<3>().transpose() << "\n";
+        //     std::cout << "  [After ] n: " << Lw_opt.head<3>().transpose()  << " | v: " << Lw_opt.tail<3>().transpose()  << "\n";
+        //     std::cout << "  [Diff Norm] : " << diff_norm << "\n";
+        // }
 
         // 2. 写入新的 Plucker 并重新截取物理端点
-        //pML->SetPluckerLineNew(Lw_opt);
-        pML->UpdateFromPluckerLineNew(); 
+        pML->SetPluckerLineNew(Lw_opt);
+        //pML->UpdateFromPluckerLineNew();
+        pML->UpdateEndpointsFromPluckerAndObservations();
 
         // 3. 获取优化后的新端点
         auto new_endpoints = pML->GetLineWorldPos();

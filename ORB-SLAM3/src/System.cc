@@ -31,6 +31,7 @@
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/xml_iarchive.hpp>
 #include <boost/archive/xml_oarchive.hpp>
+#include "MapExporter.h"
 
 namespace ORB_SLAM3
 {
@@ -1386,6 +1387,47 @@ void System::SaveDebugData(const int &initIdx)
     f << fixed;
     f << mpLocalMapper->mInitTime << endl;
     f.close();
+}
+
+
+void System::SaveGlobalMapOBJ(const std::string &filename)
+{
+    std::cout << std::endl << "===================================================" << std::endl;
+    std::cout << "[System] 正在导出全局点线 3D 模型至: " << filename << std::endl;
+
+    // 1. 获取所有的地图点
+    std::vector<MapPoint*> vpAllMapPoints = mpAtlas->GetAllMapPoints();
+
+    // 2. 获取所有的地图线 (由于 Atlas 可能包含多个 Sub-Map，我们遍历提取)
+    std::vector<MapLine*> vpAllMapLines;
+    std::vector<Map*> vpMaps = mpAtlas->GetAllMaps();
+    for(Map* pMap : vpMaps)
+    {
+        if(!pMap) continue;
+        std::vector<MapLine*> linesInMap = pMap->GetAllMapLines(); // 假设你的 Map.h 里有这个接口
+        vpAllMapLines.insert(vpAllMapLines.end(), linesInMap.begin(), linesInMap.end());
+    }
+
+    // 3. 统计有效数量
+    int validPoints = 0, validLines = 0;
+    for(auto pMP : vpAllMapPoints) { if(pMP && !pMP->isBad()) validPoints++; }
+    for(auto pML : vpAllMapLines)  { if(pML && !pML->isBad()) validLines++; }
+
+    std::cout << "[System] 准备写入: " << validPoints << " 个地图点, "
+              << validLines << " 条地图线." << std::endl;
+
+    // 4. 调用你的 MapExporter 进行写入
+    // 提示：你可以直接复用之前我们写好的 ExportMapPointsToOBJ 和 ExportMapLinesToOBJ
+    // 如果你想把它们写进同一个文件方便在 MeshLab 里一起看，可以调用你自定义的复合导出函数
+
+    std::string pt_file = filename + "_Points.obj";
+    std::string ln_file = filename + "_Lines.obj";
+
+    MapExporter::ExportMapPointsToOBJ(vpAllMapPoints, pt_file);
+    MapExporter::ExportMapLinesToOBJ(vpAllMapLines, ln_file);
+
+    std::cout << "[System] 全局地图导出完成！" << std::endl;
+    std::cout << "===================================================" << std::endl;
 }
 
 

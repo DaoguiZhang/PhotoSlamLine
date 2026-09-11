@@ -102,7 +102,7 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Ma
     //set line position
     SetLineWorldPos(LsPos, LePos);
     //SetLineColorRGB(LsColor, LeColor);
-    ComputePluckerLineFromWorldLine();
+
 
     Eigen::Vector3f Ow;
     if(pFrame -> NLleft == -1 || idxF < pFrame -> NLleft){
@@ -118,6 +118,8 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Ma
     Eigen::Vector3f LmPos = (mLineWorldPos.head<3>() + mLineWorldPos.tail<3>()) / 2.0f;
     mLineNormalVector = LmPos - Ow;
     mLineNormalVector = mLineNormalVector / mLineNormalVector.norm();
+
+    ComputePluckerLineFromWorldLine(Ow);
 
     Eigen::Vector3f PC = LmPos - Ow;
     const float dist = PC.norm();
@@ -554,17 +556,83 @@ void MapLine::ComputeDistinctiveDescriptors()
     }
 }
 
-void MapLine::ComputePluckerLineFromWorldLine()
+// void MapLine::ComputePluckerLineFromWorldLine()
+// {
+//     Eigen::Vector3d ls = mLineWorldPos.head<3>().cast<double>();
+//     Eigen::Vector3d le = mLineWorldPos.tail<3>().cast<double>();
+//     if((ls-le).norm() < 1e-8)
+//     {
+//         mWorldPlucker.setZero();
+//         return;
+//     }
+//     Eigen::Vector3d plu_n, plu_v;
+//     Converter::LineSegmentToPlucker(ls, le, plu_n, plu_v);
+//     mWorldPlucker.head<3>() = plu_n;
+//     mWorldPlucker.tail<3>() = plu_v;
+// }
+
+void MapLine::ComputePluckerLineFromWorldLine(const Eigen::Vector3f& pCamCenter)
 {
+    // 1. 基础端点提取
     Eigen::Vector3d ls = mLineWorldPos.head<3>().cast<double>();
     Eigen::Vector3d le = mLineWorldPos.tail<3>().cast<double>();
-    if((ls-le).norm() < 1e-8)
+
+    Eigen::Vector3d d_endpoints = le - ls;
+    double len = d_endpoints.norm();
+
+    // 防御退化线段
+    if(len < 1e-8)
     {
         mWorldPlucker.setZero();
         return;
     }
+
+    // 2. 利用两点生成初始的 Plücker 符号块 (plu_n, plu_v)
     Eigen::Vector3d plu_n, plu_v;
     Converter::LineSegmentToPlucker(ls, le, plu_n, plu_v);
+
+    // 3. 计算该线段在真实世界系下的中点
+    Eigen::Vector3d line_center_world = (ls + le) * 0.5;
+
+    // 4. 🌟【智能上下文对齐防火墙】🌟
+    Eigen::Vector3d cam_center_world = Eigen::Vector3d::Zero();
+    bool has_valid_cam = false;
+
+    if (pCamCenter.norm() > 1e-6f)
+    {
+        // 模式 A：外部显式传入了相机中心 (适用于临时的 Frame 构造)
+        cam_center_world = pCamCenter.cast<double>();
+        has_valid_cam = true;
+    }
+    else
+    {
+        // 模式 B：未传入参数，尝试从自身持有的主参考帧获取 (适用于 KeyFrame 构造)
+        unique_lock<mutex> lock(mMutexFeatures); // 临时加锁保护指针
+        if (mpRefKF && !mpRefKF->isBad())
+        {
+            cam_center_world = mpRefKF->GetCameraCenter().cast<double>();
+            has_valid_cam = true;
+        }
+    }
+
+    // 如果成功拿到了相机中心，执行严格的视线正向极性翻转
+    if (has_valid_cam)
+    {
+        double v2 = plu_v.squaredNorm();
+        if (v2 > 1e-10)
+        {
+            Eigen::Vector3d P0 = plu_n.cross(plu_v) / v2;
+
+            // 规范对齐：确保 Lw 箭头的正向与视线方向保持锐角一致
+            if (plu_v.dot(P0 - cam_center_world) < 0)
+            {
+                plu_n = -plu_n;
+                plu_v = -plu_v;
+            }
+        }
+    }
+
+    // 5. 规范化同步回写状态
     mWorldPlucker.head<3>() = plu_n;
     mWorldPlucker.tail<3>() = plu_v;
 }
@@ -1547,6 +1615,213 @@ void MapLine::UpdateWorldEndpointsFromObservationLineDepth()
         // ---- 4) 闭环重投影截断：基于全局最优直线，重新裁切高精度 3D 物理短端点 ----
         // 传入 0.05 和 0.95 的分位数进行双向噪声剥离截断
         UpdateWorldEndpointsFromObservationPntsAndPluckerLine(Lw, all_pts, 0.05, 0.95);
+    }
+}
+
+/*
+//这是老版本，没有处理整根线段会突然被“整体推向远方”。
+void MapLine::UpdateEndpointsFromPluckerAndObservations()
+{
+    // 1. 提取图优化后的绝对空间骨架 Lw = [n; v]
+    Eigen::Matrix<double,6,1> Lw = this->GetPluckerLine();
+
+    Eigen::Vector3f n = Lw.head<3>().cast<float>();
+    Eigen::Vector3f v = Lw.tail<3>().cast<float>();
+    float v2 = v.squaredNorm();
+    if (v2 < 1e-9f) return; // 退化预防
+
+    Eigen::Vector3f dir_line = v.normalized();
+    Eigen::Vector3f p0_line  = n.cross(v) / v2; // 空间无穷直线锚点
+
+    // 2. 获取所有的多视角历史观测帧
+    std::map<KeyFrame*, std::tuple<int, int>> obs_map = this->GetLineObservations();
+    if (obs_map.empty()) return;
+
+    std::vector<float> t_values;
+    t_values.reserve(obs_map.size() * 2);
+
+    // 3. 遍历多视线，发射端点射线进行空间裁剪
+    for(const auto &obs : obs_map)
+    {
+        KeyFrame* pKF = obs.first;
+        int idx = std::get<0>(obs.second); // 获取该关键帧下的 LSD 特征索引
+        if(!pKF || pKF->isBad() || idx < 0) continue;
+
+        // 提取该帧下的 2D 特征端点坐标
+        Eigen::Vector2f sl, el;
+        if(!pKF->GetLineEndPointEigen(idx, sl, el)) continue;
+
+        // 恢复该观测相机的空间绝对位姿 (Twc)
+        Sophus::SE3f Twc = pKF->GetPose().inverse();
+        Eigen::Vector3f cam_center = Twc.translation();
+        Eigen::Matrix3f Rwc = Twc.rotationMatrix();
+
+        // 2D 像素像素反投影为 3D 归一化空间视线方向
+        Eigen::Vector3f d_ray1 = (Rwc * Eigen::Vector3f((sl[0] - pKF->cx)/pKF->fx, (sl[1] - pKF->cy)/pKF->fy, 1.0f)).normalized();
+        Eigen::Vector3f d_ray2 = (Rwc * Eigen::Vector3f((el[0] - pKF->cx)/pKF->fx, (el[1] - pKF->cy)/pKF->fy, 1.0f)).normalized();
+
+        // 求视线与 Plücker 直线的最近点 (解标量 s 和 t)
+        auto project_ray = [&](const Eigen::Vector3f& o_r, const Eigen::Vector3f& d_r) {
+            float a = d_r.dot(d_r);
+            float b = d_r.dot(dir_line);
+            float c = dir_line.dot(dir_line);
+            Eigen::Vector3f r_vec = o_r - p0_line;
+            float d_val = d_r.dot(r_vec);
+            float e_val = dir_line.dot(r_vec);
+            float denom = a * c - b * b;
+
+            if (std::fabs(denom) > 1e-6f) {
+                float s = (b * e_val - c * d_val) / denom; // 视线上的物理深度
+                float t = (a * e_val - b * d_val) / denom; // 直线上的标量参数
+
+                // 防火墙：交点必须在相机前方 (s > 0)，且视线与无穷直线的物理垂直距离不能太远
+                Eigen::Vector3f p_ray = o_r + s * d_r;
+                Eigen::Vector3f p_line = p0_line + t * dir_line;
+                if (s > 0.05f && (p_ray - p_line).norm() < 0.15f) {
+                    t_values.push_back(t);
+                }
+            }
+        };
+
+        project_ray(cam_center, d_ray1);
+        project_ray(cam_center, d_ray2);
+    }
+
+    if (t_values.size() < 2) return;
+
+    // 4. 鲁棒分位数剔除毛刺
+    std::sort(t_values.begin(), t_values.end());
+    float t_min = t_values.front();
+    float t_max = t_values.back();
+    if (t_values.size() >= 4) {
+        t_min = t_values[static_cast<int>(t_values.size() * 0.05)];
+        t_max = t_values[static_cast<int>(t_values.size() * 0.95)];
+    }
+
+    if (t_max < t_min) std::swap(t_min, t_max);
+
+    // 5. 最终有限长物理端点写回成员变量
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        mLsWorldPos = p0_line + t_min * dir_line;
+        mLeWorldPos = p0_line + t_max * dir_line;
+
+        mLineWorldPos.head<3>() = mLsWorldPos;
+        mLineWorldPos.tail<3>() = mLeWorldPos;
+    }
+}
+*/
+
+void MapLine::UpdateEndpointsFromPluckerAndObservations()
+{
+    // 1. 提取图优化后的绝对空间骨架 Lw = [n; v]
+    Eigen::Matrix<double,6,1> Lw = this->GetPluckerLine();
+
+    Eigen::Vector3f n = Lw.head<3>().cast<float>();
+    Eigen::Vector3f v = Lw.tail<3>().cast<float>();
+    float v2 = v.squaredNorm();
+    if (v2 < 1e-9f) return;
+
+    Eigen::Vector3f dir_line = v.normalized();
+    Eigen::Vector3f p0_line  = n.cross(v) / v2; // 空间无穷直线锚点
+
+    // 2. 获取所有的多视角历史观测帧
+    std::map<KeyFrame*, std::tuple<int, int>> obs_map = this->GetLineObservations();
+    if (obs_map.empty()) return;
+
+    std::vector<float> t_values;
+    t_values.reserve(obs_map.size() * 2);
+
+    // 用来统计当前所有有效观测帧的平均相机光心，用于后续绝对距离校验
+    Eigen::Vector3f mean_cam_center = Eigen::Vector3f::Zero();
+    int valid_kf_count = 0;
+
+    // 3. 遍历多视线，发射端点射线进行空间裁剪
+    for(const auto &obs : obs_map)
+    {
+        KeyFrame* pKF = obs.first;
+        int idx = std::get<0>(obs.second);
+        if(!pKF || pKF->isBad() || idx < 0) continue;
+
+        Eigen::Vector2f sl, el;
+        if(!pKF->GetLineEndPointEigen(idx, sl, el)) continue;
+
+        Sophus::SE3f Twc = pKF->GetPose().inverse();
+        Eigen::Vector3f cam_center = Twc.translation();
+        Eigen::Matrix3f Rwc = Twc.rotationMatrix();
+
+        mean_cam_center += cam_center;
+        valid_kf_count++;
+
+        Eigen::Vector3f d_ray1 = (Rwc * Eigen::Vector3f((sl[0] - pKF->cx)/pKF->fx, (sl[1] - pKF->cy)/pKF->fy, 1.0f)).normalized();
+        Eigen::Vector3f d_ray2 = (Rwc * Eigen::Vector3f((el[0] - pKF->cx)/pKF->fx, (el[1] - pKF->cy)/pKF->fy, 1.0f)).normalized();
+
+        auto project_ray = [&](const Eigen::Vector3f& o_r, const Eigen::Vector3f& d_r) {
+            float a = d_r.dot(d_r);
+            float b = d_r.dot(dir_line);
+            float c = dir_line.dot(dir_line);
+            Eigen::Vector3f r_vec = o_r - p0_line;
+            float d_val = d_r.dot(r_vec);
+            float e_val = dir_line.dot(r_vec);
+            float denom = a * c - b * b;
+
+            if (std::fabs(denom) > 1e-6f) {
+                float s = (b * e_val - c * d_val) / denom; // 🌟 视线上的物理深度（点到当前相机中心的距离）
+                float t = (a * e_val - b * d_val) / denom;
+
+                Eigen::Vector3f p_ray = o_r + s * d_r;
+                Eigen::Vector3f p_line = p0_line + t * dir_line;
+
+                // 🌟【物理防火墙 1】：在室内环境下，视线深度 s 绝不可能大于 5.0 米！
+                // 如果 s > 5.0m 或者异面直线垂直距离 > 8厘米，铁证如山说明这根线整体跑远退化了，直接拒绝收录！
+                if (s > 0.05f && s < 5.0f && (p_ray - p_line).norm() < 0.08f) {
+                    t_values.push_back(t);
+                }
+            }
+        };
+
+        project_ray(cam_center, d_ray1);
+        project_ray(cam_center, d_ray2);
+    }
+
+    if (t_values.size() < 2 || valid_kf_count == 0) return;
+    mean_cam_center /= static_cast<float>(valid_kf_count);
+
+    // 4. 鲁棒分位数去噪
+    std::sort(t_values.begin(), t_values.end());
+    float t_min = t_values.front();
+    float t_max = t_values.back();
+    if (t_values.size() >= 4) {
+        t_min = t_values[static_cast<int>(t_values.size() * 0.05)];
+        t_max = t_values[static_cast<int>(t_values.size() * 0.95)];
+    }
+    if (t_max < t_min) std::swap(t_min, t_max);
+
+    // 5. 计算拟合出来的临时空间端点
+    Eigen::Vector3f tentative_P1 = p0_line + t_min * dir_line;
+    Eigen::Vector3f tentative_P2 = p0_line + t_max * dir_line;
+    Eigen::Vector3f tentative_center = (tentative_P1 + tentative_P2) * 0.5f;
+
+    // 🌟🌟🌟【新增核心保险丝：室内整体跑远熔断闸门】🌟🌟🌟
+    // 计算整根线段的空间几何中心，距离观测它的相机集群平均中心的绝对物理距离
+    float dist_to_camera_cluster = (tentative_center - mean_cam_center).norm();
+
+    // 室内环境中，如果整根线段距离相机超过了 4.5 米，说明它被优化器推到了墙外虚空中。
+    // 必须无条件熔断，拒绝回写更新内存！保持其优化前的健康空间位置！
+    if (dist_to_camera_cluster > 4.5f)
+    {
+        std::cout << "[ANTI-WARP GATE] Blocked MapLine ID " << mnId
+                  << " from flying away! Dist to cam: " << dist_to_camera_cluster << "m (Rejected)" << std::endl;
+        return;
+    }
+
+    // 6. 校验通过，安全写回显式端点成员
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        mLsWorldPos = tentative_P1;
+        mLeWorldPos = tentative_P2;
+        mLineWorldPos.head<3>() = mLsWorldPos;
+        mLineWorldPos.tail<3>() = mLeWorldPos;
     }
 }
 

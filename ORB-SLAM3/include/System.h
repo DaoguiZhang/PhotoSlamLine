@@ -173,6 +173,9 @@ public:
     // Save data used for initialization debug
     void SaveDebugData(const int &iniIdx);
 
+    // 🌟 新增：导出全局 3D 点线 OBJ 模型的接口
+    void SaveGlobalMapOBJ(const std::string &filename);
+
     // Save camera trajectory in the KITTI dataset format.
     // Only for stereo and RGB-D. This method does not work for monocular.
     // Call first Shutdown()

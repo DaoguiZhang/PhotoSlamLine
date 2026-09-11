@@ -364,6 +364,22 @@ void LocalMapping::RunWithLine()
                     //优化前的点云和线段导出来，现在测试第三keyframe的时候，就运行这一步
                     if(mpCurrentKeyFrame->mnId == 2)
                     {
+                        auto matches = mpCurrentKeyFrame->GetMapLineMatches();
+                        std::cout << "============= [LIVE SNAKE RADAR] =============" << std::endl;
+                        std::cout << "  - Frame ID: " << mpCurrentKeyFrame->mnId << std::endl;
+                        std::cout << "  - Matches Vector Size: " << matches.size() << std::endl;
+
+                        int valid_ptr = 0;
+                         int bad_line = 0;
+                        for(size_t i=0; i<matches.size(); ++i) {
+                            if(matches[i]) {
+                                valid_ptr++;
+                                if(matches[i]->isBad()) bad_line++;
+                            }
+                        }
+                        std::cout << "  - Non-Null Pointers: " << valid_ptr << std::endl;
+                        std::cout << "  - Bad Lines Flagged: " << bad_line << std::endl;
+                        std::cout << "===============================================" << std::endl;
 
                         std::string map_points_filename = std::to_string(mpCurrentKeyFrame->mnId) + "_Keyframe_MapPoints_before.obj";
                         MapExporter::ExportMapPointsWithCameraAxesOBJKeyFrame(mpCurrentKeyFrame, mpCurrentKeyFrame->GetMapPointMatches(), map_points_filename);
@@ -745,7 +761,7 @@ void LocalMapping::ProcessNewKeyFrameWithLine()
     const vector<MapLine*> vpMapLineMatches = mpCurrentKeyFrame->GetMapLineMatches();
 
     std::cerr << " ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId " << mpCurrentKeyFrame->mnId << std::endl;
-    std::cerr << " ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnFrameId " << mpCurrentKeyFrame->mnFrameId << std::endl;
+    //td::cerr << " ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnFrameId " << mpCurrentKeyFrame->mnFrameId << std::endl;
 
     for(size_t i=0; i<vpMapPointMatches.size(); i++)
     {
@@ -780,6 +796,8 @@ void LocalMapping::ProcessNewKeyFrameWithLine()
                     pML->AddLineObservation(mpCurrentKeyFrame, i);
                     pML->UpdateNormalAndDepth();
                     pML->ComputeDistinctiveDescriptors();
+
+                    pML->UpdateEndpointsFromPluckerAndObservations();
                 }
                 else    //// this can only happen for new stereo points inserted by the Tracking
                 {
@@ -1688,6 +1706,11 @@ void LocalMapping::CreateNewMapLines()
             pML->UpdateNormalAndDepth();
             mpAtlas->AddMapLine(pML);
             mlpRecentAddedMapLines.push_back(pML);
+
+
+            // 🌟 [新增初始化刷新] 刚出生的单目/RGB-D线段，立刻利用多帧深度信息进行骨架和端点纠正
+            pML->UpdateEndpointsFromPluckerAndObservations();
+
         } // end for each matched idxPair
     } // end for each neighbor KF
 
@@ -2119,15 +2142,6 @@ void LocalMapping::SearchInNeighborsWithLine()
        }           
     }
 
-    // // 🌟 [新增保底刷新] 观测关系改变后，重新拉伸线段物理长度范围
-    // for(MapLine* pML : mpCurrentKeyFrame->GetMapLineMatches())
-    // {
-    //     if(pML && !pML->isBad())
-    //     {
-    //         pML->UpdateWorldEndpointsFromObservationLineDepth();
-    //     }
-    // }
-
     //if(mpAtlas->KeyFramesInMap()>2)
     //{
     //    DebugCurrentFrameMapLinesProjection(mpCurrentKeyFrame->GetMapLineMatches());
@@ -2162,6 +2176,19 @@ void LocalMapping::SearchInNeighborsWithLine()
 
     // 更新共视连接
     mpCurrentKeyFrame->UpdateConnections();
+
+    // 🌟 [新增多视融合刷新] 观测关系改变后，利用新加入的帧深度数据，重新拉伸/裁剪线段物理长度
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for(MapLine* pML : mpCurrentKeyFrame->GetMapLineMatches())
+        {
+            if(pML && !pML->isBad())
+            {
+                //pML->UpdateWorldEndpointsFromObservationLineDepth();
+                pML->UpdateEndpointsFromPluckerAndObservations();
+            }
+        }
+    }
 }
 
 void LocalMapping::SearchInNeighborsWithLineNew()
