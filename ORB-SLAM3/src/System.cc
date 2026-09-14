@@ -32,6 +32,7 @@
 #include <boost/archive/xml_iarchive.hpp>
 #include <boost/archive/xml_oarchive.hpp>
 #include "MapExporter.h"
+#include "LineMode.h"
 
 namespace ORB_SLAM3
 {
@@ -195,8 +196,20 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     //Initialize the Local Mapping thread and launch
     mpLocalMapper = new LocalMapping(this, mpAtlas, mSensor==MONOCULAR || mSensor==IMU_MONOCULAR,
                                      mSensor==IMU_MONOCULAR || mSensor==IMU_STEREO || mSensor==IMU_RGBD, strSequence);
-    //mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::Run,mpLocalMapper);
-    mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::RunWithLine,mpLocalMapper);  //change to the localbundleadjustment
+    std::cout << "[LineMode] PHOTO_SLAM_LINE_MODE=" << GetLineMode()
+              << " (0=point-only, 1=line-frontend-only, 2=full point-line)"
+              << " | PO_LINE=" << (GetPoseOptLineEnabled() ? 1 : 0)
+              << " LBA_LINE=" << (GetLbaLineEnabled() ? 1 : 0)
+              << " | LBA_W=" << GetLbaLineWeight()
+              << " LBA_TAU=" << GetLbaLineTau()
+              << " LBA_DELTA=" << GetLbaLineDelta()
+              << " LBA_SIGMA_PX=" << GetLbaLineSigmaPx()
+              << " | DIAG_LINE_EDGES=" << (IsLineEdgeDiag() ? 1 : 0)
+              << " DIAG_MONO_INIT=" << (IsMonoInitDiag() ? 1 : 0) << std::endl;
+    if (GetLineMode() == 0)
+        mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::Run,mpLocalMapper);
+    else
+        mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::RunWithLine,mpLocalMapper);  //change to the localbundleadjustment
     mpLocalMapper->mInitFr = initFr;
     if(settings_)
         mpLocalMapper->mThFarPoints = settings_->thFarPoints();
@@ -696,18 +709,28 @@ Sophus::SE3f System::TrackMonocularWithLine(const cv::Mat &im, const double &tim
         for(size_t i_imu = 0; i_imu < vImuMeas.size(); i_imu++)
             mpTracker->GrabImuData(vImuMeas[i_imu]);
 
-    // Sophus::SE3f Tcw = mpTracker->GrabImageMonocular(imToFeed,timestamp,filename);
-
-    // Changed to GrabImageMonocularWithLine
-    Sophus::SE3f Tcw = mpTracker->GrabImageMonocularWithLine(imToFeed,timestamp,filename);
+    // Ablation gate: PHOTO_SLAM_LINE_MODE == 0 routes to the original point-only
+    // monocular pipeline (no line extraction / matching / optimization).
+    Sophus::SE3f Tcw;
+    if (GetLineMode() == 0)
+    {
+        Tcw = mpTracker->GrabImageMonocular(imToFeed, timestamp, filename);
+    }
+    else
+    {
+        Tcw = mpTracker->GrabImageMonocularWithLine(imToFeed, timestamp, filename);
+    }
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = mpTracker->mState;
     mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
 
-    mTrackedMapline = mpTracker->mCurrentFrame.mvpMapLines;
-    mTrackedKeylineUn = mpTracker->mCurrentFrame.mvKeyLinesUn;
+    if (GetLineMode() != 0)
+    {
+        mTrackedMapline = mpTracker->mCurrentFrame.mvpMapLines;
+        mTrackedKeylineUn = mpTracker->mCurrentFrame.mvKeyLinesUn;
+    }
 
     return Tcw;
 }

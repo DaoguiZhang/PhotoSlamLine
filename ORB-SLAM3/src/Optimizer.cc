@@ -42,6 +42,7 @@
 #include "G2oTypes.h"
 #include "Converter.h"
 #include "StereoLineDebug.h"
+#include "LineMode.h"
 #include <unordered_map>
 
 #include<mutex>
@@ -2590,6 +2591,11 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
 
         // === NEW: Line edges ===
         // Helper: 2D line equation (a,b,c) with (a,b) unit-normalized, from two endpoints.
+        // Ablation gate: PHOTO_SLAM_LINE_MODE >= 2 adds line edges to pose
+        // optimization (mode 1 = line-frontend-only; mode 0 never reaches here).
+        // PHOTO_SLAM_PO_LINE=0 disables line edges here independently.
+        if (GetLineMode() >= 2 && GetPoseOptLineEnabled())
+        {
         auto makeLineEq = [](double u1, double v1, double u2, double v2) -> Eigen::Vector3d
         {
             const double dx = u2 - u1;
@@ -2681,6 +2687,7 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
                 ++nInitialCorrespondences;
             }
         }
+        } // if (GetLineMode() >= 2 && GetPoseOptLineEnabled())
     } // lock结束
 
     if (IsStereoLineDebugEnabled())
@@ -2793,6 +2800,29 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
             break;
         }
             
+    }
+
+    if (IsLineEdgeDiag())
+    {
+        int nPtIn = 0, nPtOut = 0;
+        double sumChi2Pt = 0.0;
+        for (size_t i = 0; i < vpEdgesMono.size(); ++i)
+        {
+            if (pFrame->mvbOutlier[vnIndexEdgeMono[i]]) nPtOut++;
+            else { nPtIn++; sumChi2Pt += vpEdgesMono[i]->chi2(); }
+        }
+        int nLnIn = 0, nLnOut = 0;
+        double sumChi2Ln = 0.0;
+        for (size_t i = 0; i < vpEdgesLineMono.size(); ++i)
+        {
+            if (pFrame->mvbLineOutlier[vnIndexEdgeLineMono[i]]) nLnOut++;
+            else { nLnIn++; sumChi2Ln += vpEdgesLineMono[i]->chi2(); }
+        }
+        std::cerr << "[LineEdgeDiag] PO frame=" << pFrame->mnId
+                  << " ptEdges=" << vpEdgesMono.size() << " ptIn=" << nPtIn << " ptOut=" << nPtOut
+                  << " ptChi2=" << sumChi2Pt
+                  << " lnEdges=" << vpEdgesLineMono.size() << " lnIn=" << nLnIn << " lnOut=" << nLnOut
+                  << " lnChi2=" << sumChi2Ln << std::endl;
     }
 
     // === 更新优化后的位姿 ===
@@ -5414,6 +5444,10 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     // 🌟 [新增] 用于记录优化前的 Plücker 坐标
     std::map<long unsigned int, Eigen::Matrix<double, 6, 1>> initial_plucker_map;
     list<MapLine*> lLocalMapLines;
+    // Ablation gate: PHOTO_SLAM_LINE_MODE >= 2 adds line vertices/edges to Local BA.
+    // PHOTO_SLAM_LBA_LINE=0 disables line vertices/edges here independently.
+    if (GetLineMode() >= 2 && GetLbaLineEnabled())
+    {
     for (KeyFrame* pKFi : lLocalKeyFrames) {
         vector<MapLine*> vpLines = pKFi->GetMapLineMatches();
         for (MapLine* pML : vpLines) {
@@ -5425,6 +5459,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
             }
         }
     }
+    } // if (GetLineMode() >= 2 && GetLbaLineEnabled())
 
     std::vector<EdgeSE3ProjectLine4D*> vpEdgesLineMono; 
     std::vector<KeyFrame*> vpEdgeKFLineMono;
@@ -5432,6 +5467,10 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
 
     int nextLineVertexId = maxKFid + 1 + lLocalMapPoints.size() + 10000000; // 确保线段顶点ID不与点云顶点冲突
     unordered_map<MapLine*, int> mapLineVertexId;
+
+    // Line noise diagnostic counters (line detection is single-octave in practice).
+    std::map<int, int> lineOctaveHist;
+    int lineOctaveClamped = 0;
 
     for (MapLine* pML : lLocalMapLines)
     {
@@ -5476,15 +5515,23 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
             eLine->setMeasurement(std::make_pair(sp, ep));
             eLine->SetCameraIntrinsics(pKFi->fx, pKFi->fy, pKFi->cx, pKFi->cy);
 
-            int octave = kl.octave;
-            if (octave < 0 || octave >= (int)pKFi->mvInvLevelSigma2.size()) octave = 0;
-            double invSigma2 = (double)pKFi->mvInvLevelSigma2[octave];
-            
-            eLine->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+            // Line detection is single-octave (LSDextractor levels=1, LBD
+            // numOfOctave=1), so kl.octave==0 and the previous
+            // mvInvLevelSigma2[octave] lookup always returned the ORB level-0
+            // value 1.0. The noise source is now explicit: sigma_px is the
+            // assumed std (px) of each endpoint's perpendicular reprojection
+            // distance; the artificial weight w is applied independently.
+            lineOctaveHist[kl.octave]++;
+            if (kl.octave < 0 || kl.octave >= (int)pKFi->mvInvLevelSigma2.size())
+                lineOctaveClamped++;
+            const double sigma_px = GetLbaLineSigmaPx();
+            const double invSigma2 = 1.0 / (sigma_px * sigma_px);
+
+            eLine->setInformation(Eigen::Matrix2d::Identity() * invSigma2 * GetLbaLineWeight());
             eLine->setLevel(0); 
             
             g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
-            rk->setDelta(sqrt(5.991)); 
+            rk->setDelta(GetLbaLineDelta());
             eLine->setRobustKernel(rk);
             
             optimizer.addEdge(eLine);
@@ -5526,7 +5573,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
 
     vector<pair<KeyFrame*,MapLine*>> vToEraseLines;
     for (size_t i = 0; i < vpEdgesLineMono.size(); ++i) {
-        if (vpEdgesLineMono[i]->chi2() > 9.0) // 容忍度稍高
+        if (vpEdgesLineMono[i]->chi2() > GetLbaLineTau()) // 容忍度稍高
             vToEraseLines.emplace_back(vpEdgeKFLineMono[i], vpMapLineEdgeMono[i]);
     }
     
@@ -5561,6 +5608,13 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     }
     
     // --- 13. Write back 4-DoF Lines and Re-truncate Endpoints ---
+    // Hold the map mutex during line write-back: the tracking thread reads
+    // MapLine endpoints/observations (line matching + pose optimization) while
+    // holding mMutexMapUpdate for the whole tracking iteration, and this
+    // write-back mutates the same MapLine state (SetPluckerLineNew + endpoint
+    // re-truncation + re-sampling), so the two must be serialized.
+    {
+        unique_lock<mutex> lock(pMap->mMutexMapUpdate);
     opr.reserveMapLines(lLocalMapLines.size());
     for (MapLine* pML : lLocalMapLines)
     {
@@ -5635,12 +5689,29 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
             pML->setRetrived(true); 
         }
     }
+    } // map mutex (line write-back)
     pMap->IncreaseChangeIndex();
     
     num_OptKF = lLocalKeyFrames.size();
     num_MPs = lLocalMapPoints.size();
     num_edges = nEdges;
     num_Lines = lLocalMapLines.size();
+
+    if (IsLineEdgeDiag())
+    {
+        std::cerr << "[LineEdgeDiag] LBA curKF=" << pKF->mnId
+                  << " optKF=" << lLocalKeyFrames.size()
+                  << " fixedKF=" << lFixedCameras.size()
+                  << " ptEdges=" << (vpEdgesMono.size() + vpEdgesStereo.size())
+                  << " lnEdges=" << vpEdgesLineMono.size()
+                  << " mapLines=" << lLocalMapLines.size()
+                  << " sigmaPx=" << GetLbaLineSigmaPx()
+                  << " lineOctaveClamped=" << lineOctaveClamped
+                  << " lineOctaveHist={";
+        for (const auto& kv : lineOctaveHist)
+            std::cerr << kv.first << ":" << kv.second << ",";
+        std::cerr << "}" << std::endl;
+    }
 
     if (IsStereoLineDebugEnabled())
     {

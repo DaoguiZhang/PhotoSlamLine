@@ -4416,6 +4416,14 @@ void Tracking::CreateInitialMapMonocularWithLine()
     else
         invMedianDepth = 1.0f/medianDepth;
 
+    if (MonoInitLineDebug())
+        std::cerr << "[MONO-INIT-DBG] initKFid=" << pKFcur->mnId
+                  << " initFrameId=" << mCurrentFrame.mnId
+                  << " mapPts=" << mpAtlas->MapPointsInMap()
+                  << " mapLines=" << mpAtlas->MapLinesInMap()
+                  << " medianDepth=" << medianDepth
+                  << " invMedianDepth=" << invMedianDepth << std::endl;
+
     if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<50) 
     {
         Verbose::PrintMess("Wrong initialization, reseting...", Verbose::VERBOSITY_QUIET);
