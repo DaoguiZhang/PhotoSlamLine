@@ -1285,6 +1285,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
         }
 
         //pMostBoWMatchesKF = vpCovKFi[pMostBoWMatchesKF];
+        pMostBoWMatchesKF = vpCovKFi[nIndexMostBoWMatchesKF]; // FIX: use the covisible KF with most BoW matches
 
         if(numBoWMatches >= nBoWMatches) // TODO pick a good threshold
         {
@@ -1623,6 +1624,7 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
 
         if(numBoWMatches >= nBoWMatches) 
         {
+            vnStage[index] = 1;
             // Geometric validation based on Points
             bool bFixedScale = mbFixScale;
             if(mpTracker->mSensor==System::IMU_MONOCULAR && !mpCurrentKF->GetMap()->GetIniertialBA2())
@@ -1640,6 +1642,9 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
             {
                 mTcm = solver.iterate(20, bNoMore, vbInliers, nInliers, bConverge);
             }
+            vnMatchesStage[index] = solver.GetBestInliers();
+            if(!bConverge)
+                vnStage[index] = 2;
 
             if(bConverge)
             {
@@ -1708,6 +1713,7 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                 // 接受判定只依据点投影匹配数（与点流程一致），线匹配仅随行记录用于融合/精化。
                 if(numProjMatches >= nProjMatches)
                 {
+                    vnStage[index] = 3;
                     // Optimize Sim3 transformation with every point match
                     Eigen::Matrix<double, 7, 7> mHessian7x7;
                     bool bFixedScale = mbFixScale;
@@ -1723,6 +1729,7 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
 
                     if(numOptMatches >= nSim3Inliers)
                     {
+                        vnStage[index] = 4;
                         g2o::Sim3 gSmw(pMostBoWMatchesKF->GetRotation().cast<double>(),pMostBoWMatchesKF->GetTranslation().cast<double>(),1.0);
                         g2o::Sim3 gScw = gScm*gSmw; 
                         Sophus::Sim3f mScw = Converter::toSophus(gScw);
@@ -1741,6 +1748,7 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                         // 接受判定只依据优化后的点投影匹配数。
                         if(numProjOptMatches >= nProjOptMatches)
                         {
+                            vnStage[index] = 5;
                             int nNumKFs = 0;
                             // Check the Sim3 transformation with the current KeyFrame covisibles
                             vector<KeyFrame*> vpCurrentCovKFs = mpCurrentKF->GetBestCovisibilityKeyFrames(nNumCovisibles);
@@ -1790,6 +1798,13 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                 }
             }
         }
+        if(IsLineLoopDiag())
+            std::cout << "[LineLoop][LineBoW] curKF " << mpCurrentKF->mnId
+                      << " cand " << pKFi->mnId
+                      << " bow=" << numBoWMatches
+                      << " stage=" << vnStage[index]
+                      << " bestInl=" << vnMatchesStage[index]
+                      << std::endl;
         index++;
     }
 
