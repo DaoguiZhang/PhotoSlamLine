@@ -223,6 +223,54 @@ public:
 
 };
 
+// Line endpoint -> Sim(3) pose edge used by OptimizeSim3WithLine.
+//
+// Measurement: normalized 2D line equation (a,b,c) in KF1, sqrt(a^2+b^2)=1.
+// Residual (1D, pixels): signed perpendicular distance of the projected endpoint
+// to the observed 2D line: r = a*u + b*v + c.
+// Vertices: 0 = VertexSBAPointXYZ (endpoint world pos), 1 = VertexSim3Expmap (S12).
+//
+// Like EdgeSim3ProjectXYZ this edge does NOT implement linearizeOplus; g2o falls
+// back to its numerical Jacobian (verified in test_sim3_line_jacobian). This keeps
+// the Sim(3) line residual consistent with the existing point Sim(3) edges.
+class EdgeSim3ProjectPointToLine2D
+    : public g2o::BaseBinaryEdge<1, Eigen::Vector3d,
+                                 g2o::VertexSBAPointXYZ, ORB_SLAM3::VertexSim3Expmap>
+{
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    EdgeSim3ProjectPointToLine2D() : fx(0), fy(0), cx(0), cy(0) {}
+
+    bool read(std::istream&) override { return false; }
+    bool write(std::ostream&) const override { return false; }
+
+    void SetCameraIntrinsics(double _fx, double _fy, double _cx, double _cy)
+    { fx=_fx; fy=_fy; cx=_cx; cy=_cy; }
+
+    void computeError() override
+    {
+        const auto* vP = static_cast<const g2o::VertexSBAPointXYZ*>(_vertices[0]);
+        const auto* vS = static_cast<const ORB_SLAM3::VertexSim3Expmap*>(_vertices[1]);
+
+        const Eigen::Vector3d Xc = vS->estimate().map(vP->estimate());
+        if (Xc(2) <= 1e-9 || !Xc.allFinite())
+        {
+            _error[0] = 1e3;
+            return;
+        }
+
+        const double invz = 1.0 / Xc(2);
+        const double u = fx * Xc(0) * invz + cx;
+        const double v = fy * Xc(1) * invz + cy;
+
+        const Eigen::Vector3d& L = _measurement; // (a,b,c)
+        _error[0] = L(0)*u + L(1)*v + L(2);
+    }
+
+    double fx, fy, cx, cy;
+};
+
 // class EdgeSE3ProjectLineXYZOnlyPose
 //     : public g2o::BaseUnaryEdge<4, Eigen::Matrix<double,4,1>, g2o::VertexSE3Expmap> 
 // {

@@ -211,6 +211,14 @@ target_link_libraries(test_stereo_line_jacobian PRIVATE
     ${OpenCV_LIBRARIES}
     Eigen3::Eigen)
 
+# Line loop closing: Sim3 line edge numerical Jacobian + Plucker consistency
+add_executable(test_line_loop tests/test_line_loop.cpp)
+target_link_libraries(test_line_loop PRIVATE
+    ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
+    ${ORB_SLAM3_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+    ${OpenCV_LIBRARIES}
+    Eigen3::Eigen)
+
 # Line structural loss autograd vs finite-difference check
 add_executable(test_line_structure_loss tests/test_line_structure_loss.cpp)
 target_link_libraries(test_line_structure_loss PRIVATE

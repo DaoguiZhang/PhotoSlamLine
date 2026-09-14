@@ -217,6 +217,17 @@ public:
                             g2o::Sim3 &g2oS12, const float th2, const bool bFixScale,
                             Eigen::Matrix<double,7,7> &mAcumHessian, const bool bAllPoints=false);
 
+    // OptimizeSim3 + line residuals. Point edges keep exactly the OptimizeSim3
+    // outlier rejection and define the returned inlier count (acceptance is NOT
+    // affected by lines); line edges (endpoint -> observed 2D line in pKF1) only
+    // refine the Sim(3) estimate. When vpMatchedLines1 holds no valid lines, the
+    // result is identical to OptimizeSim3 (reliable fallback).
+    static int OptimizeSim3WithLine(KeyFrame* pKF1, KeyFrame* pKF2,
+                            std::vector<MapPoint *> &vpMatches1,
+                            std::vector<MapLine *> &vpMatchedLines1,
+                            g2o::Sim3 &g2oS12, const float th2, const bool bFixScale,
+                            Eigen::Matrix<double,7,7> &mAcumHessian, const bool bAllPoints=false);
+
     // For inertial systems
 
     void static LocalInertialBA(KeyFrame* pKF, bool *pbStopFlag, Map *pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, MappingOperation& opr, bool bLarge = false, bool bRecInit = false);

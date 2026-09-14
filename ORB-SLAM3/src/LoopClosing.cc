@@ -24,6 +24,7 @@
 #include "Optimizer.h"
 #include "ORBmatcher.h"
 #include "G2oTypes.h"
+#include "LineMode.h"
 
 #include<mutex>
 #include<thread>
@@ -344,9 +345,8 @@ void LoopClosing::RunWithLine()
             std::chrono::steady_clock::time_point time_StartPR = std::chrono::steady_clock::now();
 #endif
 
-            // 🌟 1. 尝试使用纯位置和共视进行检测（原函数名可以保留或替换为你的新函数）
-            // 在这里我们依然调用原始的寻找候选区的入口，但如果底层你修改了，也需要同步
-            bool bFindedRegion = NewDetectCommonRegions();
+            // 🌟 1. 线感知的回环/合并候选检测（点候选 + 线投影匹配）
+            bool bFindedRegion = NewDetectCommonRegionsWithLine();
             
             //----------------debug----------------------//
             if(bFindedRegion)
@@ -752,7 +752,7 @@ bool LoopClosing::NewDetectCommonRegions()
 #ifdef REGISTER_TIMES
         std::chrono::steady_clock::time_point time_StartQuery = std::chrono::steady_clock::now();
 #endif
-        mpKeyFrameDB->DetectNBestCandidates(mpCurrentKF, vpLoopBowCand, vpMergeBowCand,3);
+        mpKeyFrameDB->DetectNBestCandidates(mpCurrentKF, vpLoopBowCand, vpMergeBowCand,10); // relaxed from 3 candidates
 #ifdef REGISTER_TIMES
         std::chrono::steady_clock::time_point time_EndQuery = std::chrono::steady_clock::now();
 
@@ -996,7 +996,12 @@ bool LoopClosing::NewDetectCommonRegionsWithLine()
         std::chrono::steady_clock::time_point time_StartQuery = std::chrono::steady_clock::now();
 #endif
         // 从数据库检索候选帧 (底层基于 BoW，不涉及具体点线几何)
-        mpKeyFrameDB->DetectNBestCandidates(mpCurrentKF, vpLoopBowCand, vpMergeBowCand, 3);
+        mpKeyFrameDB->DetectNBestCandidates(mpCurrentKF, vpLoopBowCand, vpMergeBowCand, 10); // relaxed from 3 candidates
+        if(IsLineLoopDiag())
+            std::cout << "[LineLoop] BoW query KF " << mpCurrentKF->mnId
+                      << ": bowVec=" << mpCurrentKF->mBowVec.size()
+                      << " loopCand=" << vpLoopBowCand.size()
+                      << " mergeCand=" << vpMergeBowCand.size() << std::endl;
 #ifdef REGISTER_TIMES
         std::chrono::steady_clock::time_point time_EndQuery = std::chrono::steady_clock::now();
         double timeDataQuery = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndQuery - time_StartQuery).count();
@@ -1038,6 +1043,11 @@ bool LoopClosing::NewDetectCommonRegionsWithLine()
 
     if(mbMergeDetected || mbLoopDetected)
     {
+        if(IsLineLoopDiag())
+            std::cout << "[LineLoop] candidate accepted: loop=" << (mbLoopDetected?1:0)
+                      << " merge=" << (mbMergeDetected?1:0)
+                      << " matchedPts=" << mvpLoopMPs.size()
+                      << " matchedLines=" << mvpLoopMatchedLines.size() << std::endl;
         return true;
     }
 
@@ -1107,11 +1117,15 @@ bool LoopClosing::DetectAndReffineSim3FromLastKFWithLines(KeyFrame* pCurrentKF, 
         spAlreadyMatchedMPs, vpMPs, vpMatchedMPs,
         spAlreadyMatchedMLs, vpMLs, vpMatchedMLs);
 
-    int nProjMatches = 30;        // 初始投影匹配总数阈值
-    int nProjOptMatches = 50;     // 优化后内点总数阈值
-    int nProjMatchesRep = 100;    // 最终二次投影匹配总数阈值
+    int nProjMatches = 30;        // 初始投影匹配总数阈值（点，与点流程一致）
+    int nProjOptMatches = 50;     // 优化后内点总数阈值（点，与点流程一致）
+    int nProjMatchesRep = 100;    // 最终二次投影匹配总数阈值（点，与点流程一致）
 
-    if(nNumProjMatches >= nProjMatches)
+    // 点数与线数分别统计；接受判定只依据点，避免未定义的“点数+线数”混加。
+    int numProjMatches = 0;
+    for(size_t i = 0; i < vpMatchedMPs.size(); i++) if(vpMatchedMPs[i]) numProjMatches++;
+
+    if(numProjMatches >= nProjMatches)
     {
         Sophus::SE3d mTwm = pMatchedKF->GetPoseInverse().cast<double>();
         g2o::Sim3 gSwm(mTwm.unit_quaternion(), mTwm.translation(), 1.0);
@@ -1121,27 +1135,20 @@ bool LoopClosing::DetectAndReffineSim3FromLastKFWithLines(KeyFrame* pCurrentKF, 
         bool bFixedScale = mbFixScale;       
         if(mpTracker->mSensor==System::IMU_MONOCULAR && !pCurrentKF->GetMap()->GetIniertialBA2())
             bFixedScale=false;
-            
-        // 🌟 2. 仅利用 MapPoint 优化 Sim3 位姿 
-        // （由于 Optimizer::OptimizeSim3 目前是基于点的，我们暂时用点来提供精确求解）
-        int numOptMatches = Optimizer::OptimizeSim3(pCurrentKF, pMatchedKF, vpMatchedMPs, gScm, 10, bFixedScale, mHessian7x7, true);
 
-        // 计算当前匹配上的 MapLine 数量，用于辅助评分
-        int numLineMatches = 0;
-        for(size_t i = 0; i < vpMatchedMLs.size(); i++) {
-            if(vpMatchedMLs[i]) numLineMatches++;
-        }
-        
-        // 🌟 综合内点数：优化后的点内点 + 匹配上的线段数
-        // 这样可以防止弱纹理区域点数量不足 50 导致回环被误杀
-        int totalOptMatches = numOptMatches + numLineMatches * 2; // 线特征通常提供更强约束，可赋予权重(如 *2)
+        // Sim(3) 精化：C 模式下把可靠匹配线作为额外残差加入；接受判定仍由点内点数决定。
+        int numOptMatches;
+        if(GetLineLoopMode() >= 2)
+            numOptMatches = Optimizer::OptimizeSim3WithLine(pCurrentKF, pMatchedKF, vpMatchedMPs, vpMatchedMLs, gScm, 10, bFixedScale, mHessian7x7, true);
+        else
+            numOptMatches = Optimizer::OptimizeSim3(pCurrentKF, pMatchedKF, vpMatchedMPs, gScm, 10, bFixedScale, mHessian7x7, true);
 
-        if(totalOptMatches > nProjOptMatches)
+        if(numOptMatches > nProjOptMatches)
         {
             // 通过优化后的 gScm 还原出更新后的 gScw
             g2o::Sim3 gScw_estimation = gScm * gSwm.inverse();
 
-            // 🌟 3. 清空之前的匹配容器，准备用优化后的更精确的位姿重新投影搜寻更多特征
+            // 用优化后的位姿重新投影搜寻更多特征
             vpMatchedMPs.assign(pCurrentKF->GetMapPointMatches().size(), nullptr);
             vpMatchedMLs.assign(pCurrentKF->GetMapLineMatches().size(), nullptr);
 
@@ -1150,8 +1157,11 @@ bool LoopClosing::DetectAndReffineSim3FromLastKFWithLines(KeyFrame* pCurrentKF, 
                 spAlreadyMatchedMPs, vpMPs, vpMatchedMPs,
                 spAlreadyMatchedMLs, vpMLs, vpMatchedMLs);
 
-            // 如果使用精确位姿找到了足够多的特征 (点+线 >= 100)
-            if(nNumProjMatches >= nProjMatchesRep)
+            int numProjMatchesRep = 0;
+            for(size_t i = 0; i < vpMatchedMPs.size(); i++) if(vpMatchedMPs[i]) numProjMatchesRep++;
+
+            // 若精确位姿找到了足够多的点（>= 100），接受该候选
+            if(numProjMatchesRep >= nProjMatchesRep)
             {
                 gScw = gScw_estimation; // 更新最终的位姿
                 return true;
@@ -1165,9 +1175,10 @@ bool LoopClosing::DetectAndReffineSim3FromLastKFWithLines(KeyFrame* pCurrentKF, 
 bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, KeyFrame* &pMatchedKF2, KeyFrame* &pLastCurrentKF, g2o::Sim3 &g2oScw,
                                              int &nNumCoincidences, std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs)
 {
+    // Baseline point-loop geometric acceptance (relaxed for monocular drift; NOT line thresholds).
     int nBoWMatches = 20;
-    int nBoWInliers = 15;
-    int nSim3Inliers = 20;
+    int nBoWInliers = 8;   // was 15
+    int nSim3Inliers = 10; // was 20
     int nProjMatches = 50;
     int nProjOptMatches = 80;
 
@@ -1277,13 +1288,14 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
 
         if(numBoWMatches >= nBoWMatches) // TODO pick a good threshold
         {
+            vnStage[index] = 1;
             // Geometric validation
             bool bFixedScale = mbFixScale;
             if(mpTracker->mSensor==System::IMU_MONOCULAR && !mpCurrentKF->GetMap()->GetIniertialBA2())
                 bFixedScale=false;
 
             Sim3Solver solver = Sim3Solver(mpCurrentKF, pMostBoWMatchesKF, vpMatchedPoints, bFixedScale, vpKeyFrameMatchedMP);
-            solver.SetRansacParameters(0.99, nBoWInliers, 300); // at least 15 inliers
+            solver.SetRansacParameters(0.99, nBoWInliers, 500); // relaxed from 300 iters
 
             bool bNoMore = false;
             vector<bool> vbInliers;
@@ -1295,6 +1307,10 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
                 mTcm = solver.iterate(20,bNoMore, vbInliers, nInliers, bConverge);
                 //Verbose::PrintMess("BoW guess: Solver achieve " + to_string(nInliers) + " geometrical inliers among " + to_string(nBoWInliers) + " BoW matches", Verbose::VERBOSITY_DEBUG);
             }
+            vnMatchesStage[index] = solver.GetBestInliers();
+
+            if(!bConverge)
+                vnStage[index] = 2;
 
             if(bConverge)
             {
@@ -1302,7 +1318,6 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
 
                 //Verbose::PrintMess("BoW guess: Convergende with " + to_string(nInliers) + " geometrical inliers among " + to_string(nBoWInliers) + " BoW matches", Verbose::VERBOSITY_DEBUG);
                 // Match by reprojection
-                vpCovKFi.clear();
                 vpCovKFi = pMostBoWMatchesKF->GetBestCovisibilityKeyFrames(nNumCovisibles);
                 vpCovKFi.push_back(pMostBoWMatchesKF);
                 set<KeyFrame*> spCheckKFs(vpCovKFi.begin(), vpCovKFi.end());
@@ -1344,7 +1359,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
 
                 if(numProjMatches >= nProjMatches)
                 {
-                    // Optimize Sim3 transformation with every matches
+                    vnStage[index] = 3;
                     Eigen::Matrix<double, 7, 7> mHessian7x7;
 
                     bool bFixedScale = mbFixScale;
@@ -1355,6 +1370,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
 
                     if(numOptMatches >= nSim3Inliers)
                     {
+                        vnStage[index] = 4;
                         g2o::Sim3 gSmw(pMostBoWMatchesKF->GetRotation().cast<double>(),pMostBoWMatchesKF->GetTranslation().cast<double>(),1.0);
                         g2o::Sim3 gScw = gScm*gSmw; // Similarity matrix of current from the world position
                         Sophus::Sim3f mScw = Converter::toSophus(gScw);
@@ -1365,6 +1381,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
 
                         if(numProjOptMatches >= nProjOptMatches)
                         {
+                            vnStage[index] = 5;
                             int max_x = -1, min_x = 1000000;
                             int max_y = -1, min_y = 1000000;
                             for(MapPoint* pMPi : vpMatchedMP)
@@ -1451,6 +1468,13 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
                 Verbose::PrintMess("BoW candidate: it don't match with the current one", Verbose::VERBOSITY_DEBUG);
             }*/
         }
+        if(IsLineLoopDiag())
+            std::cout << "[LineLoop][PointBoW] curKF " << mpCurrentKF->mnId
+                      << " cand " << pKFi->mnId
+                      << " bow=" << numBoWMatches
+                      << " stage=" << vnStage[index]
+                      << " bestInl=" << vnMatchesStage[index]
+                      << std::endl;
         index++;
     }
 
@@ -1487,14 +1511,12 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                                      int &nNumCoincidences, std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs,
                                      std::vector<MapLine*> &vpMLs, std::vector<MapLine*> &vpMatchedMLs)
 {
+    // Baseline point-loop geometric acceptance (relaxed for monocular drift; NOT line thresholds).
     int nBoWMatches = 20;
-    int nBoWInliers = 15;
-    int nSim3Inliers = 20;
+    int nBoWInliers = 8;   // was 15
+    int nSim3Inliers = 10; // was 20
     int nProjMatches = 50;
     int nProjOptMatches = 80;
-    
-    // 🌟 可以适当降低对点数量的硬性要求，因为我们还有线特征作为支撑
-    int nProjLineMatchesTh = 10; 
 
     set<KeyFrame*> spConnectedKeyFrames = mpCurrentKF->GetConnectedKeyFrames();
 
@@ -1607,7 +1629,7 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                 bFixedScale=false;
 
             Sim3Solver solver = Sim3Solver(mpCurrentKF, pMostBoWMatchesKF, vpMatchedPoints, bFixedScale, vpKeyFrameMatchedMP);
-            solver.SetRansacParameters(0.99, nBoWInliers, 300); // at least 15 inliers
+            solver.SetRansacParameters(0.99, nBoWInliers, 500); // relaxed from 300 iters
 
             bool bNoMore = false;
             vector<bool> vbInliers;
@@ -1683,8 +1705,8 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                 for(int r=0; r<4; r++) for(int c=0; c<4; c++) cvScw.at<float>(r,c) = eigScw(r,c);
                 int numLineProjMatches = line_matcher.SearchByProjection(mpCurrentKF, cvScw, vpMapLines, vpMatchedML, 5.0);
 
-                // 综合判断 (可以选择放宽一点单独依靠点匹配的要求，如果线特征也能匹配上一些)
-                if(numProjMatches >= nProjMatches || (numProjMatches > nProjMatches*0.8 && numLineProjMatches >= nProjLineMatchesTh))
+                // 接受判定只依据点投影匹配数（与点流程一致），线匹配仅随行记录用于融合/精化。
+                if(numProjMatches >= nProjMatches)
                 {
                     // Optimize Sim3 transformation with every point match
                     Eigen::Matrix<double, 7, 7> mHessian7x7;
@@ -1692,8 +1714,12 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                     if(mpTracker->mSensor==System::IMU_MONOCULAR && !mpCurrentKF->GetMap()->GetIniertialBA2())
                         bFixedScale=false;
 
-                    // 这里还是用点进行精确的 Sim3 优化
-                    int numOptMatches = Optimizer::OptimizeSim3(mpCurrentKF, pKFi, vpMatchedMP, gScm, 10, mbFixScale, mHessian7x7, true);
+                    // Sim(3) 精化：C 模式加入匹配线残差；接受判定仍由点内点数决定。
+                    int numOptMatches;
+                    if(GetLineLoopMode() >= 2)
+                        numOptMatches = Optimizer::OptimizeSim3WithLine(mpCurrentKF, pKFi, vpMatchedMP, vpMatchedML, gScm, 10, mbFixScale, mHessian7x7, true);
+                    else
+                        numOptMatches = Optimizer::OptimizeSim3(mpCurrentKF, pKFi, vpMatchedMP, gScm, 10, mbFixScale, mHessian7x7, true);
 
                     if(numOptMatches >= nSim3Inliers)
                     {
@@ -1712,8 +1738,8 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                         for(int r=0; r<4; r++) for(int c=0; c<4; c++) cvScwOpt.at<float>(r,c) = eigScwOpt(r,c);
                         int numLineProjOptMatches = line_matcher.SearchByProjection(mpCurrentKF, cvScwOpt, vpMapLines, vpMatchedMLOpt, 3.0);
 
-                        // 综合检查（同样允许线段补偿一部分点的缺失）
-                        if(numProjOptMatches >= nProjOptMatches || (numProjOptMatches > nProjOptMatches*0.8 && numLineProjOptMatches > 5))
+                        // 接受判定只依据优化后的点投影匹配数。
+                        if(numProjOptMatches >= nProjOptMatches)
                         {
                             int nNumKFs = 0;
                             // Check the Sim3 transformation with the current KeyFrame covisibles
@@ -1744,11 +1770,8 @@ bool LoopClosing::DetectCommonRegionsFromBoWWithLines(std::vector<KeyFrame*> &vp
                                 vnMatchesStage[index] = nNumKFs;
                             }
 
-                            // 结合点数和线数作为评估标准（你可以加上一定权重，比如1条线算2个点）
-                            int totalCombinedScore = numProjOptMatches + numLineProjOptMatches * 2;
-                            int bestTotalScore = nBestMatchesReproj + (vpBestMatchedMapLines.empty() ? 0 : numLineProjOptMatches * 2);
-
-                            if(totalCombinedScore > bestTotalScore)
+                            // 评分只依据点匹配数，线匹配随行记录。
+                            if(numProjOptMatches > nBestMatchesReproj)
                             {
                                 nBestMatchesReproj = numProjOptMatches; // 仍然记录为点的数量，用于后续兼容
                                 nBestNumCoindicendes = nNumKFs;
@@ -2265,6 +2288,8 @@ void LoopClosing::CorrectLoopWithLine()
 {
     //cout << "Loop detected!" << endl;
 
+    int nLinesCorrected = 0; // coarse Sim(3) correction count (diagnostics)
+
     // Send a stop signal to Local Mapping
     // Avoid new keyframes are inserted while correcting the loop
     mpLocalMapper->RequestStop();
@@ -2426,7 +2451,9 @@ void LoopClosing::CorrectLoopWithLine()
                 pMLi->SetLineWorldPos(eigCorrectedP1w.cast<float>(), eigCorrectedP2w.cast<float>());
                 pMLi->mnCorrectedByKF = mpCurrentKF->mnId;
                 pMLi->mnCorrectedReference = pKFi->mnId;
-                pMLi->UpdateNormalAndDepth(); // 如果你的线类有更新函数，调用它
+                pMLi->ComputePluckerLineFromWorldLine(); // 同步 Plücker 表示
+                pMLi->UpdateNormalAndDepth();
+                nLinesCorrected++;
             }
 
             // Correct velocity according to orientation correction
@@ -2464,6 +2491,7 @@ void LoopClosing::CorrectLoopWithLine()
         //cout << "LC: end replacing duplicated" << endl;
 
         // 线段的处理 Start Loop Fusion
+        int nLinesFused = 0;
         for(size_t i=0; i<mvpLoopMatchedLines.size(); i++)
         {
             if(mvpLoopMatchedLines[i])
@@ -2471,7 +2499,10 @@ void LoopClosing::CorrectLoopWithLine()
                 MapLine* pLoopML = mvpLoopMatchedLines[i];
                 MapLine* pCurML = mpCurrentKF->GetMapLine(i);
                 if(pCurML)
+                {
                     pCurML->Replace(pLoopML);
+                    nLinesFused++;
+                }
                 else
                 {
                     mpCurrentKF->AddMapLine(pLoopML,i);
@@ -2480,6 +2511,12 @@ void LoopClosing::CorrectLoopWithLine()
                 }
             }
         }
+
+        if(IsLineLoopDiag())
+            std::cout << "[LineLoop] CorrectLoopWithLine: scale=" << mg2oLoopScw.scale()
+                      << " KFs=" << mvpCurrentConnectedKFs.size()
+                      << " linesCorrected=" << nLinesCorrected
+                      << " linesFused=" << nLinesFused << std::endl;
     }
 
     // Project MapPoints observed in the neighborhood of the loop keyframe
@@ -2543,6 +2580,9 @@ void LoopClosing::CorrectLoopWithLine()
 
     mpAtlas->InformNewBigChange();
 
+    if(IsLineLoopDiag())
+        std::cout << "[LineLoop] EssentialGraph done (WithLine) + Gaussian sync pushed" << std::endl;
+
     // Add loop edge
     mpLoopMatchedKF->AddLoopEdge(mpCurrentKF);
     mpCurrentKF->AddLoopEdge(mpLoopMatchedKF);
@@ -2554,6 +2594,9 @@ void LoopClosing::CorrectLoopWithLine()
         mbFinishedGBA = false;
         mbStopGBA = false;
         mnCorrectionGBA = mnNumCorrection;
+
+        if(IsLineLoopDiag())
+            std::cout << "[LineLoop] GBA triggered (mode=" << GetLineLoopMode() << ")" << std::endl;
 
         mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustmentWithLine, this, pLoopMap, mpCurrentKF->mnId);
     }
@@ -4554,8 +4597,11 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
 
     if(!bImuInit)
     {
-        //Optimizer::GlobalBundleAdjustemnt(pActiveMap,10,&mbStopGBA,nLoopKF,false);
-        Optimizer::GlobalBundleAdjustemntWithLine(pActiveMap,10,&mbStopGBA,nLoopKF,false);
+        // C 模式：点线 GBA；B 模式：点 GBA + 线经参考关键帧同步（下方写回）。
+        if(GetLineLoopMode() >= 2)
+            Optimizer::GlobalBundleAdjustemntWithLine(pActiveMap,10,&mbStopGBA,nLoopKF,false);
+        else
+            Optimizer::GlobalBundleAdjustemnt(pActiveMap,10,&mbStopGBA,nLoopKF,false);
     }
     else
         Optimizer::FullInertialBA(pActiveMap,7,false,nLoopKF,&mbStopGBA);
@@ -4763,6 +4809,7 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
             // 🌟 [新增代码 2]：紧接着在这里加上对全局 BA 后的 MapLine 的更新！
             // ==========================================================
             const vector<MapLine*> vpMLs = pActiveMap->GetAllMapLines();
+            int nLinesGBA = 0;
             for(size_t i=0; i<vpMLs.size(); i++)
             {
                 MapLine* pML = vpMLs[i];
@@ -4772,6 +4819,7 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
                 {
                     // 如果线段直接被 Global BA 优化了 (前提是你的GBA支持线优化)
                     pML->SetLineWorldPos(pML->mPos1GBA, pML->mPos2GBA);
+                    nLinesGBA++;
                 }
                 else
                 {
@@ -4789,6 +4837,7 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
                         pRefKF->GetPoseInverse() * Xc1, 
                         pRefKF->GetPoseInverse() * Xc2
                     );
+                    nLinesGBA++;
                 }
 
                 // 🌟 [必须增加 1]：同步更新 Plucker 底层表达
@@ -4806,6 +4855,9 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
                         sample_step, view_weight, sigma, top_k);
                 }
             }
+
+            if(IsLineLoopDiag())
+                std::cout << "[LineLoop] GBA writeback done: linesUpdated=" << nLinesGBA << std::endl;
 
             pActiveMap->InformNewBigChange();
             pActiveMap->IncreaseChangeIndex();

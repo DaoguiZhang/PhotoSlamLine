@@ -49,6 +49,7 @@ public:
     Eigen::Matrix3f GetEstimatedRotation();
     Eigen::Vector3f GetEstimatedTranslation();
     float GetEstimatedScale();
+    int GetBestInliers() const { return mnBestInliers; }
 
 protected:
 

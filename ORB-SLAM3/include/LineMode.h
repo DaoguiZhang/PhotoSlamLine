@@ -141,6 +141,49 @@ inline double GetLbaLineSigmaPx()
     return s;
 }
 
+// Loop-closing line integration switch (PHOTO_SLAM_LINE_LOOP).
+//
+//   0 = A (C0 baseline): point-only loop closing. System launches LoopClosing::Run
+//       (point detection / CorrectLoop / point Essential Graph / point GBA).
+//       This reproduces the verified C0 behavior exactly.
+//   1 = B: point loop detection + line map/Gaussian sync. Lines are detected with
+//       the (point) loop candidates, matched, then corrected / fused / resampled
+//       together with MapPoints, but the Sim(3) refinement and the global BA stay
+//       point-only (lines are carried through reference-keyframe correction).
+//   2 = C (default): B + line residuals participate in the Sim(3) refinement and
+//       the global BA adds MapLine vertices + line observation edges.
+//
+// Line loop mode only takes effect when PHOTO_SLAM_LINE_MODE >= 1 (line frontend
+// active). With PHOTO_SLAM_LINE_LOOP=0 the pipeline is identical to C0.
+inline int GetLineLoopMode()
+{
+    static const int mode = []() {
+        const char* v = std::getenv("PHOTO_SLAM_LINE_LOOP");
+        if (v == nullptr)
+            return 2;
+        const std::string s(v);
+        if (s == "0")
+            return 0;
+        if (s == "1")
+            return 1;
+        return 2;
+    }();
+    return mode;
+}
+
+// Log channel for line loop closing (PHOTO_SLAM_DEBUG_LINE_LOOP=1).
+// Emits: loop candidates found, point/line geometric validation + acceptance,
+// Sim(3) scale & correction, MapLine corrected/fused counts, Essential Graph done,
+// GBA trigger/finish/write-back, Gaussian sync counts.
+inline bool IsLineLoopDiag()
+{
+    static const bool enabled = []() {
+        const char* v = std::getenv("PHOTO_SLAM_DEBUG_LINE_LOOP");
+        return v != nullptr && std::string(v) == "1";
+    }();
+    return enabled;
+}
+
 } // namespace ORB_SLAM3
 
 #endif // ORB_SLAM3_LINEMODE_H
