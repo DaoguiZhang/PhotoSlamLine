@@ -17,6 +17,7 @@
  */
 
 #include "imgui_viewer_line.h"
+#include "include/photo_slam_diag.h"
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -505,7 +506,10 @@ void ImGuiViewerLine::run()
         glfwPollEvents();
 
         if (!keep_training_  && pGausMapper_->isStopped())
+        {
+            photo_diag::log("viewer", "mapper stopped -> viewer signalStop (keep_training=%d)", (int)keep_training_);
             signalStop();
+        }
     }
 
     // Cleanup
@@ -517,9 +521,15 @@ void ImGuiViewerLine::run()
     glfwTerminate();
 
     if (pSLAM_ && !pSLAM_->isShutDown())
+    {
+        photo_diag::log("viewer", "viewer cleanup -> calling pSLAM_->Shutdown()");
         pSLAM_->Shutdown();
+    }
     else
+    {
+        photo_diag::log("viewer", "viewer cleanup -> pSLAM already shut down, signalStop mapper");
         pGausMapper_->signalStop();
+    }
 
     if (pGausMapper_->isKeepingTraining())
         pGausMapper_->setKeepTraining(false);

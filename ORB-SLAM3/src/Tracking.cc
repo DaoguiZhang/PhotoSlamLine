@@ -2513,17 +2513,20 @@ void Tracking::Track()
         {
             if(pCurrentMap->KeyFramesInMap()<=10)
             {
+                std::cerr << "[RESET_EVENT] LOST & KFs<=10 -> ResetActiveMap at frame " << mCurrentFrame.mnId << std::endl;
                 mpSystem->ResetActiveMap();
                 return;
             }
             if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
                 if (!pCurrentMap->isImuInitialized())
                 {
+                    std::cerr << "[RESET_EVENT] LOST before IMU init -> ResetActiveMap at frame " << mCurrentFrame.mnId << std::endl;
                     Verbose::PrintMess("Track lost before IMU initialisation, reseting...", Verbose::VERBOSITY_QUIET);
                     mpSystem->ResetActiveMap();
                     return;
                 }
 
+            std::cerr << "[RESET_EVENT] LOST -> CreateMapInAtlas at frame " << mCurrentFrame.mnId << std::endl;
             CreateMapInAtlas();
 
             return;
@@ -2586,6 +2589,7 @@ void Tracking::TrackWithLine()
 
     if(mpLocalMapper->mbBadImu)
     {
+        std::cerr << "[RESET_EVENT] badImu -> ResetActiveMap at frame " << mCurrentFrame.mnId << " state=" << (int)mState << std::endl;
         std::cout << "TRACK: Reset map because local mapper set the bad imu flag " << std::endl;
         mpSystem->ResetActiveMap();
         return;
@@ -2603,6 +2607,7 @@ void Tracking::TrackWithLine()
     {
         if(mLastFrame.mTimeStamp>mCurrentFrame.mTimeStamp)
         {
+            std::cerr << "[RESET_EVENT] timestamp older -> CreateMapInAtlas at frame " << mCurrentFrame.mnId << " state=" << (int)mState << std::endl;
             std::cerr << "ERROR: Frame with a timestamp older than previous frame detected!" << std::endl;
             unique_lock<mutex> lock(mMutexImuQueue);
             mlQueueImuData.clear();
@@ -3115,17 +3120,20 @@ void Tracking::TrackWithLine()
         {
             if(pCurrentMap->KeyFramesInMap()<=10)
             {
+                std::cerr << "[RESET_EVENT] LOST & KFs<=10 -> ResetActiveMap at frame " << mCurrentFrame.mnId << std::endl;
                 mpSystem->ResetActiveMap();
                 return;
             }
             if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
                 if (!pCurrentMap->isImuInitialized())
                 {
+                    std::cerr << "[RESET_EVENT] LOST before IMU init -> ResetActiveMap at frame " << mCurrentFrame.mnId << std::endl;
                     Verbose::PrintMess("Track lost before IMU initialisation, reseting...", Verbose::VERBOSITY_QUIET);
                     mpSystem->ResetActiveMap();
                     return;
                 }
 
+            std::cerr << "[RESET_EVENT] LOST -> CreateMapInAtlas at frame " << mCurrentFrame.mnId << std::endl;
             CreateMapInAtlas();
 
             return;

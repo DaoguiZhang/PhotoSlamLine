@@ -315,6 +315,9 @@ protected:
     bool keep_training_ = false;
     int default_sh_ = 0;
 
+    // Diagnostics (Phase A/B): actual optimizer step() executions.
+    unsigned long long diag_optimizer_steps_ = 0;
+
     // Settings
     SystemSensorTypeLine sensor_type_;
 

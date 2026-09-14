@@ -17,6 +17,7 @@
  */
 
 #include "include/gaussian_mapper_line.h"
+#include "include/photo_slam_diag.h"
 
 GaussianMapperLine::GaussianMapperLine(
     std::shared_ptr<ORB_SLAM3::System> pSLAM,
@@ -392,12 +393,15 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
 
 void GaussianMapperLine::run()
 {
+    photo_diag::log("mapper", "run() start: cfg=%s iterations_=%d refined_max=%d",
+        config_file_path_.string().c_str(), opt_params_.iterations_, opt_params_.refined_gaussian_max_iter_num_);
     // First loop: Initial gaussian mapping
     std::cerr << "[DEBUG] Thread: GaussianMapperLine thread started." << std::endl;
     while (!isStopped()) {
         
         // Check conditions for initial mapping
         if (hasMetInitialMappingConditions()) {
+            photo_diag::log("mapper", "initial mapping conditions met: kfs=%lu iter=%d", pSLAM_->GetNumKeyframes(), getIteration());
             //std::cerr << "[DEBUG] Checkpoint 1: Initial conditions met. Starting data collection..." << std::endl;
             pSLAM_->getAtlas()->clearMappingOperation();
 
@@ -637,6 +641,7 @@ void GaussianMapperLine::run()
             break;
         }
         else if (pSLAM_->isShutDown()) {
+            photo_diag::log("mapper", "SLAM Shutdown detected during initial wait; break. iter=%d", getIteration());
             std::cerr << "[DEBUG] SLAM Shutdown detected during wait." << std::endl;
             break;
         }
@@ -648,6 +653,7 @@ void GaussianMapperLine::run()
 
     // Second loop: Incremental gaussian mapping
     int SLAM_stop_iter = 0;
+    photo_diag::log("mapper", "second loop start: iter=%d iterations_=%d initial_mapped=%d", getIteration(), opt_params_.iterations_, (int)initial_mapped_);
     while (!isStopped()) {
         //std::cerr <<"============================start run GaussianMapperLine: LOCAL Mapping  ===================================" << std::endl;
         // Check conditions for incremental mapping
@@ -679,8 +685,10 @@ void GaussianMapperLine::run()
         if (pSLAM_->isShutDown()) {
 
             // 【修改点 1】循环清空所有积压的操作，确保最后一批 Line Gaussians 全部入场
+            int diag_pending_ops = 0;
             while (pSLAM_->getAtlas()->hasMappingOperation()) {
                 combineMappingOperations_withLine();
+                ++diag_pending_ops;
             }
             SLAM_stop_iter = getIteration();
             //// SLAM虽然关了，但我们检查是否还有残留的操作没处理完， 防止优化完全
@@ -688,10 +696,14 @@ void GaussianMapperLine::run()
             //    SLAM_ended_ = true;
             //}
             SLAM_ended_ = true;
+            photo_diag::log("mapper", "SLAM Shutdown detected in second loop: drained_ops=%d SLAM_ended_=true iter=%d", diag_pending_ops, getIteration());
         }
 
-        if (SLAM_ended_ || getIteration() >= opt_params_.iterations_)
+        if (SLAM_ended_ || getIteration() >= opt_params_.iterations_) {
+            photo_diag::log("mapper", "second loop break: SLAM_ended_=%d iter=%d iterations_=%d online_steps=%llu",
+                (int)SLAM_ended_, getIteration(), opt_params_.iterations_, diag_optimizer_steps_);
             break;
+        }
     }
 
     // // Third loop: Tail gaussian optimization
@@ -728,6 +740,7 @@ void GaussianMapperLine::run()
     // ====================================================================
     // 🌟 核心操作：重置所有关键帧的使用次数
     // ====================================================================
+    photo_diag::log("mapper", "tail refinement start: iter=%d online_steps=%llu", getIteration(), diag_optimizer_steps_);
     std::cerr << "[Gaussian Mapper] SLAM ended. Resetting remaining_times_of_use for global refinement..." << std::endl;
     {
         // 建议加上互斥锁，防止此时还有其他线程访问 keyframes (虽然此时 SLAM 已关)
@@ -744,6 +757,7 @@ void GaussianMapperLine::run()
     // 5000 次是一个非常安全的数值，大约需要多花几秒钟，但能挽救整个地图的边缘画质
     int final_iters = opt_params_.refined_gaussian_max_iter_num_; 
     int target_stop_iter = getIteration() + final_iters;
+    photo_diag::log("mapper", "tail target: target_stop_iter=%d final_iters=%d", target_stop_iter, final_iters);
 
     while (getIteration() < target_stop_iter || isKeepingTraining()) {
         try {
@@ -779,6 +793,7 @@ void GaussianMapperLine::run()
             std::cerr << "Unknown Error occurred third loop." << std::endl;
         }
     }
+    photo_diag::log("mapper", "tail refinement done: iter=%d total_steps=%llu", getIteration(), diag_optimizer_steps_);
     std::cerr << "[Gaussian Mapper] Final refinement completed perfectly! Saving models..." << std::endl;
 
     // Save and clear
@@ -807,6 +822,7 @@ void GaussianMapperLine::run()
         time_log.close();
     }
 
+    photo_diag::log("mapper", "run() end -> signalStop(): iter=%d total_steps=%llu", getIteration(), diag_optimizer_steps_);
     signalStop();
 }
 
@@ -1183,6 +1199,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         if (getIteration() < opt_params_.iterations_) {
             gaussians_->optimizer_->step();
             gaussians_->optimizer_->zero_grad(true);
+            ++diag_optimizer_steps_;
         }
     }
 }
@@ -1474,6 +1491,7 @@ void GaussianMapperLine::trainForOneIteration()
         if (getIteration() < opt_params_.iterations_) {
             gaussians_->optimizer_->step();
             gaussians_->optimizer_->zero_grad(true);
+            ++diag_optimizer_steps_;
         }
     }
 }

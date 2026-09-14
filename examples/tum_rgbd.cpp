@@ -34,6 +34,7 @@
 #include "include/gaussian_mapper.h"
 #include "viewer/imgui_viewer.h"
 #include "viewer/imgui_viewer_line.h"
+#include "include/photo_slam_diag.h"
 
 #define USE_LINE_GAUSSIAN 1
 
@@ -86,6 +87,14 @@ int main(int argc, char **argv)
         std::cerr << std::endl << "Different number of images for rgb and depth." << std::endl;
         return 1;
     }
+
+    photo_diag::log("main", "config voc=%s", std::filesystem::absolute(argv[1]).string().c_str());
+    photo_diag::log("main", "config orb=%s", std::filesystem::absolute(argv[2]).string().c_str());
+    photo_diag::log("main", "config gaussian=%s", std::filesystem::absolute(argv[3]).string().c_str());
+    photo_diag::log("main", "config seq=%s", std::filesystem::absolute(argv[4]).string().c_str());
+    photo_diag::log("main", "config assoc=%s", std::filesystem::absolute(argv[5]).string().c_str());
+    photo_diag::log("main", "config out=%s use_viewer=%d", std::filesystem::absolute(output_dir).string().c_str(), (int)use_viewer);
+    photo_diag::log("main", "expected=%d (association records)", nImages);
 
     // Device
     torch::DeviceType device_type;
@@ -145,34 +154,60 @@ int main(int argc, char **argv)
     std::vector<float> vTimesTrack;
     vTimesTrack.resize(nImages);
 
+    // ---- Phase A diagnostic counters ----
+    int diag_read_ok = 0;
+    int diag_track_called = 0;
+    int diag_track_returned = 0;
+    int diag_loop_reason = 0;  // 0 = ran to nImages, 1 = isShutDown break, 2 = empty image
+    int diag_state_hist[8] = {0};  // index = state + 1
+    int diag_lost_count = 0;
+    long diag_lost_first = -1;
+    long diag_lost_last = -1;
+    int diag_last_state = 999;
+    long diag_last_idx = -1;
+    double diag_last_ts = 0.0;
+
     std::cout << std::endl << "-------" << std::endl;
     std::cout << "Start processing sequence ..." << std::endl;
     std::cout << "Images in the sequence: " << nImages << std::endl << std::endl;
 
     // Main loop
     cv::Mat imRGB, imD;
+    photo_diag::log("main", "input loop start: expected=%d", nImages);
     for (int ni = 0; ni < nImages; ni++)
     {
         if (pSLAM->isShutDown())
+        {
+            diag_loop_reason = 1;
+            photo_diag::log("main", "input loop BREAK: isShutDown() at ni=%d (of %d)", ni, nImages);
             break;
+        }
         // Read image and depthmap from file
         imRGB = cv::imread(std::string(argv[4]) + "/" + vstrImageFilenamesRGB[ni], cv::IMREAD_UNCHANGED);
+        if (imRGB.empty())
+            photo_diag::log("main", "WARN imRGB empty BEFORE cvtColor at ni=%d", ni);
         cv::cvtColor(imRGB, imRGB, CV_BGR2RGB);
         imD = cv::imread(std::string(argv[4]) + "/" + vstrImageFilenamesD[ni], cv::IMREAD_UNCHANGED);
         double tframe = vTimestamps[ni];
 
         if (imRGB.empty())
         {
+            diag_loop_reason = 2;
+            photo_diag::log("main", "FAIL imRGB empty at ni=%d ts=%.6f", ni, tframe);
             std::cerr << std::endl << "Failed to load image at: "
                       << std::string(argv[4]) << "/" << vstrImageFilenamesRGB[ni] << std::endl;
             return 1;
         }
         if (imD.empty())
         {
+            diag_loop_reason = 2;
+            photo_diag::log("main", "FAIL imD empty at ni=%d ts=%.6f", ni, tframe);
             std::cerr << std::endl << "Failed to load depth image at: "
                       << std::string(argv[4]) << "/" << vstrImageFilenamesD[ni] << std::endl;
             return 1;
         }
+
+        diag_read_ok++;
 
         if (imageScale != 1.f)
         {
@@ -186,7 +221,20 @@ int main(int argc, char **argv)
 
         // Pass the image to the SLAM system
         //pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        diag_track_called++;
         pSLAM->TrackRGBDWithLine(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+        diag_track_returned++;
+
+        int st = pSLAM->GetTrackingState();
+        if (st >= -1 && st <= 5) diag_state_hist[st + 1]++;
+        if (st == 4) { diag_lost_count++; if (diag_lost_first < 0) diag_lost_first = ni; diag_lost_last = ni; }
+        if (st != diag_last_state)
+        {
+            photo_diag::log("main", "state %d -> %d at ni=%d ts=%.6f kfs=%lu", diag_last_state, st, ni, tframe, pSLAM->GetNumKeyframes());
+            diag_last_state = st;
+        }
+        diag_last_idx = ni;
+        diag_last_ts = tframe;
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
@@ -204,11 +252,16 @@ int main(int argc, char **argv)
         if (ttrack < T)
             usleep((T - ttrack) * 1e6);
     }
+    photo_diag::log("main", "input loop END: reason=%d expected=%d read_ok=%d track_called=%d track_returned=%d last_idx=%ld lost=%d",
+        diag_loop_reason, nImages, diag_read_ok, diag_track_called, diag_track_returned, diag_last_idx, diag_lost_count);
 
     std::cout << "Sequence processing finished. Waiting for backend to sync..." << std::endl;
     
     // Stop all threads
+    photo_diag::log("main", "calling Shutdown from main: input_done=%d already_shutdown=%d last_idx=%ld",
+        (int)(diag_last_idx + 1 >= nImages), (int)pSLAM->isShutDown(), diag_last_idx);
     pSLAM->Shutdown();
+    photo_diag::log("main", "Shutdown() returned");
 
     // 4. 等待训练线程结束
     // 因为你在 GaussianMapperLine::run() 结尾加了 target_stop_iter 循环，
@@ -236,6 +289,51 @@ int main(int argc, char **argv)
     pSLAM->SaveTrajectoryEuRoC((output_dir / "CameraTrajectory_EuRoC.txt").string());
     pSLAM->SaveKeyFrameTrajectoryEuRoC((output_dir / "KeyFrameTrajectory_EuRoC.txt").string());
     pSLAM->SaveTrajectoryKITTI((output_dir / "CameraTrajectory_KITTI.txt").string());
+
+    // ---- Phase A: write IntegrityReport ----
+    {
+        unsigned long diag_traj_lines = 0;
+        unsigned long diag_traj_uniq_ts = 0;
+        double diag_prev_ts = -1.0;
+        {
+            std::ifstream trj((output_dir / "CameraTrajectory_TUM.txt").string());
+            std::string line;
+            while (std::getline(trj, line))
+            {
+                if (line.empty()) continue;
+                diag_traj_lines++;
+                std::istringstream ss(line);
+                double t;
+                if (ss >> t) { if (t != diag_prev_ts) diag_traj_uniq_ts++; diag_prev_ts = t; }
+            }
+        }
+        std::ofstream rep((output_dir / "IntegrityReport.txt").string());
+        if (rep.is_open())
+        {
+            rep << "expected=" << nImages << "\n";
+            rep << "read_ok=" << diag_read_ok << "\n";
+            rep << "track_called=" << diag_track_called << "\n";
+            rep << "track_returned=" << diag_track_returned << "\n";
+            rep << "loop_reason=" << diag_loop_reason << "\n";
+            rep << "last_idx=" << diag_last_idx << "\n";
+            rep << "last_ts=" << std::fixed << std::setprecision(6) << diag_last_ts << "\n";
+            rep << "keyframes=" << pSLAM->GetNumKeyframes() << "\n";
+            rep << "trajectory_lines=" << diag_traj_lines << "\n";
+            rep << "trajectory_unique_ts=" << diag_traj_uniq_ts << "\n";
+            rep << "lost_count=" << diag_lost_count << "\n";
+            rep << "lost_first=" << diag_lost_first << "\n";
+            rep << "lost_last=" << diag_lost_last << "\n";
+            rep << "state_hist[NO_IMAGES_YET=0]=" << diag_state_hist[1] << "\n";
+            rep << "state_hist[NOT_INITIALIZED=1]=" << diag_state_hist[2] << "\n";
+            rep << "state_hist[OK=2]=" << diag_state_hist[3] << "\n";
+            rep << "state_hist[RECENTLY_LOST=3]=" << diag_state_hist[4] << "\n";
+            rep << "state_hist[LOST=4]=" << diag_state_hist[5] << "\n";
+            rep << "state_hist[OK_KLT=5]=" << diag_state_hist[6] << "\n";
+            rep.close();
+        }
+        photo_diag::log("main", "IntegrityReport written: traj_lines=%lu uniq_ts=%lu kfs=%lu lost=%d",
+            diag_traj_lines, diag_traj_uniq_ts, pSLAM->GetNumKeyframes(), diag_lost_count);
+    }
 
     return 0;
 }
