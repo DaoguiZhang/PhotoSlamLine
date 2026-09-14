@@ -364,6 +364,15 @@ protected:
     // Tools
     std::random_device rd_;
 
+    // Explicit-seed control for the keyframe-order shuffle
+    // (PHOTO_SLAM_GAUSSIAN_KF_SEED). When set, kfid_rng_ is seeded ONCE at
+    // construction and reused by generateKfidRandomShuffle(); when unset, the
+    // original per-call random_device-seeded engine is used (default behavior).
+    // Accessed only from the GaussianMapperLine::run() thread.
+    std::mt19937 kfid_rng_;
+    bool use_explicit_kfid_seed_ = false;
+    unsigned long long kfid_seed_ = 0;
+
     // Mutex
     std::mutex mutex_status_;
     std::mutex mutex_settings_;

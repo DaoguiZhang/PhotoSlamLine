@@ -18,6 +18,23 @@
 
 #include "include/gaussian_mapper_line.h"
 
+#include <cstdlib>
+#include <cstdint>
+#include <string>
+#include <numeric>
+
+namespace {
+// Diagnostics switch for the keyframe-order shuffle (PHOTO_SLAM_DEBUG_KF_SHUFFLE=1).
+inline bool IsKfShuffleDiag()
+{
+    static const bool enabled = []() {
+        const char* v = std::getenv("PHOTO_SLAM_DEBUG_KF_SHUFFLE");
+        return v != nullptr && std::string(v) == "1";
+    }();
+    return enabled;
+}
+}
+
 GaussianMapperLine::GaussianMapperLine(
     std::shared_ptr<ORB_SLAM3::System> pSLAM,
     std::filesystem::path gaussian_config_file_path,
@@ -40,6 +57,26 @@ GaussianMapperLine::GaussianMapperLine(
     // Random seed
     std::srand(seed);
     torch::manual_seed(seed);
+
+    // Optional explicit seed for the keyframe-order shuffle (reproducibility).
+    // PHOTO_SLAM_GAUSSIAN_KF_SEED=<uint>: seed kfid_rng_ once and reuse it;
+    // unset: keep the original per-call random_device-seeded engine.
+    const char* kf_seed_env = std::getenv("PHOTO_SLAM_GAUSSIAN_KF_SEED");
+    if (kf_seed_env != nullptr && kf_seed_env[0] != '\0') {
+        try {
+            kfid_seed_ = std::stoull(kf_seed_env);
+            kfid_rng_.seed(static_cast<std::mt19937::result_type>(kfid_seed_));
+            use_explicit_kfid_seed_ = true;
+        } catch (...) {
+            use_explicit_kfid_seed_ = false;
+        }
+    }
+    if (use_explicit_kfid_seed_)
+        std::cerr << "[GaussianMapper] kfid shuffle: explicit seed ENABLED seed="
+                  << kfid_seed_ << std::endl;
+    else
+        std::cerr << "[GaussianMapper] kfid shuffle: explicit seed DISABLED "
+                  << "(random_device per call)" << std::endl;
 
     // Device
     if (device_type == torch::kCUDA && torch::cuda::is_available()) {
@@ -2540,10 +2577,40 @@ void GaussianMapperLine::generateKfidRandomShuffle()
     std::size_t nkfs = scene_->keyframes().size();
     kfid_shuffle_.resize(nkfs);
     std::iota(kfid_shuffle_.begin(), kfid_shuffle_.end(), 0);
-    std::mt19937 g(rd_());
-    std::shuffle(kfid_shuffle_.begin(), kfid_shuffle_.end(), g);
+    if (use_explicit_kfid_seed_) {
+        // Persistent engine (seeded once at construction) -> reproducible order.
+        std::shuffle(kfid_shuffle_.begin(), kfid_shuffle_.end(), kfid_rng_);
+    } else {
+        // Original behavior: fresh random_device-seeded engine per call.
+        std::mt19937 g(rd_());
+        std::shuffle(kfid_shuffle_.begin(), kfid_shuffle_.end(), g);
+    }
 
     kfid_shuffled_ = true;
+
+    // Lightweight reproducibility summary (PHOTO_SLAM_DEBUG_KF_SHUFFLE=1).
+    if (IsKfShuffleDiag()) {
+        auto fnv = [](std::uint64_t h, std::uint64_t v) {
+            h ^= v;
+            h *= 0x100000001b3ULL;
+            return h;
+        };
+        std::uint64_t in_h = 1469598103934665603ULL;
+        std::uint64_t out_h = 1469598103934665603ULL;
+        for (const auto& kv : scene_->keyframes())
+            in_h = fnv(in_h, static_cast<std::uint64_t>(kv.first));
+        for (std::size_t idx : kfid_shuffle_)
+            out_h = fnv(out_h, static_cast<std::uint64_t>(idx));
+        std::cerr << "[KfShuffleDiag] nkfs=" << nkfs
+                  << " seedMode=" << (use_explicit_kfid_seed_ ? "explicit" : "random")
+                  << " seed=" << kfid_seed_
+                  << " inputHash=" << std::hex << in_h << std::dec
+                  << " shuffleHash=" << std::hex << out_h << std::dec
+                  << " head=";
+        for (std::size_t i = 0; i < std::min<std::size_t>(8, kfid_shuffle_.size()); ++i)
+            std::cerr << kfid_shuffle_[i] << ",";
+        std::cerr << std::endl;
+    }
 }
 
 std::shared_ptr<GaussianKeyframeLine>
