@@ -4646,6 +4646,8 @@ public:
 
     virtual void oplusImpl(const double* update) {
         Eigen::Map<const Eigen::Vector4d> delta(update);
+        // Guard: a diverged optimizer step (NaN/Inf) must not reach SO3::exp.
+        if (!delta.allFinite()) return;
         Eigen::Vector3d u_delta = delta.head<3>(); // 3-DoF for direction
         double w_delta = delta(3);                 // 1-DoF for momentum
 
@@ -4654,7 +4656,8 @@ public:
         double w1 = n.norm();
         double w2 = v.norm();
 
-        if (w1 < 1e-9 || w2 < 1e-9) return;
+        // NaN-safe norm check: !(x > 1e-9) is true for NaN, tiny and negative.
+        if (!(w1 > 1e-9) || !(w2 > 1e-9)) return;
 
         Eigen::Matrix3d U;
         U.col(0) = n / w1;

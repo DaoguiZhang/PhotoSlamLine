@@ -430,10 +430,24 @@ void Sim3Solver::ComputeSim3(Eigen::Matrix3f &P1, Eigen::Matrix3f &P2)
 
     Eigen::Vector3f vec = evec.block<3,1>(1,maxIndex); //extract imaginary part of the quaternion (sin*axis)
 
-    // Rotation angle. sin is the norm of the imaginary part, cos is the real part
-    double ang=atan2(vec.norm(),evec(0,maxIndex));
+    // Guard: a degenerate point triple (collinear / coincident / non-finite
+    // eigenvector) yields a singular rotation. Reject this RANSAC hypothesis
+    // with an identity Sim(3) instead of feeding NaN into SO3::exp (newer
+    // Sophus asserts on non-finite angle-axis vectors, aborting the process).
+    const float nvec = vec.norm();
+    if (!std::isfinite(nvec) || nvec < 1e-6f || !vec.allFinite())
+    {
+        mR12i = Eigen::Matrix3f::Identity();
+        mt12i = Eigen::Vector3f::Zero();
+        ms12i = 1.0f;
+        mT12i.setIdentity();
+        return;
+    }
 
-    vec = 2*ang*vec/vec.norm(); //Angle-axis representation. quaternion angle is the half
+    // Rotation angle. sin is the norm of the imaginary part, cos is the real part
+    double ang=atan2(nvec,evec(0,maxIndex));
+
+    vec = 2*ang*vec/nvec; //Angle-axis representation. quaternion angle is the half
     mR12i = Sophus::SO3f::exp(vec).matrix();
 
     // Step 5: Rotate set 2

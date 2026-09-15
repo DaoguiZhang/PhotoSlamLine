@@ -5638,6 +5638,10 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         if(!vLine4D)
             continue;
         Eigen::Matrix<double,6,1> Lw_opt = vLine4D->estimate();
+        // Guard: skip diverged (non-finite) line estimates so NaN never
+        // propagates into MapLine endpoints / tracking.
+        if (!Lw_opt.allFinite())
+            continue;
         
         // 1. 记录优化前旧的端点，用于比对变化
         auto old_endpoints = pML->GetLineWorldPos();
