@@ -5151,7 +5151,12 @@ bool Tracking::TrackWithMotionModelWithLine()
     if(nLinematches<20)
     {
         Verbose::PrintMess("Not enough Line matches, wider window search!!", Verbose::VERBOSITY_NORMAL);
-        fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
+        // BUGFIX: clear the LINE matches before the wider line re-search,
+        // NOT the point matches (points were already matched above and must
+        // be kept for the joint pose optimization). Clearing mvpMapPoints here
+        // wiped the point correspondences every time lines were scarce, which
+        // degraded the point map and broke loop closing.
+        fill(mCurrentFrame.mvpMapLines.begin(),mCurrentFrame.mvpMapLines.end(),static_cast<MapLine*>(NULL));
         //nLinematches = line_matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
         nLinematches = line_matcher.SearchByProjectionNew(mCurrentFrame, mLastFrame, 4*th, mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
         Verbose::PrintMess("Line Matches with wider search: " + to_string(nLinematches), Verbose::VERBOSITY_NORMAL);
