@@ -36,6 +36,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <algorithm>
+#include <fstream>
+#include <iomanip>
+#include <string>
 #include "MapExporter.h"
 
 
@@ -43,6 +46,42 @@ using namespace std;
 
 namespace ORB_SLAM3
 {
+
+// ============================================================================
+// Low-overhead per-frame CSV diagnostic to locate the first divergence between
+// the standard point pipeline and the line-aware pipeline.
+// Enabled via PHOTO_SLAM_TRACK_CSV=<path>. Dormant when unset.
+// Columns: frame_id,timestamp,state,ref_kf,tx,ty,tz,matches_inliers,need_kf,queue_len,accept_kf
+// ============================================================================
+static void TrackCsvAppend(Frame* pFrame, int state, unsigned long refKfId,
+                           int matchesInliers, bool bNeedKF, int queueLen, bool acceptKF)
+{
+    static bool checked = false;
+    static bool enabled = false;
+    static std::ofstream ofs;
+    static std::mutex mtx;
+    if (!checked)
+    {
+        checked = true;
+        const char* e = std::getenv("PHOTO_SLAM_TRACK_CSV");
+        enabled = (e != nullptr && e[0] != '\0');
+        if (enabled)
+        {
+            ofs.open(e, std::ios::out);
+            ofs << "frame_id,timestamp,state,ref_kf,tx,ty,tz,matches_inliers,need_kf,queue_len,accept_kf\n";
+        }
+    }
+    if (!enabled) return;
+    std::lock_guard<std::mutex> lk(mtx);
+    const Sophus::SE3f Tcw = pFrame->GetPose();
+    const Eigen::Vector3f t = Tcw.translation();
+    ofs << pFrame->mnId << ',' << std::fixed << std::setprecision(6) << pFrame->mTimeStamp << ','
+        << state << ',' << refKfId << ','
+        << t.x() << ',' << t.y() << ',' << t.z() << ','
+        << matchesInliers << ',' << (bNeedKF?1:0) << ','
+        << queueLen << ',' << (acceptKF?1:0) << '\n';
+    ofs.flush();
+}
 
 // ============================================================================
 // Debug-only statistics for Mono line initialization.
@@ -2735,6 +2774,9 @@ void Tracking::Track()
             std::chrono::steady_clock::time_point time_StartNewKF = std::chrono::steady_clock::now();
 #endif
             bool bNeedKF = NeedNewKeyFrame();
+            TrackCsvAppend(&mCurrentFrame, (int)mState, mpReferenceKF ? mpReferenceKF->mnId : 0,
+                           mnMatchesInliers, bNeedKF, mpLocalMapper->KeyframesInQueue(),
+                           mpLocalMapper->AcceptKeyFrames());
 
             // Check if we need to insert a new keyframe
             // if(bNeedKF && bOK)
@@ -3355,6 +3397,9 @@ void Tracking::TrackWithLine()
 #endif
             //bool bNeedKF = NeedNewKeyFrame();
             bool bNeedKF = NeedNewKeyFrameWithLine();   //to do next...
+            TrackCsvAppend(&mCurrentFrame, (int)mState, mpReferenceKF ? mpReferenceKF->mnId : 0,
+                           mnMatchesInliers, bNeedKF, mpLocalMapper->KeyframesInQueue(),
+                           mpLocalMapper->AcceptKeyFrames());
             // Check if we need to insert a new keyframe
             // if(bNeedKF && bOK)
             if(bNeedKF && (bOK || (mInsertKFsLost && mState==RECENTLY_LOST &&
