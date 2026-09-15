@@ -24,6 +24,7 @@
 #include "Converter.h"
 #include "GeometricTools.h"
 #include "MapExporter.h"
+#include "LineMode.h"
 
 #include<mutex>
 #include<chrono>
@@ -479,9 +480,21 @@ void LocalMapping::RunWithLine()
                         //Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
                         //std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Reg" << std::endl;
 
-                        std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
-                        Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
-                        std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
+                        // Ablation gate: reuse the standard point LBA when line
+                        // vertices/edges are disabled (LINE_MODE < 2 or LBA_LINE=0).
+                        // This keeps the point map identical to the point-only
+                        // pipeline; line processing is then attached on top only
+                        // when line edges actually participate.
+                        if (GetLineMode() >= 2 && GetLbaLineEnabled())
+                        {
+                            std::cerr << "LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
+                            Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, num_MLs_BA, opr);
+                            std::cerr << "LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg" << std::endl;
+                        }
+                        else
+                        {
+                            Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
+                        }
 
 
                         b_doneLBA = true;
