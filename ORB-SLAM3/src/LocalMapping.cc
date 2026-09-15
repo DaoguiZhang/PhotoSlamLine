@@ -2490,7 +2490,10 @@ void LocalMapping::SearchInNeighborsLines()
         }
     }
 
-    mpCurrentKeyFrame->UpdateConnections();
+    // Note: covisibility connections are point-only (KeyFrame::UpdateConnections
+    // uses MapPoint observations), so the line fusion above does not change them;
+    // UpdateConnections() is intentionally NOT re-called here (already done in
+    // SearchInNeighbors()).
 }
 
 void LocalMapping::SearchInNeighborsWithLineNew()
