@@ -21,10 +21,12 @@
 
 #include <vector>
 #include <cmath>
+#include <algorithm>
 #include <opencv2/core/core.hpp>
 
 #include "KeyFrame.h"
 #include "ORBmatcher.h"
+#include "LineMode.h"
 
 #include "Thirdparty/DBoW2/DUtils/Random.h"
 
@@ -67,6 +69,8 @@ Sim3Solver::Sim3Solver(KeyFrame *pKF1, KeyFrame *pKF2, const vector<MapPoint *> 
 
     size_t idx=0;
 
+    int nStatPmp1Null=0, nStatPmp1Bad=0, nStatPmp2Bad=0, nStatIdx1Neg=0, nStatIdx2Neg=0, nStatKept=0;
+
     KeyFrame* pKFm = pKF2; //Default variable
     for(int i1=0; i1<mN1; i1++)
     {
@@ -76,10 +80,16 @@ Sim3Solver::Sim3Solver(KeyFrame *pKF1, KeyFrame *pKF2, const vector<MapPoint *> 
             MapPoint* pMP2 = vpMatched12[i1];
 
             if(!pMP1)
+            {
+                nStatPmp1Null++;
                 continue;
+            }
 
             if(pMP1->isBad() || pMP2->isBad())
+            {
+                nStatPmp1Bad++;
                 continue;
+            }
 
             if(bDifferentKFs)
                 pKFm = vpKeyFrameMatchedMP[i1];
@@ -87,8 +97,17 @@ Sim3Solver::Sim3Solver(KeyFrame *pKF1, KeyFrame *pKF2, const vector<MapPoint *> 
             int indexKF1 = get<0>(pMP1->GetIndexInKeyFrame(pKF1));
             int indexKF2 = get<0>(pMP2->GetIndexInKeyFrame(pKFm));
 
-            if(indexKF1<0 || indexKF2<0)
+            if(indexKF1<0)
+            {
+                nStatIdx1Neg++;
                 continue;
+            }
+            if(indexKF2<0)
+            {
+                nStatIdx2Neg++;
+                continue;
+            }
+            nStatKept++;
 
             const cv::KeyPoint &kp1 = pKF1->mvKeysUn[indexKF1];
             const cv::KeyPoint &kp2 = pKFm->mvKeysUn[indexKF2];
@@ -112,6 +131,38 @@ Sim3Solver::Sim3Solver(KeyFrame *pKF1, KeyFrame *pKF2, const vector<MapPoint *> 
             mvAllIndices.push_back(idx);
             idx++;
         }
+    }
+
+    if(IsLineLoopDiag())
+    {
+        std::cerr << "[Sim3Solver] pKF1=" << pKF1->mnId
+                  << " pKF2=" << pKF2->mnId
+                  << " diffKFs=" << (bDifferentKFs?1:0)
+                  << " in=" << mN1
+                  << " mp1null=" << nStatPmp1Null
+                  << " bad=" << nStatPmp1Bad
+                  << " idx1neg=" << nStatIdx1Neg
+                  << " idx2neg=" << nStatIdx2Neg
+                  << " kept=" << nStatKept;
+        if(nStatKept > 0)
+        {
+            std::vector<float> v3dDist;
+            v3dDist.reserve(nStatKept);
+            for(size_t i=0; i<mvpMapPoints1.size(); ++i)
+            {
+                if(!mvpMapPoints1[i] || !mvpMapPoints2[i])
+                    continue;
+                if(mvpMapPoints1[i]->isBad() || mvpMapPoints2[i]->isBad())
+                    continue;
+                Eigen::Vector3f d = mvpMapPoints1[i]->GetWorldPos() - mvpMapPoints2[i]->GetWorldPos();
+                v3dDist.push_back(d.norm());
+            }
+            std::sort(v3dDist.begin(), v3dDist.end());
+            float med = v3dDist[v3dDist.size()/2];
+            float max = v3dDist.back();
+            std::cerr << " 3dMed=" << med << " 3dMax=" << max;
+        }
+        std::cerr << std::endl;
     }
 
     FromCameraToImage(mvX3Dc1,mvP1im1,pCamera1);
