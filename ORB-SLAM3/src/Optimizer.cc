@@ -5440,6 +5440,8 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         }
     }
 
+    if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 7-point-edges done, entering 8-line-edges" << std::endl;
+
     // --- 8. collect MapLines and add 4-DoF Plucker Vertices ---
     // 🌟 [新增] 用于记录优化前的 Plücker 坐标
     std::map<long unsigned int, Eigen::Matrix<double, 6, 1>> initial_plucker_map;
@@ -5553,12 +5555,15 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         }
     }
 
+    if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 8-line-edges done, entering 9-optimize" << std::endl;
+
     if (optimizer.vertices().empty() || optimizer.edges().empty()) return;
 
     // --- 9. run optimization ---
     if (pbStopFlag && *pbStopFlag) return;
     optimizer.initializeOptimization();
     optimizer.optimize(10); 
+    if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 9-optimize done, entering 10-outlier" << std::endl;
     
     // --- 10. outlier detection (points + lines) ---
     vector<pair<KeyFrame*,MapPoint*>> vToErasePoints;
@@ -5577,6 +5582,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
             vToEraseLines.emplace_back(vpEdgeKFLineMono[i], vpMapLineEdgeMono[i]);
     }
     
+    if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 10-outlier done, entering 11-erase" << std::endl;
     // --- 11. apply erasures under map mutex ---
     {
         unique_lock<mutex> lock(pMap->mMutexMapUpdate);
@@ -5590,6 +5596,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         }
     }
     
+    if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 11-erase done, entering 12-point-writeback" << std::endl;
     // --- 12. write back optimized poses and points ---
     opr.reserveKeyFrames(lLocalKeyFrames.size());
     for (KeyFrame* pKFi : lLocalKeyFrames) {
@@ -5607,6 +5614,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         if (!pMP->isRetrived()) { pMP->setRetrived(true); opr.addMapPoint(pMP); }
     }
     
+    if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 12-point-writeback done, entering 13-line-writeback" << std::endl;
     // --- 13. Write back 4-DoF Lines and Re-truncate Endpoints ---
     // Hold the map mutex during line write-back: the tracking thread reads
     // MapLine endpoints/observations (line matching + pose optimization) while
@@ -5623,6 +5631,12 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         if(it == mapLineVertexId.end()) continue;
 
         auto* vLine4D = static_cast<VertexLine4D*>(optimizer.vertex(it->second));
+        // Guard: a line whose vertex had zero valid observation edges was
+        // removed from the graph in section 8 (removeVertex), but its id is
+        // still recorded in mapLineVertexId. optimizer.vertex() returns null
+        // in that case and the previous code dereferenced it -> segfault.
+        if(!vLine4D)
+            continue;
         Eigen::Matrix<double,6,1> Lw_opt = vLine4D->estimate();
         
         // 1. 记录优化前旧的端点，用于比对变化

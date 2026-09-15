@@ -146,21 +146,39 @@ Sim3Solver::Sim3Solver(KeyFrame *pKF1, KeyFrame *pKF2, const vector<MapPoint *> 
                   << " kept=" << nStatKept;
         if(nStatKept > 0)
         {
+            // auxiliary: world-frame pairing distance (meaningless before Sim3 alignment)
             std::vector<float> v3dDist;
             v3dDist.reserve(nStatKept);
-            for(size_t i=0; i<mvpMapPoints1.size(); ++i)
+            // KEY: relative 3D distance in camera-1 frame under the RAW relative
+            // pose T12 = T1w * Tw2 (no GT; uses SLAM's own pose estimates). For
+            // correct matches this is ~0 (up to drift); for wrong matches it is large.
+            Eigen::Matrix3f R12 = Rcw1 * Rcw2.transpose();
+            Eigen::Vector3f t12 = tcw1 - R12 * tcw2;
+            std::vector<float> vRel3d;
+            vRel3d.reserve(nStatKept);
+            int nFinite = 0;
+            for(size_t i=0; i<mvX3Dc1.size(); ++i)
             {
-                if(!mvpMapPoints1[i] || !mvpMapPoints2[i])
+                const Eigen::Vector3f &c1 = mvX3Dc1[i];
+                const Eigen::Vector3f &c2 = mvX3Dc2[i];
+                if(!c1.allFinite() || !c2.allFinite())
                     continue;
-                if(mvpMapPoints1[i]->isBad() || mvpMapPoints2[i]->isBad())
-                    continue;
-                Eigen::Vector3f d = mvpMapPoints1[i]->GetWorldPos() - mvpMapPoints2[i]->GetWorldPos();
-                v3dDist.push_back(d.norm());
+                nFinite++;
+                Eigen::Vector3f d = c1 - (R12 * c2 + t12);
+                vRel3d.push_back(d.norm());
+                if(!mvpMapPoints1[i] || !mvpMapPoints2[i]) continue;
+                if(mvpMapPoints1[i]->isBad() || mvpMapPoints2[i]->isBad()) continue;
+                v3dDist.push_back((mvpMapPoints1[i]->GetWorldPos() - mvpMapPoints2[i]->GetWorldPos()).norm());
             }
             std::sort(v3dDist.begin(), v3dDist.end());
-            float med = v3dDist[v3dDist.size()/2];
-            float max = v3dDist.back();
-            std::cerr << " 3dMed=" << med << " 3dMax=" << max;
+            std::sort(vRel3d.begin(), vRel3d.end());
+            float med = v3dDist.empty() ? -1.f : v3dDist[v3dDist.size()/2];
+            float max = v3dDist.empty() ? -1.f : v3dDist.back();
+            float rmed = vRel3d.empty() ? -1.f : vRel3d[vRel3d.size()/2];
+            float rmax = vRel3d.empty() ? -1.f : vRel3d.back();
+            std::cerr << " nFinite=" << nFinite
+                      << " 3dMed=" << med << " 3dMax=" << max
+                      << " rel3dMed=" << rmed << " rel3dMax=" << rmax;
         }
         std::cerr << std::endl;
     }
