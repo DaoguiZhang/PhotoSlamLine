@@ -141,6 +141,20 @@ inline double GetLbaLineSigmaPx()
     return s;
 }
 
+// Shadow-line isolation switch (PHOTO_SLAM_SHADOW_LINE=1).
+// When enabled, the line frontend still runs (LSD extraction + line matching in
+// Tracking) but the LocalMapping backend does NOT create / cull / fuse MapLines
+// and uses the standard point-only NeighborSearch. This isolates the backend
+// line bookkeeping from the point pipeline (S1 isolation).
+inline bool IsShadowLineMode()
+{
+    static const bool enabled = []() {
+        const char* v = std::getenv("PHOTO_SLAM_SHADOW_LINE");
+        return v != nullptr && std::string(v) == "1";
+    }();
+    return enabled;
+}
+
 // Loop-closing line integration switch (PHOTO_SLAM_LINE_LOOP).
 //
 //   0 = A (C0 baseline): point-only loop closing. System launches LoopClosing::Run

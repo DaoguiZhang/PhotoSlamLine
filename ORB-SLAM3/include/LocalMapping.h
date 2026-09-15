@@ -146,6 +146,7 @@ protected:
     void MapLineCulling();
     void SearchInNeighbors();
     void SearchInNeighborsWithLine();
+    void SearchInNeighborsLines();
     void SearchInNeighborsWithLineNew();
     void KeyFrameCulling();
 

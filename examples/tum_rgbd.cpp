@@ -107,18 +107,32 @@ int main(int argc, char **argv)
     float imageScale = pSLAM->GetImageScale();
 
 #if USE_LINE_GAUSSIAN
+    // SLAM-only ablation: PHOTO_SLAM_SLAM_ONLY=1 skips the Gaussian mapper
+    // (and viewer), removing the map-mutex contention / timing contribution of
+    // 3DGS training from the tracking loop. This isolates pure SLAM behaviour.
+    const bool slam_only = (std::getenv("PHOTO_SLAM_SLAM_ONLY") != nullptr &&
+                            std::string(std::getenv("PHOTO_SLAM_SLAM_ONLY")) == "1");
     // Create GaussianMapper
-    std::cerr << "============================ start Set GaussianMapperLine ====================================" << std::endl;
     std::filesystem::path gaussian_cfg_path(argv[3]);
-    std::shared_ptr<GaussianMapperLine> pGausMapper =
-        std::make_shared<GaussianMapperLine>(
-            pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
-    std::thread training_thd(&GaussianMapperLine::run, pGausMapper.get());
+    std::shared_ptr<GaussianMapperLine> pGausMapper;
+    std::thread training_thd;
+    if (!slam_only)
+    {
+        std::cerr << "============================ start Set GaussianMapperLine ====================================" << std::endl;
+        pGausMapper =
+            std::make_shared<GaussianMapperLine>(
+                pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
+        training_thd = std::thread(&GaussianMapperLine::run, pGausMapper.get());
+    }
+    else
+    {
+        std::cerr << "============================ [SLAM-ONLY] GaussianMapperLine skipped ====================================" << std::endl;
+    }
 
     // Create Gaussian Viewer
     std::thread viewer_thd;
     std::shared_ptr<ImGuiViewerLine> pViewer;
-    if (use_viewer)
+    if (use_viewer && !slam_only)
     {
         pViewer = std::make_shared<ImGuiViewerLine>(pSLAM, pGausMapper);
         viewer_thd = std::thread(&ImGuiViewerLine::run, pViewer.get());

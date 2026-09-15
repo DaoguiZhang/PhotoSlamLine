@@ -318,8 +318,6 @@ void LocalMapping::RunWithLine()
 
             // Check recent MapPoints
             MapPointCulling();
-            //Check recent MapLines
-            MapLineCulling();
 
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_EndMPCulling = std::chrono::steady_clock::now();
@@ -330,8 +328,6 @@ void LocalMapping::RunWithLine()
 
             // Triangulate new MapPoints
             CreateNewMapPoints();
-            //Triangle new MapLines
-            CreateNewMapLines();
             //Debug the lines
 
 
@@ -339,9 +335,9 @@ void LocalMapping::RunWithLine()
 
             if(!CheckNewKeyFrames())
             {
-                // Find more matches in neighbor keyframes and fuse point and lines duplications
-                SearchInNeighborsWithLine();
-                //SearchInNeighbors();
+                // Find more matches in neighbor keyframes and fuse point duplications
+                // (standard point-only fusion; line fusion is attached after the LBA).
+                SearchInNeighbors();
             }
 
 #ifdef REGISTER_TIMES
@@ -669,6 +665,19 @@ void LocalMapping::RunWithLine()
 #endif
 
             mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);    //TO DO THE GLOBALBUNDLEADJUSTMENT
+
+            // Line backend bookkeeping attached AFTER the standard point
+            // pipeline (ProcessNewKeyFrame -> MapPointCulling ->
+            // CreateNewMapPoints -> SearchInNeighbors -> LBA -> KeyFrameCulling
+            // -> InsertKeyFrame). This keeps the point pipeline timing identical
+            // to LocalMapping::Run so the point map (and hence BOW loop closing)
+            // is not perturbed by line culling / triangulation / fusion.
+            if (!IsShadowLineMode())
+            {
+                MapLineCulling();
+                CreateNewMapLines();
+                SearchInNeighborsLines();
+            }
 
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_EndLocalMap = std::chrono::steady_clock::now();
@@ -2418,6 +2427,70 @@ void LocalMapping::SearchInNeighborsWithLine()
             }
         }
     }
+}
+
+void LocalMapping::SearchInNeighborsLines()
+{
+    // Line-only neighbor fusion, attached AFTER the point pipeline (minimal fix:
+    // reuse standard point logic first, then attach line processing). Point
+    // fusion already ran in SearchInNeighbors(); here we only fuse MapLines.
+    if(!mpCurrentKeyFrame) return;
+    if(mbAbortBA) return;
+
+    // Direct covisible neighbors (fresh collection; point fusion already ran).
+    const std::vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+    std::vector<KeyFrame*> vpTargetKFs;
+    vpTargetKFs.reserve(vpNeighKFs.size());
+    for (KeyFrame* pKFi : vpNeighKFs)
+        if (!pKFi->isBad() && pKFi->mnId != mpCurrentKeyFrame->mnId)
+            vpTargetKFs.push_back(pKFi);
+
+    LSDmatcher line_matcher(0.6, true, 0.85f, 3.0f, 30.0f, 2.0f);
+    std::vector<MapLine*> vpMapLinesCurKF = mpCurrentKeyFrame->GetMapLineMatches();
+
+    std::vector<MapLine*> vpFuseLineCandidates;
+    vpFuseLineCandidates.reserve(vpTargetKFs.size() * vpMapLinesCurKF.size());
+
+    for (KeyFrame* pKFi : vpTargetKFs)
+    {
+        if (mbAbortBA) return;
+        const std::vector<MapLine*> vpMapLinesKFi = pKFi->GetMapLineMatches();
+        for (MapLine* pML : vpMapLinesKFi)
+        {
+            if (!pML || pML->isBad() || pML->mnFuseCandidateForKF == mpCurrentKeyFrame->mnId)
+                continue;
+            pML->mnFuseCandidateForKF = mpCurrentKeyFrame->mnId;
+            vpFuseLineCandidates.push_back(pML);
+        }
+    }
+
+    int nMapLinesBefore = mpCurrentKeyFrame->GetMapLineMatches().size();
+    int nFused = line_matcher.Fuse(mpCurrentKeyFrame, vpFuseLineCandidates, 50.0f);
+    int nMapLinesAfter = mpCurrentKeyFrame->GetMapLineMatches().size();
+
+    std::cerr << "[LocalMapping Fuse] Candidates: " << vpFuseLineCandidates.size()
+              << " | Fused: " << nFused
+              << " | KF Lines: " << nMapLinesBefore << " -> " << nMapLinesAfter << std::endl;
+
+    for (MapLine* pML : vpMapLinesCurKF)
+    {
+        if (pML && !pML->isBad())
+        {
+            pML->ComputeDistinctiveDescriptors();
+            pML->UpdateNormalAndDepth();
+        }
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(mpCurrentKeyFrame->GetMap()->mMutexMapUpdate);
+        for (MapLine* pML : mpCurrentKeyFrame->GetMapLineMatches())
+        {
+            if (pML && !pML->isBad())
+                pML->UpdateEndpointsFromPluckerAndObservations();
+        }
+    }
+
+    mpCurrentKeyFrame->UpdateConnections();
 }
 
 void LocalMapping::SearchInNeighborsWithLineNew()
