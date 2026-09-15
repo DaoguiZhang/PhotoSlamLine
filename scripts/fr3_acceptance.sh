@@ -16,7 +16,7 @@ run_one () {
   local tag=$1; local lm=$2
   local out="$ROOT/${tag}"
   mkdir -p "$out"
-  export PHOTO_SLAM_LINE_MODE=$lm PHOTO_SLAM_LINE_LOOP=0 PHOTO_SLAM_PO_LINE=1 PHOTO_SLAM_LBA_LINE=1 PHOTO_SLAM_DEBUG_LINE_LOOP=1
+  export PHOTO_SLAM_LINE_MODE=$lm PHOTO_SLAM_LINE_LOOP=0 PHOTO_SLAM_PO_LINE=1 PHOTO_SLAM_LBA_LINE=1 PHOTO_SLAM_SHADOW_LINE=0 PHOTO_SLAM_SLAM_ONLY=0 PHOTO_SLAM_DEBUG_LINE_LOOP=1
   echo "=== $tag (LM=$lm) start $(date +%H:%M:%S) ===" > "$out/run.log"
   timeout 420 bin/tum_rgbd "$VOC" "$ORBCFG" "$GAUSCFG" "$SEQ" "$ASSOC" "$out/" no_viewer >> "$out/run.log" 2>&1
   echo "EXIT=$?" >> "$out/run.log"
