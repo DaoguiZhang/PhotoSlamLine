@@ -200,6 +200,7 @@ KeyFrame* MapLine::GetReferenceKeyFrame()
 
 void MapLine::AddLineObservation(KeyFrame* pKF, int idx)
 {
+    if(!pKF) return; // defensive: never insert a null KeyFrame observation
     unique_lock<mutex> lock(mMutexFeatures);
     tuple<int,int> indexes;
     if(mLineObservations.count(pKF)){
@@ -243,7 +244,14 @@ void MapLine::EraseLineObservation(KeyFrame* pKF)
             }
             mLineObservations.erase(pKF);
             if(mpRefKF==pKF)
-                mpRefKF=mLineObservations.begin()->first;
+            {
+                // Guard: erasing the last observation leaves the map empty;
+                // dereferencing begin() would be UB. Keep a valid ref KF if any.
+                if(!mLineObservations.empty())
+                    mpRefKF = mLineObservations.begin()->first;
+                else
+                    mpRefKF = static_cast<KeyFrame*>(nullptr);
+            }
             // If only 2 observations or less, discard point
             if(nObs<=2)
                 bBad=true;
@@ -705,6 +713,7 @@ void MapLine::UpdateNormalAndDepth()
     for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
+        if(!pKF || pKF->isBad()) continue; // defensive: skip null/invalid KF observations
 
         tuple<int,int> indexes = mit -> second;
         int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
@@ -722,6 +731,7 @@ void MapLine::UpdateNormalAndDepth()
             n++;
         }
     }
+    if(!pRefKF || pRefKF->isBad()) return; // defensive: no valid reference KF
     Eigen::Vector3f PC = Pos - pRefKF->GetCameraCenter();
     const float dist = PC.norm();
     tuple<int ,int> indexes = observations[pRefKF];
