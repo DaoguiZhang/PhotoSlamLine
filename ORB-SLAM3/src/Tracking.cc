@@ -84,6 +84,53 @@ static void TrackCsvAppend(Frame* pFrame, int state, unsigned long refKfId,
 }
 
 // ============================================================================
+// Per-frame CSV diagnostic for the office1 mono run-to-run stability
+// investigation. Enabled via PHOTO_SLAM_DEBUG_MONO_OFFICE1=<path>. Dormant when
+// unset. Buffered (no per-line flush) to avoid changing thread timing.
+// ============================================================================
+void Tracking::TrackOffice1Csv(bool bNeedKF)
+{
+    static bool checked = false;
+    static bool enabled = false;
+    static std::ofstream ofs;
+    static std::mutex mtx;
+    if (!checked)
+    {
+        checked = true;
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_MONO_OFFICE1");
+        enabled = (e != nullptr && e[0] != '\0');
+        if (enabled)
+        {
+            ofs.open(e, std::ios::out);
+            ofs << "frame_id,timestamp,tracking_state,reference_kf,last_kf,"
+                << "point_matches_before_po,line_matches_before_po,"
+                << "point_inliers_after_po,line_inliers_after_po,mnMatchesInliers,"
+                << "local_map_points,local_map_lines,need_new_kf,local_mapping_accept,"
+                << "local_mapping_queue,new_kf_inserted,pose_tx,pose_ty,pose_tz\n";
+        }
+    }
+    if (!enabled) return;
+
+    std::lock_guard<std::mutex> lk(mtx);
+    const Sophus::SE3f Tcw = mCurrentFrame.GetPose();
+    const Eigen::Vector3f t = Tcw.translation();
+    ofs << mCurrentFrame.mnId << ',' << std::fixed << std::setprecision(6)
+        << mCurrentFrame.mTimeStamp << ','
+        << (int)mState << ','
+        << (mpReferenceKF ? mpReferenceKF->mnId : 0) << ','
+        << (mpLastKeyFrame ? mpLastKeyFrame->mnId : 0) << ','
+        << mnPointMatchesBeforePO << ',' << mnLineMatchesBeforePO << ','
+        << mnPointInliersAfterPO << ',' << mnLineInliersAfterPO << ','
+        << mnMatchesInliers << ','
+        << (long)mvpLocalMapPoints.size() << ',' << (long)mvpLocalMapLines.size() << ','
+        << (bNeedKF?1:0) << ','
+        << (mpLocalMapper->AcceptKeyFrames()?1:0) << ','
+        << mpLocalMapper->KeyframesInQueue() << ','
+        << (mbNewKfInserted?1:0) << ','
+        << t.x() << ',' << t.y() << ',' << t.z() << '\n';
+}
+
+// ============================================================================
 // Debug-only statistics for Mono line initialization.
 // Enabled at runtime via environment variable PHOTO_SLAM_DEBUG_MONO_INIT=1.
 // These helpers do not change any algorithmic behavior; when the env var is
@@ -2891,6 +2938,13 @@ void Tracking::TrackWithLine()
         std::cout << "ERROR: There is not an active map in the atlas" << std::endl;
     }
 
+    // Per-frame diagnostic counters reset (cheap; dormant unless enabled).
+    mnPointMatchesBeforePO = 0;
+    mnLineMatchesBeforePO = 0;
+    mnPointInliersAfterPO = 0;
+    mnLineInliersAfterPO = 0;
+    mbNewKfInserted = false;
+
     //std::cerr << "-------------------start to Track with line feature---------------------- " << std::endl;
 
     if(mState!=NO_IMAGES_YET)
@@ -3407,8 +3461,10 @@ void Tracking::TrackWithLine()
             {
                 //std::cerr <<" --------- CreateNewKeyFrameWithLine->CreateNewKeyFrame()  -------------" << std::endl;
                 CreateNewKeyFrameWithLine();
+                mbNewKfInserted = true;
                 //std::cerr <<" --------- CreateNewKeyFrameWithLine->CreateNewKeyFrame() end -------------" << std::endl;
             }
+            TrackOffice1Csv(bNeedKF);
                 
 
 #ifdef REGISTER_TIMES
@@ -4734,6 +4790,9 @@ bool Tracking::TrackReferenceKeyFrameWithLine()
     int nline_matches = line_matcher.SearchByProjection(mpReferenceKF, mCurrentFrame, vpMapLineMatches);
     //int nline_matches = line_matcher.SearchByDescriptor(mpReferenceKF, mCurrentFrame, vpMapLineMatches);
 
+    mnPointMatchesBeforePO = nmatches;
+    mnLineMatchesBeforePO = nline_matches;
+
     if(nmatches<15)
     {
         cout << "TRACK_REF_KF: Less than 15 matches!!\n";
@@ -4803,6 +4862,9 @@ bool Tracking::TrackReferenceKeyFrameWithLine()
     }
     //std::cerr << "TrackReferenceKeyFrameWithLine->After outlier rejection-> Total Point Matches: " << nmatches << "; Total Line Matches: " << nline_matches << std::endl;
     //std::cerr << "TrackReferenceKeyFrameWithLine->After outlier rejection-> Point Matches: " << nmatchesMap << "; Line Matches: " << nline_matchesMap << std::endl;
+
+    mnPointInliersAfterPO = nmatchesMap;
+    mnLineInliersAfterPO = nline_matchesMap;
 
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
@@ -5216,6 +5278,8 @@ bool Tracking::TrackWithMotionModelWithLine()
     }
     ////debug draw
     //std::cerr << "TrackWithMotionModelWithLine->Point Matches: " <<  nmatches  << ";   TrackWithMotionModelWithLine->Line Matches: " << nLinematches << std::endl;
+    mnPointMatchesBeforePO = nmatches;
+    mnLineMatchesBeforePO = nLinematches;
     
     // line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);
     // std::string map_points_filename = std::to_string(mCurrentFrame.mnId) + "_motion_MapPoints.obj";
@@ -5327,6 +5391,9 @@ bool Tracking::TrackWithMotionModelWithLine()
     }
 
     //std::cerr << "After outlier rejection: Point Matches: " <<  nmatchesMap  << ";   Line Matches: " << nLinematchesMap << std::endl;
+
+    mnPointInliersAfterPO = nmatchesMap;
+    mnLineInliersAfterPO = nLinematchesMap;
 
     if(mbOnlyTracking)
     {

@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <fstream>
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
 #include <sstream>
 #include <thread>
@@ -102,32 +103,57 @@ int main(int argc, char **argv)
             argv[1], argv[2], ORB_SLAM3::System::MONOCULAR);
     float imageScale = pSLAM->GetImageScale();
 
+    // SLAM-only ablation: PHOTO_SLAM_SLAM_ONLY=1 skips the Gaussian mapper (and
+    // viewer), removing the map-mutex contention / timing contribution of 3DGS
+    // training from the tracking loop. This isolates pure SLAM behaviour.
+    // Default (unset or != 1) keeps the original full pipeline.
+    const bool slam_only = (std::getenv("PHOTO_SLAM_SLAM_ONLY") != nullptr &&
+                            std::string(std::getenv("PHOTO_SLAM_SLAM_ONLY")) == "1");
+
     // Create GaussianMapper
     std::filesystem::path gaussian_cfg_path(argv[3]);
 #if USE_LINE_GAUSSIAN
-    std::shared_ptr<GaussianMapperLine> pGausMapper =
-        std::make_shared<GaussianMapperLine>(
-            pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
-    std::thread training_thd(&GaussianMapperLine::run, pGausMapper.get());
+    std::shared_ptr<GaussianMapperLine> pGausMapper;
+    std::thread training_thd;
+    if (!slam_only)
+    {
+        pGausMapper =
+            std::make_shared<GaussianMapperLine>(
+                pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
+        training_thd = std::thread(&GaussianMapperLine::run, pGausMapper.get());
+    }
+    else
+    {
+        std::cerr << "[SLAM-ONLY] GaussianMapperLine skipped (PHOTO_SLAM_SLAM_ONLY=1)" << std::endl;
+    }
 
     // Create Gaussian Viewer
     std::thread viewer_thd;
     std::shared_ptr<ImGuiViewerLine> pViewer;
-    if (use_viewer)
+    if (use_viewer && !slam_only)
     {
         pViewer = std::make_shared<ImGuiViewerLine>(pSLAM, pGausMapper);
         viewer_thd = std::thread(&ImGuiViewerLine::run, pViewer.get());
     }
 #else
-    std::shared_ptr<GaussianMapper> pGausMapper =
-        std::make_shared<GaussianMapper>(
-            pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
-    std::thread training_thd(&GaussianMapper::run, pGausMapper.get());
+    std::shared_ptr<GaussianMapper> pGausMapper;
+    std::thread training_thd;
+    if (!slam_only)
+    {
+        pGausMapper =
+            std::make_shared<GaussianMapper>(
+                pSLAM, gaussian_cfg_path, output_dir, 0, device_type);
+        training_thd = std::thread(&GaussianMapper::run, pGausMapper.get());
+    }
+    else
+    {
+        std::cerr << "[SLAM-ONLY] GaussianMapper skipped (PHOTO_SLAM_SLAM_ONLY=1)" << std::endl;
+    }
 
     // Create Gaussian Viewer
     std::thread viewer_thd;
     std::shared_ptr<ImGuiViewer> pViewer;
-    if (use_viewer)
+    if (use_viewer && !slam_only)
     {
         pViewer = std::make_shared<ImGuiViewer>(pSLAM, pGausMapper);
         viewer_thd = std::thread(&ImGuiViewer::run, pViewer.get());
@@ -174,18 +200,26 @@ int main(int argc, char **argv)
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
+        // SLAM-only: the Gaussian mapper normally consumes the mapping-operation
+        // queue; without it the queue grows unboundedly (OOM). Drain it here.
+        if (slam_only && pSLAM->getAtlas() != nullptr)
+            pSLAM->getAtlas()->clearMappingOperation();
+
         double ttrack = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
         vTimesTrack[ni] = ttrack;
     }
 
     // Stop all threads
     pSLAM->Shutdown();
-    training_thd.join();
-    if (use_viewer)
+    if (training_thd.joinable())
+        training_thd.join();
+    if (use_viewer && viewer_thd.joinable())
         viewer_thd.join();
 
-    // GPU peak usage
-    saveGpuPeakMemoryUsage(output_dir / "GpuPeakUsageMB.txt");
+    // GPU peak usage (only meaningful when the Gaussian mapper ran; in
+    // SLAM-only mode no CUDA allocator is ever initialised).
+    if (!slam_only)
+        saveGpuPeakMemoryUsage(output_dir / "GpuPeakUsageMB.txt");
 
     // Tracking time statistics
     saveTrackingTime(vTimesTrack, (output_dir / "TrackingTime.txt").string());

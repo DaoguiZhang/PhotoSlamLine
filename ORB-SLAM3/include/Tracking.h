@@ -265,6 +265,10 @@ protected:
     bool NeedNewKeyFrameWithLine(); //added for line feature
     void CreateNewKeyFrameWithLine();   //added for line feature
 
+    // Per-frame CSV diagnostic (dormant unless PHOTO_SLAM_DEBUG_MONO_OFFICE1 is
+    // set to a file path). Does not change any algorithmic behaviour.
+    void TrackOffice1Csv(bool bNeedKF);
+
     // Perform preintegration from last frame
     void PreintegrateIMU();
 
@@ -367,6 +371,14 @@ protected:
     int mnMatchesInliers;
     //Current matches in frame with line
     int mnMatchesInliersLine;
+
+    // Per-frame diagnostic counters (dormant unless PHOTO_SLAM_DEBUG_MONO_OFFICE1
+    // is set; default values keep zero-cost hot path when the env var is unset).
+    int mnPointMatchesBeforePO;
+    int mnLineMatchesBeforePO;
+    int mnPointInliersAfterPO;
+    int mnLineInliersAfterPO;
+    bool mbNewKfInserted;
 
     //Last Frame, KeyFrame and Relocalisation Info
     KeyFrame* mpLastKeyFrame;
