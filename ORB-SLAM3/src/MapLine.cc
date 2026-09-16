@@ -218,7 +218,10 @@ void MapLine::AddLineObservation(KeyFrame* pKF, int idx)
         get<0>(indexes) = idx;
     }
     mLineObservations[pKF]=indexes;
-    if(!pKF->mpCamera2 && pKF->mvuLineRight[idx].first>=0 && pKF->mvuLineRight[idx].second>=0)
+    // Lifecycle guard: idx must be a valid index into the KeyFrame's line
+    // vectors before reading mvuLineRight[idx]; a stale index is UB.
+    if(!pKF->mpCamera2 && idx >= 0 && idx < (int)pKF->mvuLineRight.size()
+       && pKF->mvuLineRight[idx].first>=0 && pKF->mvuLineRight[idx].second>=0)
         nObs+=2;
     else
         nObs++;
@@ -234,7 +237,8 @@ void MapLine::EraseLineObservation(KeyFrame* pKF)
             tuple<int,int> indexes = mLineObservations[pKF];
             int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
             if(leftIndex != -1){
-                if(!pKF->mpCamera2 && pKF->mvuLineRight[leftIndex].first>=0 && pKF->mvuLineRight[leftIndex].second>=0)
+                if(!pKF->mpCamera2 && leftIndex >= 0 && leftIndex < (int)pKF->mvuLineRight.size()
+                   && pKF->mvuLineRight[leftIndex].first>=0 && pKF->mvuLineRight[leftIndex].second>=0)
                     nObs-=2;
                 else
                     nObs--;

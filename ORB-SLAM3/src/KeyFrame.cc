@@ -502,29 +502,37 @@ int KeyFrame::GetNumberMPL()
 void KeyFrame::AddMapLine(MapLine* pML, const size_t &idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
+    if(!pML || idx >= mvpMapLines.size()) return;
     mvpMapLines[idx]=pML;
 }
 
 void KeyFrame::EraseMapLineMatch(const int &idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
+    // Lifecycle guard: a stale observation index (e.g. from a MapLine whose
+    // observation was added before the KeyFrame's line-vector was resized)
+    // must never index out of bounds. The LBA already guards idxLine against
+    // mvKeyLines.size(); this is the same defense for mvpMapLines.
+    if(idx < 0 || idx >= (int)mvpMapLines.size()) return;
     mvpMapLines[idx]=static_cast<MapLine*>(NULL);
 }
 
 void KeyFrame::EraseMapLineMatch(MapLine* pML)
 {
     unique_lock<mutex> lock(mMutexFeatures);
+    if(!pML) return;
     tuple<size_t,size_t> indexes = pML->GetIndexInKeyFrame(this);
     size_t leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
-    if(leftIndex != -1)
+    if(leftIndex != (size_t)-1 && leftIndex < mvpMapLines.size())
         mvpMapLines[leftIndex]=static_cast<MapLine*>(NULL);
-    if(rightIndex != -1)
+    if(rightIndex != (size_t)-1 && rightIndex < mvpMapLines.size())
         mvpMapLines[rightIndex]=static_cast<MapLine*>(NULL);
 }
 
 void KeyFrame::ReplaceMapLineMatch(const int &idx, MapLine* pML)
 {
     unique_lock<mutex> lock(mMutexFeatures);
+    if(!pML || idx < 0 || idx >= (int)mvpMapLines.size()) return;
     mvpMapLines[idx]=pML;
 }
 
@@ -579,6 +587,7 @@ int KeyFrame::TrackedMapLines(const int &minObs)
 MapLine* KeyFrame::GetMapLine(const size_t &idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
+    if(idx >= mvpMapLines.size()) return static_cast<MapLine*>(NULL);
     return mvpMapLines[idx];
 }
 
