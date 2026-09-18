@@ -1918,6 +1918,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                 savePly(result_dir_ / (std::to_string(getIteration()) + "_0_before_loop_correction"));
             
             int num_transformed = 0;
+            float sumTrans = 0.0f, sumRot = 0.0f, sumScale = 0.0f;
+            int nLargeCorr = 0;
 
             for (auto& kf : associated_kfs) {
                 auto kfid = std::get<0>(kf);
@@ -1950,6 +1952,11 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         diff_pose.translation() -= inv_pose.translation();
                         diff_pose.translation() *= loop_kf_scale;
                         diff_pose.translation() += inv_pose.translation();
+
+                        sumTrans += diff_pose.translation().norm();
+                        sumRot += Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle();
+                        sumScale += loop_kf_scale;
+                        nLargeCorr++;
                         
                         torch::Tensor diff_pose_tensor = tensor_utils::EigenMatrix2TorchTensor(
                                     diff_pose.matrix(), device_type_).transpose(0, 1);
@@ -1985,6 +1992,27 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
             if (record_loop_ply_)
                 savePly(result_dir_ / (std::to_string(getIteration()) + "_1_after_loop_correction"));
+
+            // Line-Gaussian loop-sync statistics.
+            {
+                int lineGaussians = 0;
+                int nonFinite = 0;
+                if (gaussians_->xyz_.size(0) > 0) {
+                    lineGaussians = gaussians_->is_line_.sum().item<int>();
+                    nonFinite = gaussians_->xyz_.size(0)
+                        - torch::isfinite(gaussians_->xyz_).all(1).sum().item<int>();
+                }
+                const float meanT = (nLargeCorr > 0) ? (sumTrans / nLargeCorr) : 0.0f;
+                const float meanR = (nLargeCorr > 0) ? (sumRot / nLargeCorr * 180.0 / M_PI) : 0.0f;
+                const float meanS = (nLargeCorr > 0) ? (sumScale / nLargeCorr) : 1.0f;
+                std::cerr << "[LineLoop-Gaussian] candidates=" << lineGaussians
+                          << " corrected=" << num_transformed
+                          << " skippedBad=0 skippedNull=0 duplicateSkipped=0"
+                          << " nonFinite=" << nonFinite
+                          << " meanTranslation=" << meanT
+                          << " meanRotationDeg=" << meanR
+                          << " meanScaleRatio=" << meanS << std::endl;
+            }
 
             // Add new map points after loop closure
             auto& associated_points = opr.associatedMapPoints();

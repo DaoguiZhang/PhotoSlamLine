@@ -1189,6 +1189,10 @@ void GaussianModelLine::scaledTransformVisiblePointsOfKeyframe(
         true,
         false);
 
+    // Snapshot the pre-transform mask so we can isolate the points transformed
+    // by THIS call (avoid double-rotating line directions across KF iterations).
+    torch::Tensor pre_mask = point_not_transformed_flags.clone();
+
     scaleAndTransformThenMarkVisiblePoints(
         points,
         rots,
@@ -1200,6 +1204,35 @@ void GaussianModelLine::scaledTransformVisiblePointsOfKeyframe(
         num_transformed,
         scale
     );
+
+    // Points transformed by this call = those that were NOT transformed before
+    // and are now marked as transformed.
+    torch::Tensor newly_transformed = torch::logical_and(
+        pre_mask, torch::logical_not(point_not_transformed_flags));
+
+    if (newly_transformed.any().item<bool>()) {
+        // Sync line direction (world) for line-sampled gaussians only. The
+        // anisotropic gaussian rotation (rotation_) is already updated by the
+        // kernel; line_dir_w_ must follow the same rigid rotation.
+        torch::Tensor line_mask = torch::logical_and(newly_transformed, this->is_line_);
+        if (line_mask.any().item<bool>() && this->line_dir_w_.size(0) == this->xyz_.size(0)) {
+            torch::Tensor R = diff_pose.slice(0, 0, 3).slice(1, 0, 3).to(torch::kFloat);
+            torch::Tensor dirs = this->line_dir_w_;
+            torch::Tensor rotated = torch::matmul(R, dirs.transpose(0, 1).contiguous()).transpose(0, 1);
+            torch::Tensor m3 = line_mask.unsqueeze(1).expand({-1, 3});
+            this->line_dir_w_ = torch::where(m3, rotated, dirs);
+        }
+
+        // Sync world scale / covariance magnitude for a scale-changing loop.
+        // (SE(3) loops have scale == 1 and this is a no-op.)
+        if (std::abs(scale - 1.0f) > 1e-6f) {
+            torch::Tensor scaled = this->scaling_ * scale;
+            torch::Tensor m = newly_transformed.unsqueeze(1).expand({-1, this->scaling_.size(1)});
+            torch::Tensor new_scaling = torch::where(m, scaled, this->scaling_);
+            this->scaling_ = replaceTensorToOptimizer(new_scaling, 4);
+            this->Tensor_vec_scaling_ = {this->scaling_};
+        }
+    }
 
 // torch::Tensor point_cloud_copy = points.clone();
 // torch::Tensor dist2 = torch::clamp_min(distCUDA2(point_cloud_copy), 0.0000001);
