@@ -20,6 +20,7 @@
 #include "Optimizer.h"
 
 
+#include <cassert>
 #include <complex>
 
 #include <Eigen/StdVector>
@@ -5257,6 +5258,113 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Reg(
 }
 
 
+// Count the valid line edges that PoseOptimizationWithLine would add for pFrame.
+int Optimizer::CountValidPoseLineEdges(Frame* pFrame)
+{
+    int count = 0;
+    if (!pFrame) return 0;
+    for (int iL = 0; iL < pFrame->NL; ++iL)
+    {
+        MapLine* pML = pFrame->mvpMapLines[iL];
+        if (!pML || pML->isBad()) continue;
+        Eigen::Vector3d Xw1 = pML->GetLineWorldPos().first.cast<double>();
+        Eigen::Vector3d Xw2 = pML->GetLineWorldPos().second.cast<double>();
+        if (!std::isfinite(Xw1.norm()) || !std::isfinite(Xw2.norm())) continue;
+        if ((Xw2 - Xw1).norm() < 1e-6) continue;
+        ++count;
+    }
+    return count;
+}
+
+// Count the valid line observation edges that the line LBA would add for the
+// local window around pKF. Mirrors the collection + validity checks of
+// LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg (sections 1-2, 7-8)
+// without mutating the graph or the BA bookkeeping members.
+int Optimizer::CountLbaLineObservationEdges(KeyFrame* pKF, Map* pMap)
+{
+    if (!pKF || !pMap) return 0;
+    Map* pCurrentMap = pKF->GetMap();
+
+    // Local keyframes (BFS from pKF, same as LBA section 1).
+    std::set<KeyFrame*> sLocalKFs;
+    sLocalKFs.insert(pKF);
+    const vector<KeyFrame*> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    for (KeyFrame* pKFi : vNeighKFs)
+        if (!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
+            sLocalKFs.insert(pKFi);
+
+    // Local MapPoints (for the fixed-camera set only).
+    std::set<MapPoint*> sLocalMPs;
+    for (KeyFrame* pKFi : sLocalKFs)
+    {
+        vector<MapPoint*> vpMPs = pKFi->GetMapPointMatches();
+        for (MapPoint* pMP : vpMPs)
+            if (pMP && !pMP->isBad() && pMP->GetMap() == pCurrentMap)
+                sLocalMPs.insert(pMP);
+    }
+
+    // Pose vertices: local KFs plus fixed cameras (KFs observing local MPs).
+    std::set<KeyFrame*> sPoseKFs = sLocalKFs;
+    for (MapPoint* pMP : sLocalMPs)
+    {
+        for (const auto& ob : pMP->GetObservations())
+        {
+            KeyFrame* pKFi = ob.first;
+            if (pKFi && !pKFi->isBad() && pKFi->GetMap() == pCurrentMap
+                && sPoseKFs.count(pKFi) == 0)
+                sPoseKFs.insert(pKFi);
+        }
+    }
+
+    // Local MapLines (from local KFs only, same as LBA section 2).
+    std::set<MapLine*> sLocalMLs;
+    for (KeyFrame* pKFi : sLocalKFs)
+    {
+        vector<MapLine*> vpLines = pKFi->GetMapLineMatches();
+        for (MapLine* pML : vpLines)
+            if (pML && !pML->isBad() && pML->GetMap() == pCurrentMap)
+                sLocalMLs.insert(pML);
+    }
+
+    int count = 0;
+    for (MapLine* pML : sLocalMLs)
+    {
+        Eigen::Matrix<double,6,1> Lw = pML->GetPluckerLine().cast<double>();
+        if (!Lw.allFinite() || Lw.head<3>().norm() < 1e-9 || Lw.tail<3>().norm() < 1e-9)
+            continue;
+        for (const auto& mit : pML->GetLineObservations())
+        {
+            KeyFrame* pKFi = mit.first;
+            if (!pKFi || pKFi->isBad() || pKFi->GetMap() != pCurrentMap) continue;
+            if (sPoseKFs.count(pKFi) == 0) continue;  // no pose vertex in the graph
+            int idxLine = std::get<0>(mit.second);
+            if (idxLine < 0 || idxLine >= (int)pKFi->mvKeyLines.size()) continue;
+            ++count;
+        }
+    }
+    return count;
+}
+
+// Canonicalize pointer-keyed observation-map iteration (PHOTO_SLAM_DETERMINISTIC_ORDER=1).
+// Returns the (KeyFrame*, observation) pairs sorted by KeyFrame::mnId when
+// deterministic ordering is requested; otherwise preserves std::map pointer order
+// (current behavior). The observation maps are keyed by KeyFrame* pointers, so their
+// iteration order varies with the process address layout (ASLR), which leaks into the
+// g2o edge insertion order and therefore into the floating-point accumulation order of
+// the local BA normal equations.
+static std::vector<std::pair<KeyFrame*, std::tuple<int,int>>> SortedKeyFrameObservations(
+    const std::map<KeyFrame*, std::tuple<int,int>>& obs)
+{
+    std::vector<std::pair<KeyFrame*, std::tuple<int,int>>> v(obs.begin(), obs.end());
+    if (IsDeterministicOrder())
+        std::sort(v.begin(), v.end(),
+            [](const std::pair<KeyFrame*, std::tuple<int,int>>& a,
+               const std::pair<KeyFrame*, std::tuple<int,int>>& b) {
+                return a.first->mnId < b.first->mnId;
+            });
+    return v;
+}
+
 // Local Bundle Adjustment with Plucker 4-DoF Orthogonal Representation
 void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     KeyFrame *pKF,
@@ -5274,6 +5382,22 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     lLocalKeyFrames.push_back(pKF);
     pKF->mnBALocalForKF = pKF->mnId;
     Map* pCurrentMap = pKF->GetMap();
+
+    // Initialize all diagnostic output counters so early returns (no fixed
+    // camera, empty graph, stop flag) leave them at 0 instead of the previous
+    // call's value.
+    num_fixedKF = 0;
+    num_OptKF = 0;
+    num_MPs = 0;
+    num_edges = 0;
+    num_Lines = 0;
+
+    // Thread-race fix (directive priority 3): collect the local window under the
+    // same map mutex the tracking thread holds for its whole iteration, so the BA
+    // graph is built from a consistent snapshot instead of interleaving with
+    // tracking writes (keyframe/map-point/map-line mutations). Released before the
+    // (expensive) optimization solve so tracking is not blocked during it.
+    unique_lock<mutex> lockMap(pMap->mMutexMapUpdate);
 
     const vector<KeyFrame*> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
     for (KeyFrame* pKFi : vNeighKFs)
@@ -5310,10 +5434,9 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     list<KeyFrame*> lFixedCameras;
     for (MapPoint* pMP : lLocalMapPoints)
     {
-        const map<KeyFrame*, tuple<int,int>>& obs = pMP->GetObservations();
-        for (auto & mit : obs)
+        for (const auto& kv : SortedKeyFrameObservations(pMP->GetObservations()))
         {
-            KeyFrame* pKFi = mit.first;
+            KeyFrame* pKFi = kv.first;
             if (pKFi->mnBALocalForKF != pKF->mnId && pKFi->mnBAFixedForKF != pKF->mnId)
             {
                 pKFi->mnBAFixedForKF = pKF->mnId;
@@ -5393,12 +5516,12 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
 
-        const map<KeyFrame*, tuple<int,int>>& observations = pMP->GetObservations();
-        for (auto & mit : observations)
+        const map<KeyFrame*, tuple<int,int>> observations = pMP->GetObservations();
+        for (const auto & kv : SortedKeyFrameObservations(observations))
         {
-            KeyFrame* pKFi = mit.first;
+            KeyFrame* pKFi = kv.first;
             if (pKFi->isBad() || pKFi->GetMap() != pCurrentMap) continue;
-            const int leftIndex = get<0>(mit.second);
+            const int leftIndex = get<0>(kv.second);
             
             // 🌟 核心修复 2：加入 RGB-D / Stereo 边，防止深度丢失
             if (leftIndex != -1 && pKFi->mvuRight[leftIndex] < 0) // mono
@@ -5467,7 +5590,18 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     std::vector<KeyFrame*> vpEdgeKFLineMono;
     std::vector<MapLine*> vpMapLineEdgeMono;
 
-    int nextLineVertexId = maxKFid + 1 + lLocalMapPoints.size() + 10000000; // 确保线段顶点ID不与点云顶点冲突
+    // Dynamic line-vertex ID floor: one past the largest KF/point vertex id in
+    // this graph, so line ids can never collide with them (replaces the previous
+    // fixed +10000000 offset, which collided once the map exceeded 10M points).
+    // Point vertex id = pMP->mnId + maxKFid + 1 (section 7); KF/fixed ids <= maxKFid.
+    int maxVertexId = (int)maxKFid;
+    for (MapPoint* pMP : lLocalMapPoints)
+    {
+        int pid = (int)pMP->mnId + (int)maxKFid + 1;
+        if (pid > maxVertexId) maxVertexId = pid;
+    }
+    assert(maxVertexId >= (int)maxKFid);
+    int nextLineVertexId = maxVertexId + 1;
     unordered_map<MapLine*, int> mapLineVertexId;
 
     // Line noise diagnostic counters (line detection is single-octave in practice).
@@ -5497,11 +5631,11 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         int nLineObsEdges = 0; // 记录这条线的有效观测数
 
         const auto& obs = pML->GetLineObservations();
-        for(auto& mit : obs)
+        for (const auto& kv : SortedKeyFrameObservations(obs))
         {
-            KeyFrame* pKFi = mit.first;
+            KeyFrame* pKFi = kv.first;
             if(!pKFi || pKFi->isBad() || pKFi->GetMap()!=pCurrentMap) continue;
-            int idxLine = get<0>(mit.second);
+            int idxLine = get<0>(kv.second);
             if(idxLine < 0 || idxLine >= (int)pKFi->mvKeyLines.size()) continue;
 
             const cv::line_descriptor::KeyLine& kl = pKFi->mvKeyLines[idxLine];
@@ -5557,6 +5691,11 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
 
     if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 8-line-edges done, entering 9-optimize" << std::endl;
 
+    // Release the snapshot lock: the graph is fully built from a consistent
+    // snapshot, and the solve does not touch shared map state (the write-back
+    // below re-acquires mMutexMapUpdate).
+    lockMap.unlock();
+
     if (optimizer.vertices().empty() || optimizer.edges().empty()) return;
 
     // --- 9. run optimization ---
@@ -5598,6 +5737,11 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     
     if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 11-erase done, entering 12-point-writeback" << std::endl;
     // --- 12. write back optimized poses and points ---
+    // Hold the map mutex so the tracking thread (which holds mMutexMapUpdate for
+    // its whole iteration) cannot observe a torn write-back (some KF poses and
+    // some map points already updated, others not).
+    {
+        unique_lock<mutex> lock(pMap->mMutexMapUpdate);
     opr.reserveKeyFrames(lLocalKeyFrames.size());
     for (KeyFrame* pKFi : lLocalKeyFrames) {
         g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKFi->mnId));
@@ -5612,6 +5756,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         pMP->SetWorldPos(vPoint->estimate().cast<float>());
         pMP->UpdateNormalAndDepth();
         if (!pMP->isRetrived()) { pMP->setRetrived(true); opr.addMapPoint(pMP); }
+    }
     }
     
     if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 12-point-writeback done, entering 13-line-writeback" << std::endl;
