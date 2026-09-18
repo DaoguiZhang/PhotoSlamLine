@@ -6,6 +6,7 @@
 #include "LSDmatcher.h"
 #include "Converter.h"
 #include "LSDVisualizer.h"
+#include "LineMode.h"
 #include <unordered_set>
 #include <cstdlib>
 
@@ -2997,6 +2998,7 @@ int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector
 
     int nmatches = 0;
     const int nLines = vpLines.size();
+    int nCand = 0, nDepthReject = 0, nImgReject = 0, nBoxEmpty = 0, nLevelReject = 0, nDescReject = 0;
 
     // =========================================================
     // 2. 遍历候选 MapLine，投影到当前关键帧进行匹配
@@ -3008,6 +3010,7 @@ int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector
         // 丢弃坏线和已经匹配的线
         if(!pML || pML->isBad() || spAlreadyFound.count(pML))
             continue;
+        nCand++;
 
         auto endpoints = pML->GetLineWorldPos();
         Eigen::Vector3f SP = endpoints.first;
@@ -3019,7 +3022,7 @@ int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector
 
         // 剔除在相机后方的线段
         if (SPc(2) <= 0.0f || EPc(2) <= 0.0f)
-            continue;
+        { nDepthReject++; continue; }
 
         // 投影到像素坐标
         float u1 = fx * SPc(0) / SPc(2) + cx;
@@ -3029,9 +3032,9 @@ int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector
 
         // 图像边界检查
         if (u1 < pKF->mnMinX || u1 > pKF->mnMaxX || v1 < pKF->mnMinY || v1 > pKF->mnMaxY)
-            continue;
+        { nImgReject++; continue; }
         if (u2 < pKF->mnMinX || u2 > pKF->mnMaxX || v2 < pKF->mnMinY || v2 > pKF->mnMaxY)
-            continue;
+        { nImgReject++; continue; }
 
         // 计算线段到相机中心的距离，用于预测金字塔层级
         float dist = (0.5f * (SP + EP) - Ow).norm();
@@ -3043,7 +3046,7 @@ int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector
         // 在投影区域内获取候选线段索引
         std::vector<size_t> vIndices = pKF->GetLinesInArea(u1, v1, u2, v2, radius);
         if(vIndices.empty())
-            continue;
+        { nBoxEmpty++; continue; }
 
         cv::Mat dML = pML->GetLineDescriptor();
 
@@ -3059,7 +3062,7 @@ int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector
             int klLevel = pKF->mvKeyLines[idx].octave;
 
             if(klLevel < nPredictedLevel - 1 || klLevel > nPredictedLevel)
-                continue;
+            { nLevelReject++; continue; }
 
             const cv::Mat &dKF = pKF->mLineDescriptors.row(idx);
             int distDesc = DescriptorDistance(dML, dKF);
@@ -3077,7 +3080,20 @@ int LSDmatcher::SearchByProjection(KeyFrame *pKF, cv::Mat Scw, const std::vector
             vpMatched[bestIdx] = pML;
             nmatches++;
         }
+        else
+        {
+            nDescReject++;
+        }
     }
+
+    if(IsLineLoopDiag())
+        std::cerr << "[LineLoop][LSDProj] candidates=" << nCand
+                  << " depthReject=" << nDepthReject
+                  << " imgReject=" << nImgReject
+                  << " boxEmpty=" << nBoxEmpty
+                  << " levelReject=" << nLevelReject
+                  << " descReject=" << nDescReject
+                  << " matched=" << nmatches << std::endl;
 
     return nmatches;
 }
