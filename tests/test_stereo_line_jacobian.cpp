@@ -108,9 +108,86 @@ static Eigen::MatrixXd finiteDifference(Vertex& vertex, int dof, int m, ErrFunc&
     return J;
 }
 
+// Independent geometric ground-truth checks for the Plucker convention and the
+// Plucker <-> endpoint SE3 transform equivalence. Uses its own line and its own
+// projection, not the edge's implementation, to produce the expected values.
+static bool geometricConsistency()
+{
+    const double fx = 525.0, fy = 525.0, cx = 320.0, cy = 240.0;
+
+    struct PoseCase { const char* name; g2o::SE3Quat T; };
+    const PoseCase cases[3] = {
+        {"pure translation",
+         g2o::SE3Quat(Eigen::Quaterniond::Identity(), Eigen::Vector3d(0.1, -0.05, 0.2))},
+        {"pure rotation",
+         g2o::SE3Quat(Eigen::Quaterniond(Eigen::AngleAxisd(0.35, Eigen::Vector3d(0.3, -0.2, 0.9).normalized())),
+                      Eigen::Vector3d::Zero())},
+        {"general pose",
+         g2o::SE3Quat(Eigen::Quaterniond(Eigen::AngleAxisd(0.25, Eigen::Vector3d(0.5, 0.6, -0.3).normalized())),
+                      Eigen::Vector3d(0.12, 0.07, -0.11))},
+    };
+
+    bool ok = true;
+    for (const auto& c : cases)
+    {
+        // Ground-truth 3D line in front of the camera.
+        const Eigen::Vector3d X1(-0.4, 0.3, 3.0), X2(0.5, -0.2, 3.5);
+        const Eigen::Vector3d dir = (X2 - X1).normalized();
+        const Eigen::Vector3d n = X1.cross(dir);   // moment
+        const Eigen::Vector3d v = dir;             // direction (unit)
+
+        // 1. endpoints -> Plucker: X x v == n for every point X on the line.
+        const bool endpointsToPlucker =
+            (X1.cross(v) - n).norm() < 1e-9 && (X2.cross(v) - n).norm() < 1e-9;
+
+        // 2. Plucker transform == endpoint SE3 transform.
+        const Eigen::Matrix3d R = c.T.rotation().toRotationMatrix();
+        const Eigen::Vector3d t = c.T.translation();
+        const Eigen::Vector3d nT = R * n + t.cross(R * v);   // transformed moment
+        const Eigen::Vector3d vT = R * v;                    // transformed direction
+        const Eigen::Vector3d X1T = R * X1 + t, X2T = R * X2 + t;
+        const Eigen::Vector3d dirT = (X2T - X1T).normalized();
+        const Eigen::Vector3d nFromPts = X1T.cross(dirT);
+        const bool transformEquiv =
+            (nT - nFromPts).norm() < 1e-9 && (vT - dirT).norm() < 1e-9;
+
+        // 3. transformed endpoints still on the transformed line.
+        const bool onLineAfterTransform =
+            (X1T.cross(vT) - nT).norm() < 1e-9 && (X2T.cross(vT) - nT).norm() < 1e-9;
+
+        // 4. the projected line passes through the true projected endpoints
+        //    (independent ground-truth projection -> edge residual must be ~0).
+        g2o::VertexSE3Expmap vPose; vPose.setEstimate(c.T);
+        VertexLine4D vLine;
+        Eigen::Matrix<double,6,1> Lw; Lw << n, v;
+        vLine.setEstimate(Lw);
+        EdgeSE3ProjectLine4D edge;
+        edge.setVertex(0, &vPose);
+        edge.setVertex(1, &vLine);
+        edge.SetCameraIntrinsics(fx, fy, cx, cy);
+        const Eigen::Vector3d u1 = projectPoint(c.T, X1, fx, fy, cx, cy);
+        const Eigen::Vector3d u2 = projectPoint(c.T, X2, fx, fy, cx, cy);
+        edge.setMeasurement(std::make_pair(Eigen::Vector2d(u1(0), u1(1)),
+                                           Eigen::Vector2d(u2(0), u2(1))));
+        edge.computeError();
+        const bool projThroughEndpoints = edge.error().norm() < 1e-9;
+
+        const bool pass = endpointsToPlucker && transformEquiv &&
+                          onLineAfterTransform && projThroughEndpoints;
+        std::cout << std::left << std::setw(20) << c.name
+                  << " | endpoints->plucker=" << (endpointsToPlucker ? "PASS" : "FAIL")
+                  << " | transform-equiv=" << (transformEquiv ? "PASS" : "FAIL")
+                  << " | on-line-after=" << (onLineAfterTransform ? "PASS" : "FAIL")
+                  << " | proj-through-endpoints=" << (projThroughEndpoints ? "PASS" : "FAIL")
+                  << std::endl;
+        ok &= pass;
+    }
+    return ok;
+}
+
 int main()
 {
-    const double eps = 1e-6;
+    const double eps = 1e-5;
     const int trials = 200;
     const double fx = 525.0, fy = 525.0, cx = 320.0, cy = 240.0;
     const double bf = 40.0; // baseline * fx
@@ -208,9 +285,11 @@ int main()
             EdgeSE3ProjectLine4D edge;
             edge.setVertex(0, &vPose);
 
-            // Build a valid Plucker line (n = direction, v = X1 x n).
-            Eigen::Vector3d n = (X2 - X1).normalized();
-            Eigen::Vector3d v = X1.cross(n);
+            // Plucker convention (matches Converter::LineSegmentToPlucker):
+            //   n = moment = X1 x dir,  v = direction (unit).
+            Eigen::Vector3d dir = (X2 - X1).normalized();
+            Eigen::Vector3d n = X1.cross(dir);
+            Eigen::Vector3d v = dir;
             Eigen::Matrix<double, 6, 1> Lw;
             Lw << n, v;
             VertexLine4D vLine;
@@ -242,7 +321,7 @@ int main()
     }
 
     const double passAbs = 1e-4;
-    const double passRel = 1e-4;
+    const double passRel = 1e-5;
 
     auto print = [&](const JacReport& r, double thisEps, double thisPassAbs, double thisPassRel) {
         bool pass = (r.maxAbs < thisPassAbs) && (r.maxRel < thisPassRel);
@@ -262,6 +341,10 @@ int main()
     ok &= print(repStereo, eps, passAbs, passRel);
     ok &= print(repPlucker, eps, passAbs, passRel);
     ok &= print(repPluckerLine, eps, passAbs, passRel);
+    std::cout << "=============================================================================" << std::endl;
+
+    std::cout << "===== Plucker geometric consistency (independent ground truth) =====" << std::endl;
+    ok &= geometricConsistency();
     std::cout << "=============================================================================" << std::endl;
     return ok ? 0 : 1;
 }
