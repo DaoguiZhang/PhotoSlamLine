@@ -118,6 +118,7 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
         optimizer.setForceStopFlag(pbStopFlag);
 
     long unsigned int maxKFid = 0;
+    long unsigned int maxMPid = 0;
     const int nExpectedSize = (vpKFs.size()) * vpMP.size();
 
     // -------------------------------------------------------------
@@ -156,6 +157,7 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
     {
         MapPoint* pMP = vpMP[i];
         if(pMP->isBad()) continue;
+        if(pMP->mnId > maxMPid) maxMPid = pMP->mnId;
         
         g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
         vPoint->setEstimate(pMP->GetWorldPos().cast<double>());
@@ -266,14 +268,17 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
     std::vector<ORB_SLAM3::EdgeSE3ProjectPointToLine2D*> vpEdgesLineMono;
     // std::vector<ORB_SLAM3::EdgeStereoSE3ProjectPointToLine*> vpEdgesLineStereo; // If you have this G2O edge defined
 
-    // Compute offset to avoid ID collision
-    int nextVertexId = (int)maxKFid + vpMP.size() + 2; 
+    // Compute offset to avoid ID collision. MP vertex ids are mnId+maxKFid+1
+    // (sparse mnId), so line ids must start after maxMPid, NOT after vpMP.size().
+    int nextVertexId = (int)maxKFid + (int)maxMPid + 2; 
 
     // Store G2O IDs for endpoints
     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
     mapLineVertexId.reserve(vpML.size() * 2);
 
     const double min_pixel_len = 40.0;
+    int nLineVerticesTotal = 0;   // kept line vertices (2 per kept MapLine)
+    int nLineEdgesTotal = 0;      // total line observation edges added
 
     for(size_t i=0; i<vpML.size(); i++)
     {
@@ -321,6 +326,7 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
         }
 
         mapLineVertexId[pML] = {id1, id2};
+        nLineVerticesTotal += 2;
 
         // =========================================================
         // 🌟 [CRITICAL FIX] Directional Prior (Outer Product)
@@ -426,8 +432,17 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
             optimizer.removeVertex(vP1);
             optimizer.removeVertex(vP2);
             vbNotIncludedML[i] = true;
+            nLineVerticesTotal -= 2;
+        }
+        else {
+            nLineEdgesTotal += nLineObsEdges;
         }
     }
+
+    if(IsLineLoopDiag())
+        std::cerr << "[LineLoop][GBA] lineVertices=" << nLineVerticesTotal
+                  << " lineEdges=" << nLineEdgesTotal
+                  << " mapLines=" << vpML.size() << std::endl;
 
 
     if(pbStopFlag)
@@ -15178,6 +15193,15 @@ int Optimizer::OptimizeSim3WithLine(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPo
             e1->setRobustKernel(0);
             e2->setRobustKernel(0);
         }
+    }
+
+    if(IsLineLoopDiag())
+    {
+        int nLineInlierPairs = 0;
+        for(size_t i=0; i<vpLineEdges.size(); i++)
+            if(vpLineEdges[i].first && vpLineEdges[i].second) nLineInlierPairs++;
+        std::cerr << "[LineLoop][Sim3] linePairs=" << vpLineEdges.size()
+                  << " lineInlierPairs=" << nLineInlierPairs << std::endl;
     }
 
     int nMoreIterations;
