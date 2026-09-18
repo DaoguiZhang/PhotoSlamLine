@@ -237,6 +237,16 @@ target_link_libraries(test_line_loop PRIVATE
     ${OpenCV_LIBRARIES}
     Eigen3::Eigen)
 
+# Line loop audit: GBA line-edge analytic Jacobian FD, GBA vertex-id collision,
+# MapLine corrected-once flag, observation bookkeeping invariants.
+add_executable(test_line_loop_audit tests/test_line_loop_audit.cpp)
+target_link_libraries(test_line_loop_audit PRIVATE
+    ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
+    ${ORB_SLAM3_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+    ${ORB_SLAM3_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
+    ${OpenCV_LIBRARIES}
+    Eigen3::Eigen)
+
 # Line structural loss autograd vs finite-difference check
 add_executable(test_line_structure_loss tests/test_line_structure_loss.cpp)
 target_link_libraries(test_line_structure_loss PRIVATE
