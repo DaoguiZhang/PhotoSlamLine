@@ -1920,6 +1920,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             int num_transformed = 0;
             float sumTrans = 0.0f, sumRot = 0.0f, sumScale = 0.0f;
             int nLargeCorr = 0;
+            float maxTrans = 0.0f, maxRotDeg = 0.0f;
 
             for (auto& kf : associated_kfs) {
                 auto kfid = std::get<0>(kf);
@@ -1940,6 +1941,10 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     Sophus::SE3f original_pose = pkf->getPosef();
                     Sophus::SE3f inv_pose = pose.inverse();
                     Sophus::SE3f diff_pose = inv_pose * original_pose;
+
+                    maxTrans = std::max(maxTrans, diff_pose.translation().norm());
+                    maxRotDeg = std::max(maxRotDeg,
+                        (float)(Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle() * 180.0 / M_PI));
                     
                     bool large_rot = !diff_pose.rotationMatrix().isApprox(Eigen::Matrix3f::Identity(), large_rot_th_);
                     bool large_trans = !diff_pose.translation().isMuchSmallerThan(1.0, large_trans_th_);
@@ -2009,6 +2014,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                           << " corrected=" << num_transformed
                           << " skippedBad=0 skippedNull=0 duplicateSkipped=0"
                           << " nonFinite=" << nonFinite
+                          << " maxTranslation=" << maxTrans
+                          << " maxRotationDeg=" << maxRotDeg
                           << " meanTranslation=" << meanT
                           << " meanRotationDeg=" << meanR
                           << " meanScaleRatio=" << meanS << std::endl;
