@@ -965,6 +965,7 @@ bool MapLine::GetKeyFrameLineEndpoints(KeyFrame* pKF, int lineIdx, cv::Point2f &
 
 void MapLine::SetPluckerLineNew(const Eigen::Matrix<double,6,1>& plk)
 {
+    unique_lock<mutex> lock(mMutexPos);
     mWorldPlucker = plk;
     // ensure n·v = 0
     Eigen::Vector3d n = mWorldPlucker.head<3>();
