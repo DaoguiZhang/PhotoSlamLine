@@ -247,6 +247,16 @@ target_link_libraries(test_line_loop_audit PRIVATE
     ${OpenCV_LIBRARIES}
     Eigen3::Eigen)
 
+# P5: line-Gaussian loop-sync transform math (CPU, no CUDA): mean/rotation/
+# direction/scale under known Sim3, once-only guard, replaced-MapLine skip.
+add_executable(test_line_loop_gaussian tests/test_line_loop_gaussian.cpp)
+target_link_libraries(test_line_loop_gaussian PRIVATE
+    ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
+    ${ORB_SLAM3_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+    ${ORB_SLAM3_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
+    ${OpenCV_LIBRARIES}
+    Eigen3::Eigen)
+
 # Line structural loss autograd vs finite-difference check
 add_executable(test_line_structure_loss tests/test_line_structure_loss.cpp)
 target_link_libraries(test_line_structure_loss PRIVATE
