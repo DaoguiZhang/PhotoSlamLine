@@ -35,14 +35,23 @@ MapLine::MapLine():
     mnFirstKFid(0), mnFirstFrame(0), nObs(0), mnTrackReferenceForFrame(0),
     mnLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnLoopLineForKF(0), mnCorrectedByKF(0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), mnLineVisible(1), mnLineFound(1), mbLineBad(false),
-    mpLineReplaced(static_cast<MapLine*>(NULL)),
+    mpLineReplaced(static_cast<MapLine*>(NULL)), mpMap(NULL), mpRefKF(NULL),
+    mfMinDistance(0), mfMaxDistance(0), mnOriginMapId(0),
     mbRetrived(false)
 {
     mpLineReplaced = static_cast<MapLine*>(NULL);
     mWorldPlucker.setZero();
-    // MapLines can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
-    unique_lock<mutex> lock(mpMap->mMutexLineCreation);//指的是啥？我暂且忘记了？？？
-     mnId=nNextId++;
+    mLineNormalVector.setZero();
+    mbLineTrackInViewR = false;
+    mbLineTrackInView = false;
+    // A default-constructed MapLine has no map and no reference KF. The id
+    // allocation needs the map mutex, so it is skipped when mpMap is null
+    // (no pipeline call site default-constructs a MapLine).
+    if (mpMap)
+    {
+        unique_lock<mutex> lock(mpMap->mMutexLineCreation);
+        mnId = nNextId++;
+    }
 }
 
 //construct a MapLine with 3D Line position
@@ -300,7 +309,10 @@ void MapLine::SetBadFlag()
             pKF->EraseMapLineMatch(rightIndex);
         }
     }
-    mpMap->EraseMapLine(this);
+    if (mpMap)
+    {
+        mpMap->EraseMapLine(this);
+    }
 }
 
 void MapLine::PreSave(std::set<KeyFrame*>& spKF, std::set<MapLine*>& spML)

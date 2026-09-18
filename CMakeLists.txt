@@ -220,6 +220,15 @@ target_link_libraries(test_plucker_lba_audit PRIVATE
     ${OpenCV_LIBRARIES}
     Eigen3::Eigen)
 
+# MapLine default-construction safety (ASan/UBSan): null mpMap/refKF must not
+# be dereferenced by the constructor, getters, or destructor.
+add_executable(test_mapline_default tests/test_mapline_default.cpp)
+target_link_libraries(test_mapline_default PRIVATE
+    ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
+    ${ORB_SLAM3_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+    ${OpenCV_LIBRARIES}
+    Eigen3::Eigen)
+
 # Line loop closing: Sim3 line edge numerical Jacobian + Plucker consistency
 add_executable(test_line_loop tests/test_line_loop.cpp)
 target_link_libraries(test_line_loop PRIVATE
