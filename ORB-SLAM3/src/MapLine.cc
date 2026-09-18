@@ -173,6 +173,28 @@ void MapLine::SetLineWorldPos(const Eigen::Vector3f &LsPos, const Eigen::Vector3
     mLeWorldPos = LePos;
 }
 
+void MapLine::UpdateGeometryFromEndpoints(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos)
+{
+    // 1. Endpoints (mLineWorldPos + mLsWorldPos/mLeWorldPos, under mMutexPos).
+    SetLineWorldPos(LsPos, LePos);
+    // 2. Plücker (n, v) + direction v from the new endpoints.
+    ComputePluckerLineFromWorldLine();
+    // 3. Mean viewing direction / depth (normal).
+    UpdateNormalAndDepth();
+    // 4. Resample points along the line for 3DGS.
+    KeyFrame* pRefKF = GetReferenceKeyFrame();
+    if (pRefKF && !pRefKF->isBad())
+    {
+        SamplePointsAlongLine_MultiViewWeighted_Advanced(
+            pRefKF->getLineSampleStep(), pRefKF->getLineViewWeight(),
+            pRefKF->getLineSigma(), pRefKF->getLineTopK());
+    }
+    else
+    {
+        SamplePointsAlongLine_MultiViewWeighted_Advanced(0.1f, 2.0f, 3.0f, 2);
+    }
+}
+
 std::pair<Eigen::Vector3f, Eigen::Vector3f> MapLine::GetLineWorldPos() {
     unique_lock<mutex> lock(mMutexPos);
     return std::make_pair(mLsWorldPos, mLeWorldPos);

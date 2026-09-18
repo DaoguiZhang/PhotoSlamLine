@@ -114,6 +114,10 @@ public:
     void SetLineWorldPos(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos);
     std::pair<Eigen::Vector3f, Eigen::Vector3f> GetLineWorldPos();  //get Line start and end point
 
+    // Unified loop writeback: endpoints + Plücker/direction + normal/depth +
+    // sampled points, used by coarse correction, essential graph and GBA writeback.
+    void UpdateGeometryFromEndpoints(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos);
+
     void SetLineColorRGB(const Eigen::Vector3f &LsColor, const Eigen::Vector3f &LeColor);
     std::pair<Eigen::Vector3f, Eigen::Vector3f> GetLineColorRGB();
 

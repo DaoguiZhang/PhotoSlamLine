@@ -279,6 +279,7 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
     const double min_pixel_len = 40.0;
     int nLineVerticesTotal = 0;   // kept line vertices (2 per kept MapLine)
     int nLineEdgesTotal = 0;      // total line observation edges added
+    int nLineVertexAddFailures = 0;   // vertex-id collision / duplicate add
 
     for(size_t i=0; i<vpML.size(); i++)
     {
@@ -322,6 +323,7 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
             if (ok1) optimizer.removeVertex(vP1);
             delete vP1; delete vP2;
             vbNotIncludedML[i] = true;
+            nLineVertexAddFailures++;
             continue;
         }
 
@@ -442,6 +444,7 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
     if(IsLineLoopDiag())
         std::cerr << "[LineLoop][GBA] lineVertices=" << nLineVerticesTotal
                   << " lineEdges=" << nLineEdgesTotal
+                  << " vertexAddFailures=" << nLineVertexAddFailures
                   << " mapLines=" << vpML.size() << std::endl;
 
 
@@ -14164,21 +14167,10 @@ void Optimizer::OptimizeEssentialGraphWithLine(Map* pMap, KeyFrame* pLoopKF, Key
         Eigen::Vector3d eigCorrectedP1w = correctedSwr.map(Srw.map(P1w));
         Eigen::Vector3d eigCorrectedP2w = correctedSwr.map(Srw.map(P2w));
 
-        pML->SetLineWorldPos(eigCorrectedP1w.cast<float>(), eigCorrectedP2w.cast<float>());
-        pML->ComputePluckerLineFromWorldLine();
+        pML->UpdateGeometryFromEndpoints(eigCorrectedP1w.cast<float>(), eigCorrectedP2w.cast<float>());
 
         if (!pML->isRetrived()) {
             pML->setRetrived(true);
-
-            // 重新高频采样，供 3DGS 使用
-            float sample_step = pCurKF->getLineSampleStep();
-            float view_weight = pCurKF->getLineViewWeight();
-            float sigma = pCurKF->getLineSigma();
-            int top_k = pCurKF->getLineTopK();
-            
-            pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
-                sample_step, view_weight, sigma, top_k);
-
             opr.addMapLine(pML);
         }
     }

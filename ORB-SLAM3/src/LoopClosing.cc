@@ -2463,11 +2463,9 @@ void LoopClosing::CorrectLoopWithLine()
                 Eigen::Vector3d eigCorrectedP1w = g2oCorrectedSwi.map(g2oSiw.map(P1w));
                 Eigen::Vector3d eigCorrectedP2w = g2oCorrectedSwi.map(g2oSiw.map(P2w));
 
-                pMLi->SetLineWorldPos(eigCorrectedP1w.cast<float>(), eigCorrectedP2w.cast<float>());
+                pMLi->UpdateGeometryFromEndpoints(eigCorrectedP1w.cast<float>(), eigCorrectedP2w.cast<float>());
                 pMLi->mnCorrectedByKF = mpCurrentKF->mnId;
                 pMLi->mnCorrectedReference = pKFi->mnId;
-                pMLi->ComputePluckerLineFromWorldLine(); // 同步 Plücker 表示
-                pMLi->UpdateNormalAndDepth();
                 nLinesCorrected++;
             }
 
@@ -4833,7 +4831,7 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
                 if(pML->mnBAGlobalForKF == nLoopKF)
                 {
                     // 如果线段直接被 Global BA 优化了 (前提是你的GBA支持线优化)
-                    pML->SetLineWorldPos(pML->mPos1GBA, pML->mPos2GBA);
+                    pML->UpdateGeometryFromEndpoints(pML->mPos1GBA, pML->mPos2GBA);
                     nLinesGBA++;
                 }
                 else
@@ -4848,26 +4846,11 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
                     Eigen::Vector3f Xc2 = pRefKF->mTcwBefGBA * endpoints.second;
 
                     // 映射回修正后的世界坐标系
-                    pML->SetLineWorldPos(
+                    pML->UpdateGeometryFromEndpoints(
                         pRefKF->GetPoseInverse() * Xc1, 
                         pRefKF->GetPoseInverse() * Xc2
                     );
                     nLinesGBA++;
-                }
-
-                // 🌟 [必须增加 1]：同步更新 Plucker 底层表达
-                pML->ComputePluckerLineFromWorldLine();
-                
-                // 🌟 [必须增加 2]：重新进行高频采样，确保 3DGS 拿到修正后的坐标
-                KeyFrame* pRefKF = pML->GetReferenceKeyFrame();
-                if(pRefKF) {
-                    float sample_step = pRefKF->getLineSampleStep();
-                    float view_weight = pRefKF->getLineViewWeight();
-                    float sigma = pRefKF->getLineSigma();
-                    int top_k = pRefKF->getLineTopK();
-                    
-                    pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
-                        sample_step, view_weight, sigma, top_k);
                 }
             }
 
