@@ -34,7 +34,18 @@ int main()
                   << " endpoints_finite=" << (ep.first.allFinite() && ep.second.allFinite() ? 1 : 0)
                   << " normal_finite=" << (norm.allFinite() ? 1 : 0)
                   << std::endl;
+
+        // Getters must return finite ZERO values (no uninitialized read).
+        bool ok = (m == nullptr) && (ref == nullptr) && L.allFinite() && L.norm() == 0.0
+                  && ep.first.allFinite() && ep.first.norm() == 0.0f
+                  && ep.second.allFinite() && ep.second.norm() == 0.0f
+                  && norm.allFinite() && norm.norm() == 0.0f;
+        if (!ok)
+        {
+            std::cerr << "FAIL: default-constructed geometry is not finite/zero" << std::endl;
+            return 1;
+        }
     }
-    std::cout << "PASS (default-construct + getters + destroy, no UB)" << std::endl;
+    std::cout << "PASS (default-construct + getters + destroy, finite/zero, no UB)" << std::endl;
     return 0;
 }

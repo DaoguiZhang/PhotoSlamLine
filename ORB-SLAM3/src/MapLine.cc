@@ -37,11 +37,26 @@ MapLine::MapLine():
     mnCorrectedReference(0), mnBAGlobalForKF(0), mnLineVisible(1), mnLineFound(1), mbLineBad(false),
     mpLineReplaced(static_cast<MapLine*>(NULL)), mpMap(NULL), mpRefKF(NULL),
     mfMinDistance(0), mfMaxDistance(0), mnOriginMapId(0),
-    mbRetrived(false)
+    mbRetrived(false), mnBALocalForMerge(0), mBackupRefKFId(0), mLineBackupReplacedId(0),
+    mnLineTrackScaleLevel(0), mnLineTrackScaleLevelR(0), mLineTrackViewCos(0), mLineTrackViewCosR(0),
+    mLsTrackProjX(0), mLsTrackProjY(0), mLeTrackProjX(0), mLeTrackProjY(0),
+    mLsTrackDepth(0), mLeTrackDepth(0), mLineTrackDepth(0), mTrackDepthR(0), mTrackProjXR(0), mTrackProjYR(0),
+    mLsInvDepth(0), mLeInvDepth(0), mLsInitU(0), mLsInitV(0), mLeInitU(0), mLeInitV(0),
+    mpHostKF(NULL)
 {
     mpLineReplaced = static_cast<MapLine*>(NULL);
     mWorldPlucker.setZero();
+    mLineWorldPos.setZero();
+    mLsWorldPos.setZero();
+    mLeWorldPos.setZero();
     mLineNormalVector.setZero();
+    mPosGBA.setZero();
+    mPos1GBA.setZero();
+    mPos2GBA.setZero();
+    mPosMerge.setZero();
+    mNormalVectorMerge.setZero();
+    mLsColorRGB.setZero();
+    mLeColorRGB.setZero();
     mbLineTrackInViewR = false;
     mbLineTrackInView = false;
     // A default-constructed MapLine has no map and no reference KF. The id
