@@ -30,28 +30,22 @@ inline torch::Tensor inverse_sigmoid(const torch::Tensor &x)
 
 inline torch::Tensor build_rotation(torch::Tensor &r)
 {
-    auto r0 = r.index({torch::indexing::Slice(), 0});
-    auto r1 = r.index({torch::indexing::Slice(), 1});
-    auto r2 = r.index({torch::indexing::Slice(), 2});
-    auto r3 = r.index({torch::indexing::Slice(), 3});
-    auto norm = torch::sqrt(r0 * r0 + r1 * r1 + r2 * r2 + r3 * r3);
+    // Autograd-safe functional build (the previous in-place copy_ into views of
+    // a zero tensor corrupted the backward graph -> CUDA illegal memory access
+    // when the result fed a loss). Quaternion layout: (w, x, y, z).
+    using namespace torch::indexing;
+    auto norm = torch::sqrt(torch::sum(r * r, /*dim=*/1, /*keepdim=*/true)).clamp_min(1e-12f);
+    auto q = r / norm;
+    auto w = q.index({Slice(), 0});
+    auto x = q.index({Slice(), 1});
+    auto y = q.index({Slice(), 2});
+    auto z = q.index({Slice(), 3});
 
-    auto q = r / norm.unsqueeze(/*dim=*/1);
-    r = q.index({torch::indexing::Slice(), 0});
-    auto x = q.index({torch::indexing::Slice(), 1});
-    auto y = q.index({torch::indexing::Slice(), 2});
-    auto z = q.index({torch::indexing::Slice(), 3});
-
-    auto R = torch::zeros({q.size(0), 3, 3}, torch::TensorOptions().device(torch::kCUDA));
-    R.select(1, 0).select(1, 0).copy_(1 - 2 * (y * y + z * z));
-    R.select(1, 0).select(1, 1).copy_(2 * (x * y - r * z));
-    R.select(1, 0).select(1, 2).copy_(2 * (x * z + r * y));
-    R.select(1, 1).select(1, 0).copy_(2 * (x * y + r * z));
-    R.select(1, 1).select(1, 1).copy_(1 - 2 * (x * x + z * z));
-    R.select(1, 1).select(1, 2).copy_(2 * (y * z - r * x));
-    R.select(1, 2).select(1, 0).copy_(2 * (x * z - r * y));
-    R.select(1, 2).select(1, 1).copy_(2 * (y * z + r * x));
-    R.select(1, 2).select(1, 2).copy_(1 - 2 * (x * x + y * y));
+    auto R = torch::stack({
+        torch::stack({1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)}, 1),
+        torch::stack({2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)}, 1),
+        torch::stack({2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)}, 1),
+    }, 1);  // [N, 3, 3]
     return R;
 }
 

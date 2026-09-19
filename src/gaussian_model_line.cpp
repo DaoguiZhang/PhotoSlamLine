@@ -124,6 +124,9 @@ torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherenc
     if (!line_mask.any().item<bool>() || !this->xyz_init_.defined() || this->xyz_init_.size(0) != this->xyz_.size(0)) {
         return torch::zeros({}, torch::TensorOptions().device(device_type_));
     }
+    if (this->line_dir_w_.size(0) != this->xyz_.size(0)) {
+        return torch::zeros({}, torch::TensorOptions().device(device_type_));
+    }
 
     // 1. 提取所有线点的当前位置 (P)、初始参考位置 (A) 和单位方向向量 (u)
     auto p_m = this->xyz_.index({line_mask});           // [Nl, 3]
@@ -3894,6 +3897,12 @@ torch::Tensor GaussianModelLine::computeGroupedLineLoss(
 torch::Tensor GaussianModelLine::computeLineShapeConstraint(float lambda_ecc, float lambda_ori) {
     auto line_mask = this->is_line_;
     if (!line_mask.any().item<bool>()) return torch::zeros({}, xyz_.options());
+    // Defensive guard: line tensors must stay size-aligned with xyz_; otherwise
+    // the boolean index below reads out of bounds (CUDA illegal access).
+    if (this->line_dir_w_.size(0) != this->xyz_.size(0)
+        || this->scaling_.size(0) != this->xyz_.size(0)
+        || this->rotation_.size(0) != this->xyz_.size(0))
+        return torch::zeros({}, xyz_.options());
 
     // 1. 提取 Scaling
     // 注意：scaling_ 存储的是 log 空间的值

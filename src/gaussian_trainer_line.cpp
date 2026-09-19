@@ -118,7 +118,10 @@ void GaussianTrainerLine::trainingOnce(
 
                 if ((iteration > opt.densify_from_iter_) && (iteration % opt.densification_interval_ == 0)) {
                     int size_threshold = (iteration > opt.opacity_reset_interval_) ? 20 : 0;
-                    gaussians->densifyAndPrune(opt.densify_grad_threshold_, 0.005, scene->cameras_extent_, size_threshold);
+                    // Line-aware densify/prune: keeps is_line_ / line_dir_w_ /
+                    // xyz_init_ in sync with xyz_ (point-only densifyAndPrune
+                    // drops them -> line loss OOB / candidates=0).
+                    gaussians->densifyAndPruneWithLineAwareness(opt.densify_grad_threshold_, 0.005, scene->cameras_extent_, size_threshold);
                 }
 
                 if ((iteration % opt.opacity_reset_interval_) == 0 || (dataset.white_background_ && iteration == opt.densify_from_iter_))
