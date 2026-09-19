@@ -16,6 +16,79 @@
 #include "include/gaussian_model_line.h"
 #include <torch/torch.h>
 
+#include <cstdlib>
+#include "include/rasterize_points.h"
+
+// Line-Gaussian retention ablation knobs (env-configurable, default = baseline).
+//   PHOTO_SLAM_LINE_INIT_OPACITY : initial opacity of line-sampled Gaussians (B)
+//   PHOTO_SLAM_LINE_MIN_OPACITY  : opacity-prune threshold for line Gaussians (D)
+//                                  (-1 = use the point threshold)
+//   PHOTO_SLAM_LINE_GRACE_ITER   : iterations after birth during which line
+//                                  Gaussians are exempt from opacity pruning (C)
+//   PHOTO_SLAM_LINE_LAZY_FACTOR  : lazy(gradient)-prune threshold factor for
+//                                  line Gaussians (line grad is ~100x smaller
+//                                  than point grad; 0 = never lazy-prune lines)
+//   PHOTO_SLAM_LINE_SIZE_EXTENT   : world-size prune factor for lines
+//                                  (line world scale > factor*extent pruned;
+//                                  lines are elongated by design, so this is
+//                                  larger than the 0.1 point factor)
+namespace {
+float lineInitialOpacity() {
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_INIT_OPACITY");
+        return e ? std::atof(e) : 0.1f;
+    }();
+    return v;
+}
+float lineMinOpacity() {
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_MIN_OPACITY");
+        // Line Gaussians are thin and naturally settle at much lower opacity
+        // than point Gaussians (measured opMean ~0.05 vs point threshold 0.1).
+        // A dedicated, lower opacity-prune threshold keeps geometrically valid
+        // lines alive without touching the point threshold.
+        return e ? std::atof(e) : 0.01f;
+    }();
+    return v;
+}
+int lineGraceIter() {
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_GRACE_ITER");
+        return e ? std::atoi(e) : 0;
+    }();
+    return v;
+}
+float lineLazyFactor() {
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_LAZY_FACTOR");
+        // Gradient-based "lazy" pruning is a point-oriented criterion that does
+        // not apply to line Gaussians: their thin anisotropic footprint gives
+        // ~100-1000x smaller per-pixel gradient than points by construction, so
+        // any non-zero gradient threshold eventually prunes every line over the
+        // long training (verified: factor 0.001 -> candidates=0 at loop; 0 ->
+        // candidates>0). Lines remain governed by opacity (lineMinOpacity) and
+        // size (lineSizeExtentFactor) pruning, so this is not an unconditional
+        // exemption. Keep the knob for experiments.
+        return e ? std::atof(e) : 0.0f;
+    }();
+    return v;
+}
+float lineSizeExtentFactor() {
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_SIZE_EXTENT");
+        return e ? std::atof(e) : 0.5f;
+    }();
+    return v;
+}
+bool linePruneDiag() {
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_LINE_PRUNE");
+        return e && std::atoi(e) != 0;
+    }();
+    return v;
+}
+} // namespace
+
 
 // 由 CUDA 逻辑反推：保证 my_radius>=1 的最小 world scale 近似：scale >= z/(3f)
 inline float GaussianModelLine::minWorldScaleFromPixelFootprint(float z, float focal)
@@ -724,7 +797,8 @@ void GaussianModelLine::increasePcd(
     auto new_features_dc = features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(0, 1)}).transpose(1, 2).contiguous();
     auto new_features_rest = features.index({torch::indexing::Slice(), torch::indexing::Slice(), torch::indexing::Slice(1, sh_dim)}).transpose(1, 2).contiguous();
 
-    auto new_opacity = general_utils::inverse_sigmoid(0.1f * torch::ones({N, 1}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_)));
+    auto new_opacity = general_utils::inverse_sigmoid(
+        lineInitialOpacity() * torch::ones({N, 1}, torch::TensorOptions().dtype(torch::kFloat32).device(device_type_)));
     auto new_exist_since_iter = torch::full({N}, iteration, torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
 
     auto new_xyz_init = new_xyz.clone().detach();
@@ -1248,6 +1322,26 @@ void GaussianModelLine::scaledTransformVisiblePointsOfKeyframe(
             this->scaling_ = replaceTensorToOptimizer(new_scaling, 4);
             this->Tensor_vec_scaling_ = {this->scaling_};
         }
+    }
+
+    // Diagnostic: why are line Gaussians (not) transformed by loop correction?
+    static const bool diag = []() {
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_LINE_LOOP");
+        return e && std::atoi(e) != 0;
+    }();
+    if (diag) {
+        torch::Tensor belong = torch::logical_and(
+            this->is_line_,
+            torch::abs(this->exist_since_iter_ - kf_creation_iter) < stable_num_iter_existence);
+        torch::Tensor vis = markVisible(points, kf_world_view_transform, kf_full_proj_transform);
+        torch::Tensor line_vis = torch::logical_and(this->is_line_, vis);
+        std::cerr << "[LoopDiag] kf_iter=" << kf_creation_iter
+                  << " lineTotal=" << this->is_line_.sum().item<int64_t>()
+                  << " lineBelong=" << belong.sum().item<int64_t>()
+                  << " lineVisible=" << line_vis.sum().item<int64_t>()
+                  << " lineBelongVis=" << torch::logical_and(belong, line_vis).sum().item<int64_t>()
+                  << " lineTransformedThisKf=" << torch::logical_and(newly_transformed, this->is_line_).sum().item<int64_t>()
+                  << std::endl;
     }
 
 // torch::Tensor point_cloud_copy = points.clone();
@@ -3523,37 +3617,82 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // =========================================================
     // 2. 核心改进：在点数增加前，先计算针对当前点的剪裁掩码
     // =========================================================
-    // A. 基础透明度掩码
-    auto opacity_mask = (this->getOpacityActivation() < min_opacity).view({-1});
+    // A. 基础透明度掩码 (line Gaussians get a separate, lower threshold
+    // because thin structures naturally settle at lower opacity than points).
+    auto opacity = this->getOpacityActivation().view({-1});
+    auto opacity_mask = opacity < min_opacity;
+    if (lineMinOpacity() >= 0.0f) {
+        auto point_mask = torch::logical_and(~this->is_line_, opacity_mask);
+        auto line_op_mask = torch::logical_and(this->is_line_, opacity < lineMinOpacity());
+        opacity_mask = torch::logical_or(point_mask, line_op_mask);
+    }
 
     // B. 激进线段剪裁 (只针对已经在图中存在一段时间的点, important)
-    float lazy_threshold = max_grad * 0.1f;
-    // 增加一个条件：denom_ > 0 确保这个点至少被投影过，且不是刚诞生的
-    auto lazy_line_mask = torch::logical_and(
-        this->is_line_, 
-        torch::logical_and(grads.squeeze() < lazy_threshold, this->denom_.squeeze() > 0)
-    );
+    // Line Gaussians are thin (few pixels), so their per-point gradient is
+    // inherently ~10-100x smaller than point Gaussians. Use a line-specific
+    // factor (default 0.01, i.e. 1e-5 with grad_threshold 1e-3) so only
+    // truly-lazy lines are pruned. factor==0 disables line lazy pruning.
+    const float lazy_factor = lineLazyFactor();
+    auto lazy_line_mask = torch::zeros_like(this->is_line_);
+    if (lazy_factor > 0.0f) {
+        float lazy_threshold = max_grad * lazy_factor;
+        // 增加一个条件：denom_ > 0 确保这个点至少被投影过，且不是刚诞生的
+        lazy_line_mask = torch::logical_and(
+            this->is_line_, 
+            torch::logical_and(grads.squeeze() < lazy_threshold, this->denom_.squeeze() > 0)
+        );
+    }
+
+    // Instrument line-Gaussian retention (opacity / age / prune reason).
+    // Gated behind PHOTO_SLAM_DEBUG_LINE_PRUNE (off by default: the .item()
+    // calls force CPU-GPU syncs on every densify).
+    torch::Tensor big_points_mask;
+    if (linePruneDiag() && this->is_line_.any().item<bool>()) {
+        auto line_mask = this->is_line_;
+        auto op = torch::sigmoid(this->opacity_).squeeze();
+        auto line_op = op.index({line_mask});
+        auto line_birth = this->exist_since_iter_.index({line_mask}).to(torch::kFloat);
+        std::cerr << "[LinePrune] line=" << line_mask.sum().item<int64_t>()
+                  << " opMin=" << line_op.min().item<float>()
+                  << " opMean=" << line_op.mean().item<float>()
+                  << " opMax=" << line_op.max().item<float>()
+                  << " birthMean=" << line_birth.mean().item<float>()
+                  << " prunedByOpacity=" << torch::logical_and(line_mask, opacity_mask).sum().item<int64_t>()
+                  << " prunedByLazy=" << lazy_line_mask.sum().item<int64_t>()
+                  << std::endl;
+    }
 
     auto prune_mask = torch::logical_or(opacity_mask, lazy_line_mask);
 
     // C. 屏幕空间与世界空间尺寸检查
     if (max_screen_size > 0) {
         auto big_points_vs = this->max_radii2D_ > max_screen_size;
-        auto big_points_ws = std::get<0>(this->getScalingActivation().max(1)) > 0.1f * extent;
-        prune_mask = torch::logical_or(prune_mask, torch::logical_or(big_points_vs, big_points_ws));
+        auto max_scaling = std::get<0>(this->getScalingActivation().max(1));
+        // Point world-size check keeps the upstream 0.1*extent threshold.
+        auto big_points_ws = torch::logical_and(~this->is_line_, max_scaling > 0.1f * extent);
+        // Line world-size check uses a dedicated, larger factor (default 0.5)
+        // because line Gaussians are elongated along the line direction by
+        // design. This prunes only overgrown lines instead of exempting them.
+        auto big_lines_ws = torch::logical_and(this->is_line_, max_scaling > lineSizeExtentFactor() * extent);
+        big_points_mask = torch::logical_or(big_points_vs, torch::logical_or(big_points_ws, big_lines_ws));
+        prune_mask = torch::logical_or(prune_mask, big_points_mask);
     }
-
-    auto lazy_count = lazy_line_mask.sum().item<int>();
-    auto total_before = this->xyz_.size(0);
 
     // =========================================================
     // 3. 执行物理剪裁 (先清减，再增补)
     // =========================================================
     this->prunePointsWithLineAwareness(prune_mask);
 
-    std::cerr << "[Pruning Report] Total Gaussians: " << total_before 
-          << " | Pruned (Lazy Line): " << lazy_count 
-          << " | Remaining: " << this->xyz_.size(0) << std::endl;
+    if (linePruneDiag()) {
+        auto lazy_count = lazy_line_mask.sum().item<int>();
+        auto total_before = this->xyz_.size(0);
+        auto line_before_total = this->is_line_.sum().item<int64_t>();
+        std::cerr << "[Pruning Report] Total Gaussians: " << total_before 
+              << " | lineBefore=" << line_before_total
+              << " | lineAfter=" << this->is_line_.sum().item<int64_t>()
+              << " | Pruned (Lazy Line): " << lazy_count 
+              << " | Remaining: " << this->xyz_.size(0) << std::endl;
+    }
 
     // 重新计算剪裁后的梯度，用于加密逻辑
     // 因为 prune 之后原有 grads 已经失效了

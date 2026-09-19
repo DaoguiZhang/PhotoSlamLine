@@ -1932,7 +1932,19 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             int nLargeCorr = 0;
             float maxTrans = 0.0f, maxRotDeg = 0.0f;
 
+            // Explicit loop-correction magnitude gate (cost-only, does NOT
+            // affect loop validity): correct Gaussians of a KF only when
+            //   transNorm > TRANS_THRESHOLD_METERS ||
+            //   rotationAngleRad > ROT_THRESHOLD_RAD
+            // Defaults 0.10 m and 2 deg; env-configurable.
+            const char* et = std::getenv("PHOTO_SLAM_GAUSS_LOOP_TRANS_M");
+            const float gaussLoopTransThrM = (et ? std::atof(et) : 0.10f);
+            const char* er = std::getenv("PHOTO_SLAM_GAUSS_LOOP_ROT_DEG");
+            const float gaussLoopRotThrRad = (er ? std::atof(er) : 2.0f) * (float)M_PI / 180.0f;
+            int nKFsTotal = 0, nKFsWithPkf = 0, nKFsCorrected = 0, nKFsSkippedByGate = 0;
+
             for (auto& kf : associated_kfs) {
+                nKFsTotal++;
                 auto kfid = std::get<0>(kf);
                 std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
                 
@@ -1945,6 +1957,7 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         0);
 
                 if (pkf) {
+                    nKFsWithPkf++;
                     auto& pose = std::get<2>(kf);
                     
                     // Logic to detect large loop drift and correct geometry
@@ -1956,10 +1969,12 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     maxRotDeg = std::max(maxRotDeg,
                         (float)(Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle() * 180.0 / M_PI));
                     
-                    bool large_rot = !diff_pose.rotationMatrix().isApprox(Eigen::Matrix3f::Identity(), large_rot_th_);
-                    bool large_trans = !diff_pose.translation().isMuchSmallerThan(1.0, large_trans_th_);
+                    const float transNorm = diff_pose.translation().norm();
+                    const float rotRad = (float)Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle();
+                    const bool do_correct = (transNorm > gaussLoopTransThrM) || (rotRad > gaussLoopRotThrRad);
                     
-                    if (large_rot || large_trans) {
+                    if (do_correct) {
+                        nKFsCorrected++;
                         std::cerr << "[Gaussian Mapper] Large loop correction for KF " << kfid << std::endl;
                         
                         // Calculate transformation matrix M: P_new = M * P_old
@@ -1993,6 +2008,9 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         }
                         increaseKeyframeTimesOfUse(pkf, loop_closure_increased_times_of_use_);
                     }
+                    else {
+                        nKFsSkippedByGate++;
+                    }
                     
                     // Update KF pose
                     pkf->setPose(
@@ -2012,15 +2030,26 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             {
                 int lineGaussians = 0;
                 int nonFinite = 0;
+                int correctedLineGaussians = 0;
                 if (gaussians_->xyz_.size(0) > 0) {
                     lineGaussians = gaussians_->is_line_.sum().item<int>();
                     nonFinite = gaussians_->xyz_.size(0)
                         - torch::isfinite(gaussians_->xyz_).all(1).sum().item<int>();
+                    // Line Gaussians transformed by this loop (were in the
+                    // not-transformed set before, now marked transformed).
+                    if (lineGaussians > 0 && point_not_transformed_flags.size(0) == gaussians_->is_line_.size(0))
+                        correctedLineGaussians = torch::logical_and(
+                            gaussians_->is_line_, torch::logical_not(point_not_transformed_flags)).sum().item<int>();
                 }
                 const float meanT = (nLargeCorr > 0) ? (sumTrans / nLargeCorr) : 0.0f;
                 const float meanR = (nLargeCorr > 0) ? (sumRot / nLargeCorr * 180.0 / M_PI) : 0.0f;
                 const float meanS = (nLargeCorr > 0) ? (sumScale / nLargeCorr) : 1.0f;
                 std::cerr << "[LineLoop-Gaussian] candidates=" << lineGaussians
+                          << " correctedLineGaussians=" << correctedLineGaussians
+                          << " kfsTotal=" << nKFsTotal
+                          << " kfsWithPkf=" << nKFsWithPkf
+                          << " kfsCorrected=" << nKFsCorrected
+                          << " kfsSkippedByGate=" << nKFsSkippedByGate
                           << " corrected=" << num_transformed
                           << " skippedBad=0 skippedNull=0 duplicateSkipped=0"
                           << " nonFinite=" << nonFinite
