@@ -69,6 +69,9 @@ private:
         : mvAssociatedKeyFrames(std::move(opr.mvAssociatedKeyFrames)),
           mvAssociatedMapPoints(std::move(opr.mvAssociatedMapPoints)),
           mvAssociatedMapLines(std::move(opr.mvAssociatedMapLines)),
+          mvAssociatedLineSampledPoints(std::move(opr.mvAssociatedLineSampledPoints)),
+          mvAssociatedMapLineIds(std::move(opr.mvAssociatedMapLineIds)),
+          msInsertedLineIds(opr.msInsertedLineIds),
           meOperationType(opr.meOperationType),
           mfScale(opr.mfScale),
           mT(opr.mT)

@@ -5787,9 +5787,11 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     {
         unique_lock<mutex> lock(pMap->mMutexMapUpdate);
     opr.reserveMapLines(lLocalMapLines.size());
+    int nSeen=0, nNeedUpdate=0, nSampledEmpty=0, nSent=0;
     for (MapLine* pML : lLocalMapLines)
     {
         if(!pML || pML->isBad()) continue;
+        nSeen++;
         auto it = mapLineVertexId.find(pML);
         if(it == mapLineVertexId.end()) continue;
 
@@ -5857,6 +5859,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
         // 5. 只有发生显著变化，才重新采样并发送给 3DGS
         if (needUpdate) 
         {
+            nNeedUpdate++;
             float sample_step = pKF->getLineSampleStep();
             float view_weight = pKF->getLineViewWeight();
             float sigma = pKF->getLineSigma();
@@ -5866,10 +5869,24 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
             pML->SamplePointsAlongLine_MultiViewWeighted_Advanced(
                 sample_step, view_weight, sigma, top_k);
 
+            if (pML->GetLineSampledPoints3D().empty())
+                nSampledEmpty++;
+
             opr.addMapLine(pML);
             pML->setRetrived(true); 
+            nSent++;
         }
     }
+    if (IsLineLoopDiag())
+        std::cerr << "[LineLoop][LBA-line-seed] KF=" << pKF->mnId
+                  << " windowLines=" << lLocalMapLines.size()
+                  << " seen=" << nSeen
+                  << " needUpdate=" << nNeedUpdate
+                  << " sampledEmpty=" << nSampledEmpty
+                  << " sent=" << nSent
+                  << " opSampledPts="
+                  << (std::get<0>(opr.associatedLineSampledPoints()).size() / 3)
+                  << std::endl;
     } // map mutex (line write-back)
     pMap->IncreaseChangeIndex();
     
