@@ -1183,6 +1183,11 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         if (getIteration() < opt_params_.iterations_) {
             gaussians_->optimizer_->step();
             gaussians_->optimizer_->zero_grad(true);
+            // Keep rotation quaternions unit-norm: the raw rotation_ norm is
+            // unconstrained (losses only see the normalized quaternion), so it
+            // can drift to zero and degenerate the normalize() backward.
+            if (getIteration() % 50 == 0)
+                gaussians_->normalizeRotationQuaternions();
         }
     }
 }
@@ -1474,6 +1479,11 @@ void GaussianMapperLine::trainForOneIteration()
         if (getIteration() < opt_params_.iterations_) {
             gaussians_->optimizer_->step();
             gaussians_->optimizer_->zero_grad(true);
+            // Keep rotation quaternions unit-norm: the raw rotation_ norm is
+            // unconstrained (losses only see the normalized quaternion), so it
+            // can drift to zero and degenerate the normalize() backward.
+            if (getIteration() % 50 == 0)
+                gaussians_->normalizeRotationQuaternions();
         }
     }
 }

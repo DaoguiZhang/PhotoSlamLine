@@ -33,8 +33,9 @@ inline torch::Tensor build_rotation(torch::Tensor &r)
     // Autograd-safe functional build (the previous in-place copy_ into views of
     // a zero tensor corrupted the backward graph -> CUDA illegal memory access
     // when the result fed a loss). Quaternion layout: (w, x, y, z).
+    // Clamp sum-of-squares BEFORE sqrt so sqrt backward never sees 0.
     using namespace torch::indexing;
-    auto norm = torch::sqrt(torch::sum(r * r, /*dim=*/1, /*keepdim=*/true)).clamp_min(1e-12f);
+    auto norm = torch::sqrt(torch::sum(r * r, /*dim=*/1, /*keepdim=*/true).clamp_min(1e-16f));
     auto q = r / norm;
     auto w = q.index({Slice(), 0});
     auto x = q.index({Slice(), 1});

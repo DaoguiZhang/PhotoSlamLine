@@ -210,7 +210,20 @@ torch::Tensor GaussianModelLine::getScaling()
 
 torch::Tensor GaussianModelLine::getRotationActivation()
 {
-    return torch::nn::functional::normalize(this->rotation_);
+    // Robust normalization: clamp sum-of-squares BEFORE sqrt so the sqrt
+    // backward never sees 0 (sqrt(0) -> Inf -> NaN for a degenerate quaternion).
+    auto norm_sq = torch::sum(this->rotation_ * this->rotation_, 1, true).clamp_min(1e-16f);
+    return this->rotation_ / torch::sqrt(norm_sq);
+}
+
+void GaussianModelLine::normalizeRotationQuaternions()
+{
+    if (this->rotation_.size(0) == 0) return;
+    torch::NoGradGuard no_grad;
+    auto norm_sq = torch::sum(this->rotation_ * this->rotation_, 1, true).clamp_min(1e-16f);
+    auto normalized = this->rotation_ / torch::sqrt(norm_sq);
+    this->rotation_ = replaceTensorToOptimizer(normalized, 5);
+    this->Tensor_vec_rotation_ = {this->rotation_};
 }
 
 torch::Tensor GaussianModelLine::getXYZ()

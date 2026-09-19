@@ -69,6 +69,10 @@ public:
     torch::Tensor getScalingActivation();
     torch::Tensor getScaling();
     torch::Tensor getRotationActivation();
+    // Re-normalize rotation quaternions in-place (optimizer-aware). Keeps the
+    // quaternion unit-norm so the normalize() backward in the line losses /
+    // rasterizer never degenerates (avoids NaN gradients -> NaN rotation_).
+    void normalizeRotationQuaternions();
     torch::Tensor getXYZ();
     torch::Tensor getFeatures();
     torch::Tensor getOpacityActivation();
