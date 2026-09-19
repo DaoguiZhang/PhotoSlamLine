@@ -2256,15 +2256,6 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     auto new_opacity = opac_sel.index({combined_indices});
     auto new_exist_since_iter = iter_sel.index({combined_indices});
 
-    // ================= [DEBUG PROBE 2: Split 检查] =================
-    std::cerr << "[DEBUG FLOW] Inside densifyAndSplit. Prepared tensors:" << std::endl;
-    std::cerr << "  > new_rotation list size: " << list_rot.size() << std::endl;
-    if (!list_rot.empty()) {
-        std::cerr << "  > first tensor in rot list: " << list_rot[0].sizes() << std::endl;
-    }
-    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
-    // ============================================================
-
     // =========================================================================
     // 5. 调用 Postfix (加入优化器)
     // =========================================================================
@@ -2478,15 +2469,6 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
 
     auto new_is_line      = torch::cat(new_is_line_list, 0);
     auto new_line_dir_w   = torch::cat(new_line_dir_w_list, 0);
-
-    // ================= [DEBUG PROBE 2: Split 检查] =================
-    std::cerr << "[DEBUG FLOW] Inside densifyAndSplit. Prepared tensors:" << std::endl;
-    std::cerr << "  > new_rotation list size: " << new_rot_list.size() << std::endl;
-    if (!new_rot_list.empty()) {
-        std::cerr << "  > first tensor in rot list: " << new_rot_list[0].sizes() << std::endl;
-    }
-    std::cerr << "  > Final new_rotation shape: " << new_rotation.sizes() << std::endl;
-    // ============================================================
 
     // size checks (debug-friendly)
     TORCH_CHECK(new_xyz.size(0) == new_is_line.size(0), "new_xyz and new_is_line size mismatch");
@@ -4067,12 +4049,23 @@ torch::Tensor GaussianModelLine::computeLineShapeConstraint(float lambda_ecc, fl
     auto eccentricity_loss = (s_perpendicular.mean(1) / (s_parallel + 1e-6)).sum();
 
     // 2. 提取 Rotation 并与初始方向对齐
-    // 假设我们在初始化时保存了初始旋转 rotation_init_
-    auto q_current = torch::nn::functional::normalize(this->rotation_.index({line_mask}));
-    
-    // 如果你没有保存初始 q，可以约束当前局部 X 轴与 line_dir_w_ 的夹角
-    auto R = general_utils::build_rotation(q_current); // [N_line, 3, 3]
-    auto local_x = R.index({torch::indexing::Slice(), torch::indexing::Slice(), 0}); // 变换后的局部 X 轴
+    // Robust quaternion normalization: clamp sum-of-squares BEFORE sqrt so the
+    // sqrt backward never sees 0 (avoids NaN gradient for a degenerate quat).
+    auto rot_l = this->rotation_.index({line_mask});
+    auto rot_norm = torch::sqrt(torch::sum(rot_l * rot_l, 1, true).clamp_min(1e-16f));
+    auto q_current = rot_l / rot_norm;
+
+    // Vectorized: local X axis (first column of the rotation matrix) computed
+    // directly from the unit quaternion (w,x,y,z), avoiding the full [N,3,3]
+    // build_rotation stack (3x less autograd graph for the orientation term).
+    auto qw = q_current.index({torch::indexing::Slice(), 0});
+    auto qx = q_current.index({torch::indexing::Slice(), 1});
+    auto qy = q_current.index({torch::indexing::Slice(), 2});
+    auto qz = q_current.index({torch::indexing::Slice(), 3});
+    auto local_x = torch::stack({
+        1 - 2 * (qy * qy + qz * qz),
+        2 * (qx * qy + qw * qz),
+        2 * (qx * qz - qw * qy)}, 1); // [N_line, 3]
     auto d_init = this->line_dir_w_.index({line_mask}); // 初始线方向
 
     // 约束 2：方向对齐 (余弦相似度接近 1)
