@@ -221,12 +221,12 @@ int main(int argc, char **argv)
         else if (ni > 0)
             T = tframe - vTimestamps[ni - 1];
 
-        // Offline benchmark: skip real-time pacing so the SLAM pipeline runs at
-        // full speed (the dominant wall-clock cost of dataset runs). Set
-        // PHOTO_SLAM_REALTIME=1 to restore the original 30Hz pacing.
-        const char* rt_env = std::getenv("PHOTO_SLAM_REALTIME");
-        const bool realtime = (rt_env != nullptr && std::string(rt_env) == "1");
-        if (realtime && ttrack < T)
+        // Real-time pacing (default ON): preserves map quality by keeping
+        // LocalMapping/LBA ahead of Tracking. PHOTO_SLAM_NO_PACING=1 skips the
+        // sleep for offline throughput experiments (quality may regress).
+        const char* np_env = std::getenv("PHOTO_SLAM_NO_PACING");
+        const bool skip_pacing = (np_env != nullptr && std::string(np_env) == "1");
+        if (!skip_pacing && ttrack < T)
             usleep((T - ttrack) * 1e6);
     }
 
