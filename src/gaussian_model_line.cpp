@@ -149,9 +149,8 @@ torch::Tensor GaussianModelLine::computeLineCoherenceLoss(float lambda_line)
 
     // 1. 筛选出属于线特征的高斯点
     auto line_mask = this->is_line_; // [N] bool
-    if (!line_mask.any().item<bool>()) {
-        return torch::zeros({}, torch::TensorOptions().device(device_type_));
-    }
+    // 不再调用 line_mask.any().item<bool>()（CPU-GPU 同步）；无线时布尔索引
+    // 得到空张量、sum 为 0，语义不变。
 
     auto xyz_l = this->xyz_.index({line_mask});           // [Nl, 3]
     auto dir_l = this->line_dir_w_.index({line_mask});    // [Nl, 3]
@@ -193,8 +192,10 @@ torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherenc
     using namespace torch::indexing;
 
     auto line_mask = this->is_line_; 
-    // 基础安全检查
-    if (!line_mask.any().item<bool>() || !this->xyz_init_.defined() || this->xyz_init_.size(0) != this->xyz_.size(0)) {
+    // 基础安全检查。注意：不再调用 line_mask.any().item<bool>()，
+    // 否则每次迭代都会强制一次 CPU-GPU 同步。无线高斯时下面的布尔索引
+    // 会得到空张量，其 sum() 恒为 0，语义不变。
+    if (!this->xyz_init_.defined() || this->xyz_init_.size(0) != this->xyz_.size(0)) {
         return torch::zeros({}, torch::TensorOptions().device(device_type_));
     }
     if (this->line_dir_w_.size(0) != this->xyz_.size(0)) {
@@ -4030,7 +4031,8 @@ torch::Tensor GaussianModelLine::computeGroupedLineLoss(
 
 torch::Tensor GaussianModelLine::computeLineShapeConstraint(float lambda_ecc, float lambda_ori) {
     auto line_mask = this->is_line_;
-    if (!line_mask.any().item<bool>()) return torch::zeros({}, xyz_.options());
+    // 不再调用 line_mask.any().item<bool>()（每次迭代的 CPU-GPU 同步）；
+    // 无线高斯时布尔索引得到空张量，sum 为 0，语义不变。
     // Defensive guard: line tensors must stay size-aligned with xyz_; otherwise
     // the boolean index below reads out of bounds (CUDA illegal access).
     if (this->line_dir_w_.size(0) != this->xyz_.size(0)

@@ -18,6 +18,8 @@
 
 #include "include/gaussian_mapper_line.h"
 
+#include <ATen/cuda/CUDAEvent.h>
+
 #include <cstdlib>
 #include <string>
 
@@ -32,6 +34,85 @@ int lineLossEvery() {
     }();
     return v;
 }
+
+// CUDA 事件级性能剖分（opt-in，PHOTO_SLAM_GPU_PROF=1）。
+// 用 cudaEventDefault(0) 打开计时；默认构造的 CUDAEvent 是 DisableTiming。
+// 事件记录在 torch 当前流上，每 kSyncEvery 次迭代才同步一次并采样，
+// 避免给热循环引入每迭代同步。
+//
+// 事件对象故意泄漏（不析构）：CUDAEvent 析构会调用 cudaEventDestroy，
+// 若发生在静态对象析构期（__cxa_finalize）会抛 "CUDA error: driver
+// shutting down" 导致 SIGABRT(134)。
+struct GpuSectionProfiler {
+    at::cuda::CUDAEvent* ev_start = nullptr;
+    at::cuda::CUDAEvent* ev_fwd = nullptr;
+    at::cuda::CUDAEvent* ev_line = nullptr;
+    at::cuda::CUDAEvent* ev_bwd = nullptr;
+    at::cuda::CUDAEvent* ev_dens = nullptr;
+    at::cuda::CUDAEvent* ev_opt = nullptr;
+
+    bool enabled = false;
+    bool inited = false;
+    int since_sync = 0;
+    static constexpr int kSyncEvery = 50;
+
+    struct Acc {
+        double fwd = 0, line = 0, bwd = 0, dens = 0, opt = 0;
+        long iters = 0;
+    };
+    Acc online, refine;
+
+    void ensureInit() {
+        if (inited) return;
+        inited = true;
+        const char* e = std::getenv("PHOTO_SLAM_GPU_PROF");
+        enabled = e && std::atoi(e) != 0 && torch::cuda::is_available();
+        if (!enabled) return;
+        ev_start = new at::cuda::CUDAEvent(0u);
+        ev_fwd   = new at::cuda::CUDAEvent(0u);
+        ev_line  = new at::cuda::CUDAEvent(0u);
+        ev_bwd   = new at::cuda::CUDAEvent(0u);
+        ev_dens  = new at::cuda::CUDAEvent(0u);
+        ev_opt   = new at::cuda::CUDAEvent(0u);
+    }
+    void markStart()        { ensureInit(); if (enabled) ev_start->record(); }
+    void markForwardEnd()   { if (enabled) ev_fwd->record(); }
+    void markLineLossEnd()  { if (enabled) ev_line->record(); }
+    void markBackwardEnd()  { if (enabled) ev_bwd->record(); }
+    void markDensifyEnd()   { if (enabled) ev_dens->record(); }
+    void markOptimizerEnd() { if (enabled) ev_opt->record(); }
+
+    void endIteration(bool refine) {
+        if (!enabled) return;
+        if (++since_sync < kSyncEvery) return;
+        since_sync = 0;
+        torch::cuda::synchronize();
+        Acc& a = refine ? this->refine : this->online;
+        // earlier_event.elapsed_time(later_event) = later - earlier.
+        a.fwd  += ev_start->elapsed_time(*ev_fwd);
+        a.line += ev_fwd->elapsed_time(*ev_line);
+        a.bwd  += ev_line->elapsed_time(*ev_bwd);
+        a.dens += ev_bwd->elapsed_time(*ev_dens);
+        a.opt  += ev_dens->elapsed_time(*ev_opt);
+        a.iters += 1;
+    }
+
+    void print() const {
+        if (!enabled) return;
+        auto dump = [](const char* name, const Acc& a) {
+            const long n = a.iters > 0 ? a.iters : 1;
+            std::cerr << "[GpuProfiler] " << name << " (n=" << a.iters << " iters)\n"
+                      << "    forward:    " << a.fwd  / n << " ms/iter\n"
+                      << "    line_loss:  " << a.line / n << " ms/iter\n"
+                      << "    backward:   " << a.bwd  / n << " ms/iter\n"
+                      << "    densify:    " << a.dens / n << " ms/iter\n"
+                      << "    optimizer:  " << a.opt  / n << " ms/iter\n";
+        };
+        dump("online (incremental mapping)", online);
+        dump("refine (final refinement)", refine);
+    }
+};
+GpuSectionProfiler g_gpu_prof;
 } // namespace
 
 GaussianMapperLine::GaussianMapperLine(
@@ -422,6 +503,21 @@ void GaussianMapperLine::run()
             std::vector<ORB_SLAM3::KeyFrame*> vpKFs;
             std::vector<ORB_SLAM3::MapPoint*> vpMPs;
             std::vector<ORB_SLAM3::MapLine*> vpMPLs;
+
+            // 快照阶段：只拷贝后续去畸变/建金字塔所需的最小数据（图像、位姿、
+            // 相机 ID、关键点），把昂贵的去畸变与 Tensor 上传移到锁外，
+            // 缩短 mMutexMapUpdate 持有时间（避免阻塞 LocalMapping 线程）。
+            struct KfSnapshot {
+                unsigned long fid;
+                unsigned long camera_id;
+                Sophus::SE3f pose;
+                cv::Mat img_left;
+                cv::Mat img_aux;
+                std::string filename;
+                std::vector<float> pixels;
+                std::vector<float> points_local;
+            };
+            std::vector<KfSnapshot> kf_snapshots;
             {
                 std::unique_lock<std::mutex> lock_map(pMap->mMutexMapUpdate);
                 vpKFs = pMap->GetAllKeyFrames();
@@ -477,12 +573,13 @@ void GaussianMapperLine::run()
                     line3D.p2_[0] = endpoints.second[0];
                     line3D.p2_[1] = endpoints.second[1];
                     line3D.p2_[2] = endpoints.second[2];
-                    line3D.color1_[0] = pML->GetLineColorRGB().first[0];
-                    line3D.color1_[1] = pML->GetLineColorRGB().first[1];
-                    line3D.color1_[2] = pML->GetLineColorRGB().first[2];
-                    line3D.color2_[0] = pML->GetLineColorRGB().second[0];
-                    line3D.color2_[1] = pML->GetLineColorRGB().second[1];
-                    line3D.color2_[2] = pML->GetLineColorRGB().second[2];
+                    auto line_colors = pML->GetLineColorRGB(); // 缓存 getter，避免 6 次重复调用
+                    line3D.color1_[0] = line_colors.first[0];
+                    line3D.color1_[1] = line_colors.first[1];
+                    line3D.color1_[2] = line_colors.first[2];
+                    line3D.color2_[0] = line_colors.second[0];
+                    line3D.color2_[1] = line_colors.second[1];
+                    line3D.color2_[2] = line_colors.second[2];
                     scene_->cacheLine3D(pML->mnId, line3D);
 
                     // 3. 执行采样 (Sample Points)
@@ -537,58 +634,61 @@ void GaussianMapperLine::run()
                 //std::cerr <<"===============================================================" << std::endl;
                 //end debug
 
-                for (const auto& pKF : vpKFs){
-                    std::shared_ptr<GaussianKeyframeLine> new_kf = std::make_shared<GaussianKeyframeLine>(pKF->mnId, getIteration());
-                    new_kf->zfar_ = z_far_;
-                    new_kf->znear_ = z_near_;
-                    // Pose
-                    auto pose = pKF->GetPose();
-                    new_kf->setPose(
-                        pose.unit_quaternion().cast<double>(),
-                        pose.translation().cast<double>());
-                    cv::Mat imgRGB_undistorted, imgAux_undistorted;
-                    try {
-                        // Camera
-                        Camera& camera = scene_->cameras_.at(pKF->mpCamera->GetId());
-                        new_kf->setCameraParams(camera);
-
-                        // Image (left if STEREO)
-                        cv::Mat imgRGB = pKF->imgLeftRGB;
-                        if (this->sensor_type_ == STEREOLINE)
-                            imgRGB_undistorted = imgRGB;
-                        else
-                            camera.undistortImage(imgRGB, imgRGB_undistorted);
-                        // Auxiliary Image
-                        cv::Mat imgAux = pKF->imgAuxiliary;
-                        if (this->sensor_type_ == RGBDLINE)
-                            camera.undistortImage(imgAux, imgAux_undistorted);
-                        else
-                            imgAux_undistorted = imgAux;
-
-                        new_kf->original_image_ =
-                            tensor_utils::cvMat2TorchTensor_Float32(imgRGB_undistorted, device_type_);
-                        new_kf->img_filename_ = pKF->mNameFile;
-                        new_kf->gaus_pyramid_height_ = camera.gaus_pyramid_height_;
-                        new_kf->gaus_pyramid_width_ = camera.gaus_pyramid_width_;
-                        new_kf->gaus_pyramid_times_of_use_ = kf_gaus_pyramid_times_of_use_;
-                    }
-                    catch (std::out_of_range) {
-                        throw std::runtime_error("[GaussianMapper::run]KeyFrame Camera not found!");
-                    }
-                    new_kf->computeTransformTensors();
-                    scene_->addKeyframe(new_kf, &kfid_shuffled_);
-
-                    increaseKeyframeTimesOfUse(new_kf, newKeyframeTimesOfUse());
-
-                    // Features
-                    std::vector<float> pixels;
-                    std::vector<float> pointsLocal;
-                    pKF->GetKeypointInfo(pixels, pointsLocal);
-                    new_kf->kps_pixel_ = std::move(pixels);
-                    new_kf->kps_point_local_ = std::move(pointsLocal);
-                    new_kf->img_undist_ = imgRGB_undistorted;
-                    new_kf->img_auxiliary_undist_ = imgAux_undistorted;
+                kf_snapshots.reserve(vpKFs.size());
+                for (const auto& pKF : vpKFs) {
+                    KfSnapshot s;
+                    s.fid = pKF->mnId;
+                    s.camera_id = pKF->mpCamera->GetId();
+                    s.pose = pKF->GetPose();
+                    s.img_left = pKF->imgLeftRGB.clone();
+                    s.img_aux = pKF->imgAuxiliary.clone();
+                    s.filename = pKF->mNameFile;
+                    pKF->GetKeypointInfo(s.pixels, s.points_local);
+                    kf_snapshots.push_back(std::move(s));
                 }
+            }
+
+            // 锁外处理：创建 GaussianKeyframe、去畸变、上传 Tensor（与原逻辑一致）
+            for (auto& s : kf_snapshots) {
+                std::shared_ptr<GaussianKeyframeLine> new_kf = std::make_shared<GaussianKeyframeLine>(s.fid, getIteration());
+                new_kf->zfar_ = z_far_;
+                new_kf->znear_ = z_near_;
+                new_kf->setPose(
+                    s.pose.unit_quaternion().cast<double>(),
+                    s.pose.translation().cast<double>());
+                cv::Mat imgRGB_undistorted, imgAux_undistorted;
+                try {
+                    Camera& camera = scene_->cameras_.at(s.camera_id);
+                    new_kf->setCameraParams(camera);
+
+                    if (this->sensor_type_ == STEREOLINE)
+                        imgRGB_undistorted = s.img_left;
+                    else
+                        camera.undistortImage(s.img_left, imgRGB_undistorted);
+                    if (this->sensor_type_ == RGBDLINE)
+                        camera.undistortImage(s.img_aux, imgAux_undistorted);
+                    else
+                        imgAux_undistorted = s.img_aux;
+
+                    new_kf->original_image_ =
+                        tensor_utils::cvMat2TorchTensor_Float32(imgRGB_undistorted, device_type_);
+                    new_kf->img_filename_ = s.filename;
+                    new_kf->gaus_pyramid_height_ = camera.gaus_pyramid_height_;
+                    new_kf->gaus_pyramid_width_ = camera.gaus_pyramid_width_;
+                    new_kf->gaus_pyramid_times_of_use_ = kf_gaus_pyramid_times_of_use_;
+                }
+                catch (std::out_of_range) {
+                    throw std::runtime_error("[GaussianMapper::run]KeyFrame Camera not found!");
+                }
+                new_kf->computeTransformTensors();
+                scene_->addKeyframe(new_kf, &kfid_shuffled_);
+
+                increaseKeyframeTimesOfUse(new_kf, newKeyframeTimesOfUse());
+
+                new_kf->kps_pixel_ = std::move(s.pixels);
+                new_kf->kps_point_local_ = std::move(s.points_local);
+                new_kf->img_undist_ = imgRGB_undistorted;
+                new_kf->img_auxiliary_undist_ = imgAux_undistorted;
             }
 
             // Prepare multi resolution images for training
@@ -761,6 +861,8 @@ void GaussianMapperLine::run()
     int final_iters = opt_params_.refined_gaussian_max_iter_num_; 
     int target_stop_iter = getIteration() + final_iters;
 
+    prof_refine_phase_ = true;
+
     while (getIteration() < target_stop_iter || isKeepingTraining()) {
         try {
             // 高斯优化代码 Invoke training once
@@ -822,6 +924,8 @@ void GaussianMapperLine::run()
         time_log << "Total_Iterations: " << getIteration() << "\n";
         time_log.close();
     }
+
+    g_gpu_prof.print();
 
     signalStop();
 }
@@ -978,6 +1082,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
     gaussians_->setRotationLearningRate(rotationLearningRate());
 
     // Render
+    g_gpu_prof.markStart();
     auto render_pkg = GaussianRendererWithLine::renderWithLine(
         viewpoint_cam,
         image_height,
@@ -992,6 +1097,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
     auto viewspace_point_tensor = std::get<1>(render_pkg);
     auto visibility_filter = std::get<2>(render_pkg);
     auto radii = std::get<3>(render_pkg);
+    g_gpu_prof.markForwardEnd();
 
     // Get rid of black edges caused by undistortion
     torch::Tensor masked_image = rendered_image * mask;
@@ -1063,8 +1169,10 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         loss = loss + loss_str;
     }
 
+    g_gpu_prof.markLineLossEnd();
 
     loss.backward();
+    g_gpu_prof.markBackwardEnd();
 
     // ==============================================================================
     // 🌟 性能改进：DEBUG 代码必须用宏或 Flag 包裹，否则严重拖慢帧率
@@ -1159,6 +1267,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
                     ||(model_params_.white_background_ && getIteration() == opt_params_.densify_from_iter_)))
                 gaussians_->resetOpacity();
         }
+        g_gpu_prof.markDensifyEnd();
 
         // ==========================================================
         // 🌟 [新增代码]：补全时间结算与进度报告
@@ -1209,7 +1318,9 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
             if (getIteration() % 50 == 0)
                 gaussians_->normalizeRotationQuaternions();
         }
+        g_gpu_prof.markOptimizerEnd();
     }
+    g_gpu_prof.endIteration(prof_refine_phase_);
 }
 
 
@@ -1283,6 +1394,7 @@ void GaussianMapperLine::trainForOneIteration()
     gaussians_->setRotationLearningRate(rotationLearningRate());
 
     // Render
+    g_gpu_prof.markStart();
     auto render_pkg = GaussianRendererWithLine::renderWithLine(
         viewpoint_cam,
         image_height,
@@ -1297,6 +1409,7 @@ void GaussianMapperLine::trainForOneIteration()
     auto viewspace_point_tensor = std::get<1>(render_pkg);
     auto visibility_filter = std::get<2>(render_pkg);
     auto radii = std::get<3>(render_pkg);
+    g_gpu_prof.markForwardEnd();
 
     // Get rid of black edges caused by undistortion
     torch::Tensor masked_image = rendered_image * mask;
@@ -1368,8 +1481,10 @@ void GaussianMapperLine::trainForOneIteration()
         loss = loss + loss_str;
     }
 
+    g_gpu_prof.markLineLossEnd();
 
     loss.backward();
+    g_gpu_prof.markBackwardEnd();
 
     // ==============================================================================
     // 🌟 性能改进：DEBUG 代码必须用宏或 Flag 包裹，否则严重拖慢帧率
@@ -1460,6 +1575,7 @@ void GaussianMapperLine::trainForOneIteration()
                     ||(model_params_.white_background_ && getIteration() == opt_params_.densify_from_iter_)))
                 gaussians_->resetOpacity();
         }
+        g_gpu_prof.markDensifyEnd();
 
         auto iter_end_timing = std::chrono::steady_clock::now();
         auto iter_time = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1508,7 +1624,9 @@ void GaussianMapperLine::trainForOneIteration()
             if (getIteration() % 50 == 0)
                 gaussians_->normalizeRotationQuaternions();
         }
+        g_gpu_prof.markOptimizerEnd();
     }
+    g_gpu_prof.endIteration(prof_refine_phase_);
 }
 
 bool GaussianMapperLine::isStopped()

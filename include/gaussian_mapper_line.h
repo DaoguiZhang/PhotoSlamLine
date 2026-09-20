@@ -314,6 +314,7 @@ protected:
     bool loop_closure_iteration_;
     bool keep_training_ = false;
     int default_sh_ = 0;
+    bool prof_refine_phase_ = false; ///< CUDA 事件剖分：是否处于最终精修阶段
 
     // Settings
     SystemSensorTypeLine sensor_type_;
