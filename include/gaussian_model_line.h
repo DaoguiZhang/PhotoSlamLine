@@ -280,3 +280,6 @@ protected:
 
     std::mutex mutex_settings_;
 };
+
+// 打印 densify 内部分解统计（prune/densify/emptyCache），由 GaussianMapperLine 在关闭时调用。
+void printDensifyProfiler();

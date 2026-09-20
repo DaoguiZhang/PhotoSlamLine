@@ -87,7 +87,33 @@ bool linePruneDiag() {
     }();
     return v;
 }
+
+// densify 内部分解（opt-in，PHOTO_SLAM_DENS_PROF=1）：prune / densify / emptyCache。
+struct DensifyProfiler {
+    bool enabled = false;
+    bool inited = false;
+    long calls = 0;
+    double prune_ms = 0, densify_ms = 0, emptycache_ms = 0;
+    void init() {
+        if (inited) return;
+        inited = true;
+        const char* e = std::getenv("PHOTO_SLAM_DENS_PROF");
+        enabled = e && std::atoi(e) != 0;
+    }
+    void print() const {
+        if (!enabled || calls == 0) return;
+        std::cerr << "[DensProfiler] calls=" << calls
+                  << " prune=" << prune_ms / calls << " ms/call"
+                  << " densify=" << densify_ms / calls << " ms/call"
+                  << " emptyCache=" << emptycache_ms / calls << " ms/call\n";
+    }
+};
+DensifyProfiler g_dens_prof;
 } // namespace
+
+void printDensifyProfiler() {
+    g_dens_prof.print();
+}
 
 
 // 由 CUDA 逻辑反推：保证 my_radius>=1 的最小 world scale 近似：scale >= z/(3f)
@@ -3593,6 +3619,8 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
 {
     using namespace torch::indexing;
 
+    g_dens_prof.init();
+
     // 1. 获取归一化梯度 (此时长度为 N)
     auto grads = this->xyz_gradient_accum_ / this->denom_;
     grads.index_put_({grads.isnan()}, 0.0f);
@@ -3664,7 +3692,9 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // =========================================================
     // 3. 执行物理剪裁 (先清减，再增补)
     // =========================================================
+    auto t_prune_start = std::chrono::steady_clock::now();
     this->prunePointsWithLineAwareness(prune_mask);
+    auto t_prune_end = std::chrono::steady_clock::now();
 
     if (linePruneDiag()) {
         auto lazy_count = lazy_line_mask.sum().item<int>();
@@ -3685,11 +3715,22 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // =========================================================
     // 4. 执行加密 (此时 N 已变，内部会更新状态)
     // =========================================================
+    auto t_dens_start = std::chrono::steady_clock::now();
     this->densifyAndCloneWithLineAwareness(grads_after_prune, max_grad, extent);
     this->densifyAndSplitWithLineAwareness(grads_after_prune, max_grad, extent, 2);
+    auto t_dens_end = std::chrono::steady_clock::now();
 
     // 5. 显存清理
+    auto t_cache_start = std::chrono::steady_clock::now();
     c10::cuda::CUDACachingAllocator::emptyCache();
+    auto t_cache_end = std::chrono::steady_clock::now();
+
+    if (g_dens_prof.enabled) {
+        g_dens_prof.prune_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_prune_end - t_prune_start).count();
+        g_dens_prof.densify_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_dens_end - t_dens_start).count();
+        g_dens_prof.emptycache_ms += std::chrono::duration_cast<std::chrono::milliseconds>(t_cache_end - t_cache_start).count();
+        g_dens_prof.calls += 1;
+    }
 }
 
 /*

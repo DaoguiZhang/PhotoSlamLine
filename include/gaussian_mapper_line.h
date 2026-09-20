@@ -316,6 +316,12 @@ protected:
     int default_sh_ = 0;
     bool prof_refine_phase_ = false; ///< CUDA 事件剖分：是否处于最终精修阶段
 
+    // Wall-clock phase timing (关键路径诊断，std::chrono 统计)
+    double phase_slam_end_s_ = 0.0;    ///< SLAM 结束时刻(相对 mapper 启动)
+    double phase_mapper_end_s_ = 0.0;  ///< 增量建图结束时刻
+    double phase_drain_ms_ = 0.0;      ///< SLAM 结束后 queue drain 耗时
+    double phase_refine_s_ = 0.0;      ///< 最终精修耗时
+
     // Settings
     SystemSensorTypeLine sensor_type_;
 

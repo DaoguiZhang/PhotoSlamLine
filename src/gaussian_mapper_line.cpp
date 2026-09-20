@@ -489,6 +489,7 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
 
 void GaussianMapperLine::run()
 {
+    const auto mapper_start = std::chrono::steady_clock::now();
     // First loop: Initial gaussian mapping
     std::cerr << "[DEBUG] Thread: GaussianMapperLine thread started." << std::endl;
     while (!isStopped()) {
@@ -793,21 +794,27 @@ void GaussianMapperLine::run()
             }
 
         if (pSLAM_->isShutDown()) {
+            if (phase_slam_end_s_ == 0.0)
+                phase_slam_end_s_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - mapper_start).count() / 1000.0;
 
             // 【修改点 1】循环清空所有积压的操作，确保最后一批 Line Gaussians 全部入场
+            const auto drain_start = std::chrono::steady_clock::now();
             while (pSLAM_->getAtlas()->hasMappingOperation()) {
                 combineMappingOperations_withLine();
             }
+            phase_drain_ms_ += std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - drain_start).count();
+
             SLAM_stop_iter = getIteration();
-            //// SLAM虽然关了，但我们检查是否还有残留的操作没处理完， 防止优化完全
-            //if (!pSLAM_->getAtlas()->hasMappingOperation()) {
-            //    SLAM_ended_ = true;
-            //}
             SLAM_ended_ = true;
         }
 
-        if (SLAM_ended_ || getIteration() >= opt_params_.iterations_)
+        if (SLAM_ended_ || getIteration() >= opt_params_.iterations_) {
+            phase_mapper_end_s_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - mapper_start).count() / 1000.0;
             break;
+        }
     }
 
     // // Third loop: Tail gaussian optimization
@@ -862,6 +869,7 @@ void GaussianMapperLine::run()
     int target_stop_iter = getIteration() + final_iters;
 
     prof_refine_phase_ = true;
+    const auto refine_start = std::chrono::steady_clock::now();
 
     while (getIteration() < target_stop_iter || isKeepingTraining()) {
         try {
@@ -898,6 +906,8 @@ void GaussianMapperLine::run()
         }
     }
     std::cerr << "[Gaussian Mapper] Final refinement completed perfectly! Saving models..." << std::endl;
+    phase_refine_s_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - refine_start).count() / 1000.0;
 
     // Save and clear
     renderAndRecordAllKeyframes("_shutdown");
@@ -926,6 +936,11 @@ void GaussianMapperLine::run()
     }
 
     g_gpu_prof.print();
+    printDensifyProfiler();
+    std::cerr << "[PhaseTiming] SLAM_end=" << phase_slam_end_s_ << "s"
+              << " mapper_end=" << phase_mapper_end_s_ << "s"
+              << " queue_drain=" << phase_drain_ms_ << "ms"
+              << " refinement=" << phase_refine_s_ << "s\n";
 
     signalStop();
 }
