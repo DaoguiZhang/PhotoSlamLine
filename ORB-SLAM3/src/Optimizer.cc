@@ -22,6 +22,7 @@
 
 #include <cassert>
 #include <complex>
+#include <cstdlib>
 
 #include <Eigen/StdVector>
 #include <Eigen/Dense>
@@ -5361,6 +5362,13 @@ int Optimizer::CountLbaLineObservationEdges(KeyFrame* pKF, Map* pMap)
         }
     }
     return count;
+}
+
+// Deterministic ordering switch (PHOTO_SLAM_DETERMINISTIC_ORDER=1). Default off.
+static bool IsDeterministicOrder()
+{
+    const char* e = getenv("PHOTO_SLAM_DETERMINISTIC_ORDER");
+    return e != nullptr && std::string(e) == "1";
 }
 
 // Canonicalize pointer-keyed observation-map iteration (PHOTO_SLAM_DETERMINISTIC_ORDER=1).

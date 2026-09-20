@@ -57,7 +57,7 @@ struct GpuSectionProfiler {
     static constexpr int kSyncEvery = 50;
 
     struct Acc {
-        double fwd = 0, line = 0, bwd = 0, dens = 0, opt = 0;
+        double fwd = 0, line = 0, bwd = 0, dens = 0, opt = 0, total = 0;
         long iters = 0;
     };
     Acc online, refine;
@@ -89,11 +89,12 @@ struct GpuSectionProfiler {
         torch::cuda::synchronize();
         Acc& a = refine ? this->refine : this->online;
         // earlier_event.elapsed_time(later_event) = later - earlier.
-        a.fwd  += ev_start->elapsed_time(*ev_fwd);
-        a.line += ev_fwd->elapsed_time(*ev_line);
-        a.bwd  += ev_line->elapsed_time(*ev_bwd);
-        a.dens += ev_bwd->elapsed_time(*ev_dens);
-        a.opt  += ev_dens->elapsed_time(*ev_opt);
+        a.fwd   += ev_start->elapsed_time(*ev_fwd);
+        a.line  += ev_fwd->elapsed_time(*ev_line);
+        a.bwd   += ev_line->elapsed_time(*ev_bwd);
+        a.dens  += ev_bwd->elapsed_time(*ev_dens);
+        a.opt   += ev_dens->elapsed_time(*ev_opt);
+        a.total += ev_start->elapsed_time(*ev_opt);
         a.iters += 1;
     }
 
@@ -101,12 +102,16 @@ struct GpuSectionProfiler {
         if (!enabled) return;
         auto dump = [](const char* name, const Acc& a) {
             const long n = a.iters > 0 ? a.iters : 1;
+            const double fwd = a.fwd / n, line = a.line / n, bwd = a.bwd / n,
+                         dens = a.dens / n, opt = a.opt / n, total = a.total / n;
+            const double sum = fwd + line + bwd + dens + opt;
             std::cerr << "[GpuProfiler] " << name << " (n=" << a.iters << " iters)\n"
-                      << "    forward:    " << a.fwd  / n << " ms/iter\n"
-                      << "    line_loss:  " << a.line / n << " ms/iter\n"
-                      << "    backward:   " << a.bwd  / n << " ms/iter\n"
-                      << "    densify:    " << a.dens / n << " ms/iter\n"
-                      << "    optimizer:  " << a.opt  / n << " ms/iter\n";
+                      << "    forward(render):   " << fwd << " ms/iter\n"
+                      << "    loss_fwd(L1+SSIM+aniso+line): " << line << " ms/iter\n"
+                      << "    backward:          " << bwd << " ms/iter\n"
+                      << "    dens_stats(maxR+gradAccum, 每步): " << dens << " ms/iter\n"
+                      << "    optimizer:         " << opt << " ms/iter\n"
+                      << "    ---- sum(parts)=" << sum << "  total(start->opt)=" << total << " ms/iter\n";
         };
         dump("online (incremental mapping)", online);
         dump("refine (final refinement)", refine);

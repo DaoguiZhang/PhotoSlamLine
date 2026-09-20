@@ -18,6 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 强制开启 C++11 ABI，防止和主项目的 std::string/vector 产生冲突
 add_definitions(-D_GLIBCXX_USE_CXX11_ABI=1)
 add_definitions(-DCOMPILEDWITHC11)
+add_definitions(-DREGISTER_TIMES)
 
 # 屏蔽 C++17 下 Eigen 和 g2o 的废弃警告
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")

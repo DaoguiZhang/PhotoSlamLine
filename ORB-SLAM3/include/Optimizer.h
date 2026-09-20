@@ -111,6 +111,8 @@ public:
     //end debug function
     void static LocalBundleAdjustmentWithLinesPluckerBack(KeyFrame *pKF, bool* pbStopFlag, Map* pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_lines,int& num_edges,MappingOperation& opr);
     void static CheckDuplicateVertexID(g2o::SparseOptimizer& optimizer);
+    int static CountValidPoseLineEdges(Frame* pFrame);
+    int static CountLbaLineObservationEdges(KeyFrame* pKF, Map* pMap);
     void static LocalBundleAdjustmentWithLinesPlucker_Alternating(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges,MappingOperation& opr);
     void static LocalBundleAdjustmentWithLinesPlucker_Depth_Alternating(KeyFrame *pKF,bool* pbStopFlag,Map* pMap,int& num_fixedKF,int& num_OptKF,int& num_MPs,int& num_lines,int& num_edges,MappingOperation& opr);
 
