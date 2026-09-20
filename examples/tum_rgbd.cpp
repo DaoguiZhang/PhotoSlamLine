@@ -23,6 +23,7 @@
 #include <fstream>
 #include <chrono>
 #include <ctime>
+#include <cstdlib>
 #include <sstream>
 #include <thread>
 #include <filesystem>
@@ -220,7 +221,12 @@ int main(int argc, char **argv)
         else if (ni > 0)
             T = tframe - vTimestamps[ni - 1];
 
-        if (ttrack < T)
+        // Offline benchmark: skip real-time pacing so the SLAM pipeline runs at
+        // full speed (the dominant wall-clock cost of dataset runs). Set
+        // PHOTO_SLAM_REALTIME=1 to restore the original 30Hz pacing.
+        const char* rt_env = std::getenv("PHOTO_SLAM_REALTIME");
+        const bool realtime = (rt_env != nullptr && std::string(rt_env) == "1");
+        if (realtime && ttrack < T)
             usleep((T - ttrack) * 1e6);
     }
 
