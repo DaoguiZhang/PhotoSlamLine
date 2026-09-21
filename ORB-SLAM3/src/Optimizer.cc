@@ -5403,6 +5403,10 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     int& num_Lines,
     MappingOperation& opr)
 {
+    std::chrono::steady_clock::time_point lba_t0 = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point lba_t1 = lba_t0;
+    std::chrono::steady_clock::time_point lba_t2 = lba_t0;
+
     // --- 1. collect local keyframes (BFS) ---
     list<KeyFrame*> lLocalKeyFrames;
     lLocalKeyFrames.push_back(pKF);
@@ -5720,6 +5724,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     // Release the snapshot lock: the graph is fully built from a consistent
     // snapshot, and the solve does not touch shared map state (the write-back
     // below re-acquires mMutexMapUpdate).
+    lba_t1 = std::chrono::steady_clock::now(); // construct done
     lockMap.unlock();
 
     if (optimizer.vertices().empty() || optimizer.edges().empty()) return;
@@ -5728,6 +5733,7 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     if (pbStopFlag && *pbStopFlag) return;
     optimizer.initializeOptimization();
     optimizer.optimize(10); 
+    lba_t2 = std::chrono::steady_clock::now(); // solve done
     if(IsLineLoopDiag()) std::cerr << "[LBA-SEC] 9-optimize done, entering 10-outlier" << std::endl;
     
     // --- 10. outlier detection (points + lines) ---
@@ -5896,6 +5902,13 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
                   << (std::get<0>(opr.associatedLineSampledPoints()).size() / 3)
                   << std::endl;
     } // map mutex (line write-back)
+    if (std::getenv("PHOTO_SLAM_LBA_PROF")) {
+        std::chrono::steady_clock::time_point lba_t3 = std::chrono::steady_clock::now();
+        double lba_construct = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(lba_t1 - lba_t0).count();
+        double lba_solve = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(lba_t2 - lba_t1).count();
+        double lba_writeback = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(lba_t3 - lba_t2).count();
+        std::cerr << "[LBAProf] construct=" << lba_construct << "ms solve=" << lba_solve << "ms writeback=" << lba_writeback << "ms total=" << (lba_construct+lba_solve+lba_writeback) << "ms\n";
+    }
     pMap->IncreaseChangeIndex();
     
     num_OptKF = lLocalKeyFrames.size();
