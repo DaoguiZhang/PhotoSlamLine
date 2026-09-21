@@ -48,16 +48,21 @@ struct GpuSectionProfiler {
     at::cuda::CUDAEvent* ev_fwd = nullptr;
     at::cuda::CUDAEvent* ev_line = nullptr;
     at::cuda::CUDAEvent* ev_bwd = nullptr;
+    at::cuda::CUDAEvent* ev_dens_start = nullptr;
+    at::cuda::CUDAEvent* ev_maxr = nullptr;
+    at::cuda::CUDAEvent* ev_dens_stats = nullptr;
     at::cuda::CUDAEvent* ev_dens = nullptr;
     at::cuda::CUDAEvent* ev_opt = nullptr;
 
     bool enabled = false;
     bool inited = false;
     int since_sync = 0;
-    static constexpr int kSyncEvery = 50;
+    // 47 与 densification_interval(100) 互质，避免采样恰好对齐每 100 步的
+    // densify，导致 densify+prune 的均值被周期性放大（之前的 2.80ms 假象）。
+    static constexpr int kSyncEvery = 47;
 
     struct Acc {
-        double fwd = 0, line = 0, bwd = 0, dens = 0, opt = 0, total = 0;
+        double fwd = 0, line = 0, bwd = 0, sync = 0, maxr = 0, gradaccum = 0, densify = 0, opt = 0, total = 0;
         long iters = 0;
     };
     Acc online, refine;
@@ -72,6 +77,9 @@ struct GpuSectionProfiler {
         ev_fwd   = new at::cuda::CUDAEvent(0u);
         ev_line  = new at::cuda::CUDAEvent(0u);
         ev_bwd   = new at::cuda::CUDAEvent(0u);
+        ev_dens_start = new at::cuda::CUDAEvent(0u);
+        ev_maxr  = new at::cuda::CUDAEvent(0u);
+        ev_dens_stats = new at::cuda::CUDAEvent(0u);
         ev_dens  = new at::cuda::CUDAEvent(0u);
         ev_opt   = new at::cuda::CUDAEvent(0u);
     }
@@ -79,6 +87,9 @@ struct GpuSectionProfiler {
     void markForwardEnd()   { if (enabled) ev_fwd->record(); }
     void markLineLossEnd()  { if (enabled) ev_line->record(); }
     void markBackwardEnd()  { if (enabled) ev_bwd->record(); }
+    void markDensStatsStart(){ if (enabled) ev_dens_start->record(); }
+    void markMaxRadiiEnd()  { if (enabled) ev_maxr->record(); }
+    void markDensStatsEnd() { if (enabled) ev_dens_stats->record(); }
     void markDensifyEnd()   { if (enabled) ev_dens->record(); }
     void markOptimizerEnd() { if (enabled) ev_opt->record(); }
 
@@ -92,7 +103,10 @@ struct GpuSectionProfiler {
         a.fwd   += ev_start->elapsed_time(*ev_fwd);
         a.line  += ev_fwd->elapsed_time(*ev_line);
         a.bwd   += ev_line->elapsed_time(*ev_bwd);
-        a.dens  += ev_bwd->elapsed_time(*ev_dens);
+        a.sync  += ev_bwd->elapsed_time(*ev_dens_start);
+        a.maxr  += ev_dens_start->elapsed_time(*ev_maxr);
+        a.gradaccum += ev_maxr->elapsed_time(*ev_dens_stats);
+        a.densify   += ev_dens_stats->elapsed_time(*ev_dens);
         a.opt   += ev_dens->elapsed_time(*ev_opt);
         a.total += ev_start->elapsed_time(*ev_opt);
         a.iters += 1;
@@ -103,13 +117,17 @@ struct GpuSectionProfiler {
         auto dump = [](const char* name, const Acc& a) {
             const long n = a.iters > 0 ? a.iters : 1;
             const double fwd = a.fwd / n, line = a.line / n, bwd = a.bwd / n,
-                         dens = a.dens / n, opt = a.opt / n, total = a.total / n;
-            const double sum = fwd + line + bwd + dens + opt;
+                         sync = a.sync / n, maxr = a.maxr / n, gradaccum = a.gradaccum / n,
+                         densify = a.densify / n, opt = a.opt / n, total = a.total / n;
+            const double sum = fwd + line + bwd + sync + maxr + gradaccum + densify + opt;
             std::cerr << "[GpuProfiler] " << name << " (n=" << a.iters << " iters)\n"
                       << "    forward(render):   " << fwd << " ms/iter\n"
                       << "    loss_fwd(L1+SSIM+aniso+line): " << line << " ms/iter\n"
                       << "    backward:          " << bwd << " ms/iter\n"
-                      << "    dens_stats(maxR+gradAccum, 每步): " << dens << " ms/iter\n"
+                      << "    dens_sync(item+rec): " << sync << " ms/iter\n"
+                      << "    dens_maxR:         " << maxr << " ms/iter\n"
+                      << "    dens_gradAccum:    " << gradaccum << " ms/iter\n"
+                      << "    densify+prune:     " << densify << " ms/iter\n"
                       << "    optimizer:         " << opt << " ms/iter\n"
                       << "    ---- sum(parts)=" << sum << "  total(start->opt)=" << total << " ms/iter\n";
         };
@@ -1241,14 +1259,17 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
             recordKeyframeRendered(masked_image, gt_image, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
 
         // Densification
+        g_gpu_prof.markDensStatsStart();
         if (getIteration() < opt_params_.densify_until_iter_) {
             // Keep track of max radii in image-space for pruning
             gaussians_->max_radii2D_.index_put_(
                 {visibility_filter},
                 torch::max(gaussians_->max_radii2D_.index({visibility_filter}),
                             radii.index({visibility_filter})));
+            g_gpu_prof.markMaxRadiiEnd();
             // if (!isdoingGausPyramidTraining() || training_level < num_gaus_pyramid_sub_levels_)
                 gaussians_->addDensificationStats(viewspace_point_tensor, visibility_filter);
+            g_gpu_prof.markDensStatsEnd();
 
             if ((getIteration() > opt_params_.densify_from_iter_) &&
                 (getIteration() % densifyInterval()== 0)) {
@@ -1549,14 +1570,17 @@ void GaussianMapperLine::trainForOneIteration()
             recordKeyframeRendered(masked_image, gt_image, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
 
         // Densification
+        g_gpu_prof.markDensStatsStart();
         if (getIteration() < opt_params_.densify_until_iter_) {
             // Keep track of max radii in image-space for pruning
             gaussians_->max_radii2D_.index_put_(
                 {visibility_filter},
                 torch::max(gaussians_->max_radii2D_.index({visibility_filter}),
                             radii.index({visibility_filter})));
+            g_gpu_prof.markMaxRadiiEnd();
             // if (!isdoingGausPyramidTraining() || training_level < num_gaus_pyramid_sub_levels_)
                 gaussians_->addDensificationStats(viewspace_point_tensor, visibility_filter);
+            g_gpu_prof.markDensStatsEnd();
 
             if ((getIteration() > opt_params_.densify_from_iter_) &&
                 (getIteration() % densifyInterval()== 0)) {
