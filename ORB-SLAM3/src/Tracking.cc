@@ -266,6 +266,8 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 #ifdef REGISTER_TIMES
 double calcAverage(vector<double> v_times)
 {
+    if (v_times.empty())
+        return 0.0;
     double accum = 0;
     for(double value : v_times)
     {
@@ -277,6 +279,8 @@ double calcAverage(vector<double> v_times)
 
 double calcDeviation(vector<double> v_times, double average)
 {
+    if (v_times.empty())
+        return 0.0;
     double accum = 0;
     for(double value : v_times)
     {
@@ -297,6 +301,8 @@ double calcAverage(vector<int> v_values)
         total++;
     }
 
+    if (total == 0)
+        return 0.0;
     return accum / total;
 }
 
@@ -311,6 +317,8 @@ double calcDeviation(vector<int> v_values, double average)
         accum += pow(value - average, 2);
         total++;
     }
+    if (total == 0)
+        return 0.0;
     return sqrt(accum / total);
 }
 
@@ -2372,6 +2380,9 @@ void Tracking::ResetFrameIMU()
 
 void Tracking::Track()
 {
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_StartTrackTotal = std::chrono::steady_clock::now();
+#endif
 
     if (bStepByStep)
     {
@@ -2901,6 +2912,11 @@ void Tracking::Track()
 
     }
 
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_EndTrackTotal = std::chrono::steady_clock::now();
+    vdTrackTotal_ms.push_back(std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndTrackTotal - time_StartTrackTotal).count());
+#endif
+
 #ifdef REGISTER_LOOP
     if (Stop()) {
 
@@ -2916,6 +2932,9 @@ void Tracking::Track()
 
 void Tracking::TrackWithLine()
 {
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_StartTrackTotal = std::chrono::steady_clock::now();
+#endif
 
     if (bStepByStep)
     {
@@ -3538,6 +3557,11 @@ void Tracking::TrackWithLine()
         }
 
     }
+
+#ifdef REGISTER_TIMES
+    std::chrono::steady_clock::time_point time_EndTrackTotal = std::chrono::steady_clock::now();
+    vdTrackTotal_ms.push_back(std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndTrackTotal - time_StartTrackTotal).count());
+#endif
 
     // std::cerr << "----------------------------------------TrackWithLine 0 ----------------------------" << std::endl;
     // for(int i=0; i<mLastFrame.NL; i++)
