@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include "include/rasterize_points.h"
+#include "LineMode.h"
 
 // Line-Gaussian retention ablation knobs (env-configurable, default = baseline).
 //   PHOTO_SLAM_LINE_INIT_OPACITY : initial opacity of line-sampled Gaussians (B)
@@ -260,7 +261,14 @@ torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherenc
 
     auto huber_loss = torch::where(is_small_error, loss_small, loss_large);
 
-    return lambda_coherence * huber_loss.sum();
+    auto line_loss = lambda_coherence * huber_loss.sum();
+    if (ORB_SLAM3::IsLineLossDiag()) {
+        // Diagnostic only (PHOTO_SLAM_DEBUG_LINE_LOSS=1).
+        std::cerr << "[LINE-LOSS] L_ori=" << line_loss.item().toFloat()
+                  << " n_line_gaussians=" << p_m.size(0)
+                  << " lambda_coherence=" << lambda_coherence << std::endl;
+    }
+    return line_loss;
 
     // 5. 返回垂直距离的平方和损失
     // 只有垂直离开直线的位移会产生 Loss，沿线滑动 Loss 为 0
@@ -4115,7 +4123,16 @@ torch::Tensor GaussianModelLine::computeLineShapeConstraint(float lambda_ecc, fl
     auto cos_sim = torch::abs(torch::sum(local_x * d_init, 1));
     auto orientation_loss = (1.0 - cos_sim).sum();
 
-    return lambda_ecc * eccentricity_loss + lambda_ori * orientation_loss;
+    auto ecc_term = lambda_ecc * eccentricity_loss;
+    auto ori_term = lambda_ori * orientation_loss;
+    if (ORB_SLAM3::IsLineLossDiag()) {
+        // Diagnostic only (PHOTO_SLAM_DEBUG_LINE_LOSS=1).
+        std::cerr << "[LINE-LOSS] L_ecc=" << ecc_term.item().toFloat()
+                  << " L_shape_ori=" << ori_term.item().toFloat()
+                  << " n_line_gaussians=" << s.size(0)
+                  << " lambda_ecc=" << lambda_ecc << " lambda_ori=" << lambda_ori << std::endl;
+    }
+    return ecc_term + ori_term;
 }
 
 // void GaussianModel::increasePointsIterationsOfExistence(const int i)
@@ -4243,6 +4260,19 @@ void GaussianModelLine::loadPly(std::filesystem::path ply_path)
 
 void GaussianModelLine::savePly(std::filesystem::path result_path)
 {
+    // Empty/uninitialized model guard: if SLAM never created any Gaussians
+    // (e.g. a run that ended before mapping initialised), the tensor buffers
+    // are undefined or zero-sized and transpose(1,2)/size(0) below would throw
+    // (uncaught -> SIGABRT). Skip writing instead of crashing.
+    if (this->xyz_.dim() == 0 || this->xyz_.size(0) == 0 ||
+        this->features_dc_.dim() < 3 || this->features_rest_.dim() < 3 ||
+        this->scaling_.dim() < 2 || this->rotation_.dim() < 2)
+    {
+        std::cerr << "[GaussianModelLine] Empty/uninitialized model; skipping PLY save to "
+                  << result_path << std::endl;
+        return;
+    }
+
     // Prepare data to write
     torch::Tensor xyz = this->xyz_.detach().cpu();
     torch::Tensor normals = torch::zeros_like(xyz);
@@ -4336,6 +4366,15 @@ void GaussianModelLine::savePly(std::filesystem::path result_path)
 
 void GaussianModelLine::saveSparsePointsPly(std::filesystem::path result_path)
 {
+    // Empty/undefined sparse cloud guard (see savePly). size(0) on an undefined
+    // tensor throws; skip in that case.
+    if (this->sparse_points_xyz_.dim() == 0 || this->sparse_points_xyz_.size(0) == 0)
+    {
+        std::cerr << "[GaussianModelLine] No sparse points cached; skipping input.ply save to "
+                  << result_path << std::endl;
+        return;
+    }
+
     // Prepare data to write
     torch::Tensor xyz = this->sparse_points_xyz_.detach().cpu();
     torch::Tensor normals = torch::zeros_like(xyz);

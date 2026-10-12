@@ -23,6 +23,8 @@
 #include <cstdlib>
 #include <string>
 
+#include "LineMode.h"
+
 namespace {
 // Line structural-loss is computed every N iterations. Default 1 (every step):
 // skipping steps measurably lowered PSNR (~-0.2 dB at N=5), so keep the loss
@@ -139,7 +141,15 @@ GaussianMapperLine::GaussianMapperLine(
       large_trans_th_(1e-2f),
       training_report_interval_(0)
 {
-    // Random seed
+    // Random seed. PHOTO_SLAM_SEED (if set) overrides the caller-provided seed so
+    // an experiment can be made reproducible/controllable from the shell. When
+    // unset, behaviour is exactly as before (random_seed_ stays -1).
+    if (const char* seed_env = std::getenv("PHOTO_SLAM_SEED")) {
+        if (*seed_env != '\0')
+            random_seed_ = std::atoi(seed_env);
+    }
+    if (random_seed_ >= 0)
+        seed = random_seed_;
     std::srand(seed);
     torch::manual_seed(seed);
 
@@ -877,6 +887,13 @@ void GaussianMapperLine::run()
     const auto refine_start = std::chrono::steady_clock::now();
 
     while (getIteration() < target_stop_iter || isKeepingTraining()) {
+        // Guard: when SLAM produced no keyframes (short/sparse run), the scene is
+        // empty and getIteration() can never advance -> the loop would spin
+        // forever. Stop refinement in that case.
+        if (scene_->keyframes().empty()) {
+            std::cerr << "[Gaussian Mapper] No keyframes in scene; stopping final refinement." << std::endl;
+            break;
+        }
         try {
             // 高斯优化代码 Invoke training once
             //trainForOneIteration();
@@ -915,9 +932,13 @@ void GaussianMapperLine::run()
         std::chrono::steady_clock::now() - refine_start).count() / 1000.0;
 
     // Save and clear
-    renderAndRecordAllKeyframes("_shutdown");
-    savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
-    writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
+    if (scene_->keyframes().empty()) {
+        std::cerr << "[Gaussian Mapper] No keyframes in scene; skipping shutdown render/PLY export." << std::endl;
+    } else {
+        renderAndRecordAllKeyframes("_shutdown");
+        savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
+        writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
+    }
 
     // ==========================================================
     // 🌟 [新增代码]：输出最终统计时间
@@ -1978,6 +1999,9 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
             // [DEBUG PROBE: Check Source Data]
             if (!l_positions.empty()) {
+                if (ORB_SLAM3::IsLineLossDiag())
+                    std::cerr << "[LINE-SAMPLE] op_line_points=" << num_l_points
+                              << " pos_floats=" << l_positions.size() << std::endl;
                 std::cerr << "[DEBUG Mapper] Received Line Sampled Points from SLAM:" << std::endl;
                 std::cerr << "  > Pos Size: " << l_positions.size() << " (N=" << num_l_points << ")" << std::endl;
                 std::cerr << "  > Dir Size: " << l_dirs.size() << std::endl;
@@ -2775,7 +2799,9 @@ void GaussianMapperLine::generateKfidRandomShuffle()
     std::size_t nkfs = scene_->keyframes().size();
     kfid_shuffle_.resize(nkfs);
     std::iota(kfid_shuffle_.begin(), kfid_shuffle_.end(), 0);
-    std::mt19937 g(rd_());
+    std::mt19937 g(random_seed_ >= 0
+                       ? static_cast<unsigned>(random_seed_ + shuffle_counter_++)
+                       : rd_());
     std::shuffle(kfid_shuffle_.begin(), kfid_shuffle_.end(), g);
 
     kfid_shuffled_ = true;

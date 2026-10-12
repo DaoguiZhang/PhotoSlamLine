@@ -324,15 +324,27 @@ double calcDeviation(vector<int> v_values, double average)
 
 void Tracking::LocalMapStats2File()
 {
+    // This runs from Shutdown()/PrintTimeStats(). The per-iteration LocalMapping
+    // statistic vectors are pushed in different code branches, so their sizes can
+    // legitimately differ (e.g. a LocalMapping iteration without new map points
+    // leaves vdMPCreation_ms shorter than vdLMTotal_ms). Index each vector only
+    // when in range to avoid an out-of-bounds read (crash) on sparse maps.
+    auto getD = [](const vector<double>& v, int i) -> double {
+        return (i >= 0 && i < (int)v.size()) ? v[i] : 0.0;
+    };
+    auto getI = [](const vector<int>& v, int i) -> int {
+        return (i >= 0 && i < (int)v.size()) ? v[i] : 0;
+    };
+
     ofstream f;
     f.open("LocalMapTimeStats.txt");
     f << fixed << setprecision(6);
     f << "#Stereo rect[ms], MP culling[ms], MP creation[ms], LBA[ms], KF culling[ms], Total[ms]" << endl;
-    for(int i=0; i<mpLocalMapper->vdLMTotal_ms.size(); ++i)
+    for(int i=0; i<(int)mpLocalMapper->vdLMTotal_ms.size(); ++i)
     {
-        f << mpLocalMapper->vdKFInsert_ms[i] << "," << mpLocalMapper->vdMPCulling_ms[i] << ","
-          << mpLocalMapper->vdMPCreation_ms[i] << "," << mpLocalMapper->vdLBASync_ms[i] << ","
-          << mpLocalMapper->vdKFCullingSync_ms[i] <<  "," << mpLocalMapper->vdLMTotal_ms[i] << endl;
+        f << getD(mpLocalMapper->vdKFInsert_ms, i) << "," << getD(mpLocalMapper->vdMPCulling_ms, i) << ","
+          << getD(mpLocalMapper->vdMPCreation_ms, i) << "," << getD(mpLocalMapper->vdLBASync_ms, i) << ","
+          << getD(mpLocalMapper->vdKFCullingSync_ms, i) <<  "," << mpLocalMapper->vdLMTotal_ms[i] << endl;
     }
 
     f.close();
@@ -340,11 +352,11 @@ void Tracking::LocalMapStats2File()
     f.open("LBA_Stats.txt");
     f << fixed << setprecision(6);
     f << "#LBA time[ms], KF opt[#], KF fixed[#], MP[#], Edges[#]" << endl;
-    for(int i=0; i<mpLocalMapper->vdLBASync_ms.size(); ++i)
+    for(int i=0; i<(int)mpLocalMapper->vdLBASync_ms.size(); ++i)
     {
-        f << mpLocalMapper->vdLBASync_ms[i] << "," << mpLocalMapper->vnLBA_KFopt[i] << ","
-          << mpLocalMapper->vnLBA_KFfixed[i] << "," << mpLocalMapper->vnLBA_MPs[i] << ","
-          << mpLocalMapper->vnLBA_edges[i] << endl;
+        f << mpLocalMapper->vdLBASync_ms[i] << "," << getI(mpLocalMapper->vnLBA_KFopt, i) << ","
+          << getI(mpLocalMapper->vnLBA_KFfixed, i) << "," << getI(mpLocalMapper->vnLBA_MPs, i) << ","
+          << getI(mpLocalMapper->vnLBA_edges, i) << endl;
     }
 
 
@@ -4137,7 +4149,21 @@ void Tracking::MonocularInitializationWithLine()
         vector<bool> vbTriangulated; // 用于标记点是否被成功三角化
 
         // 3. 利用点特征计算初始两视图重建 (恢复 Tcw 和 点的初始 3D 坐标)
-        if(mpCamera->ReconstructWithTwoViews(mInitialFrame.mvKeysUn, mCurrentFrame.mvKeysUn, mvIniMatches, Tcw, mvIniP3D, vbTriangulated))
+        const bool reconOK = mpCamera->ReconstructWithTwoViews(
+            mInitialFrame.mvKeysUn, mCurrentFrame.mvKeysUn, mvIniMatches, Tcw, mvIniP3D, vbTriangulated);
+        if (MonoInitLineDebug())
+        {
+            // Diagnostic only (PHOTO_SLAM_DEBUG_MONO_INIT=1): exposes the reference
+            // frame id vs the current frame id, so we can tell whether init fails
+            // because the sliding reference never accumulates baseline.
+            std::cerr << "[MONO-INIT-DBG] InitPair: initId=" << mInitialFrame.mnId
+                      << " curId=" << mCurrentFrame.mnId
+                      << " baselineFrames=" << (mCurrentFrame.mnId - mInitialFrame.mnId)
+                      << " nPtMatches=" << nmatches
+                      << " nLineMatches=" << nLineMatches
+                      << " recon=" << (reconOK ? 1 : 0) << std::endl;
+        }
+        if(reconOK)
         {
             // --- 提取点的颜色信息 ---
             mvIniColorRGB.resize(mvIniMatches.size());

@@ -72,6 +72,19 @@ inline bool IsLineEdgeDiag()
     return enabled;
 }
 
+// Line-Gaussian structural-loss diagnostics (PHOTO_SLAM_DEBUG_LINE_LOSS=1).
+// Prints the per-component line loss (L_ori / L_ecc / L_shape_ori) and the
+// number of line-sampled points received from SLAM. Off by default; enabling
+// forces an extra CPU-GPU sync when reading the scalar loss values.
+inline bool IsLineLossDiag()
+{
+    static const bool enabled = []() {
+        const char* v = std::getenv("PHOTO_SLAM_DEBUG_LINE_LOSS");
+        return v != nullptr && std::string(v) == "1";
+    }();
+    return enabled;
+}
+
 // Monocular-init diagnostics (PHOTO_SLAM_DEBUG_MONO_INIT=1). Mirrors the
 // file-local MonoInitLineDebug() in Tracking.cc / LSDmatcher.cc.
 inline bool IsMonoInitDiag()

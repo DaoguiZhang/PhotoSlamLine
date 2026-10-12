@@ -288,6 +288,9 @@ public:
 
     // Data
     bool kfid_shuffled_ = false;
+    // Reproducibility: <0 = PHOTO_SLAM_SEED not set (original behaviour).
+    int random_seed_ = -1;
+    unsigned long shuffle_counter_ = 0;
     std::map<camera_id_t, torch::Tensor> undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_main_undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_sub_undistort_mask_;

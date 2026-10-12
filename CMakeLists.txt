@@ -199,6 +199,9 @@ add_slam_executable(rover_rgbd examples/rover_rgbd.cpp)
 #rover mono
 add_slam_executable(rover_mono examples/rover_mono.cpp)
 
+#tandt mono (Tanks and Temples, e.g. tandt_db/train)
+add_slam_executable(tandt_mono examples/tandt_mono.cpp)
+
 ##################################################################################
 ##  Unit tests (deterministic, no dataset required)
 ##################################################################################

@@ -20,6 +20,7 @@
 
 #include "Converter.h"
 #include "GeometricTools.h"
+#include "LineMode.h"
 
 #include "Thirdparty/DBoW2/DUtils/Random.h"
 
@@ -116,16 +117,30 @@ namespace ORB_SLAM3
         float minParallax = 1.0;
 
         // Try to reconstruct from homography or fundamental depending on the ratio (0.40-0.45)
+        bool reconOK;
+        const char* reconModel;
         if(RH>0.50) // if(RH>0.40)
         {
             //cout << "Initialization from Homography" << endl;
-            return ReconstructH(vbMatchesInliersH,H, mK,T21,vP3D,vbTriangulated,minParallax,50);
+            reconModel = "H";
+            reconOK = ReconstructH(vbMatchesInliersH,H, mK,T21,vP3D,vbTriangulated,minParallax,50);
         }
         else //if(pF_HF>0.6)
         {
             //cout << "Initialization from Fundamental" << endl;
-            return ReconstructF(vbMatchesInliersF,F,mK,T21,vP3D,vbTriangulated,minParallax,50);
+            reconModel = "F";
+            reconOK = ReconstructF(vbMatchesInliersF,F,mK,T21,vP3D,vbTriangulated,minParallax,50);
         }
+        if(IsMonoInitDiag())
+        {
+            // Diagnostic only (PHOTO_SLAM_DEBUG_MONO_INIT=1): exposes why the
+            // two-view initialisation is rejected (H/F model + scores + result).
+            std::cerr << "[MONO-INIT-DBG] Reconstruct: N=" << N
+                      << " SH=" << SH << " SF=" << SF << " RH=" << RH
+                      << " model=" << reconModel
+                      << " ok=" << (reconOK ? 1 : 0) << std::endl;
+        }
+        return reconOK;
     }
 
     void TwoViewReconstruction::FindHomography(vector<bool> &vbMatchesInliers, float &score, Eigen::Matrix3f &H21)

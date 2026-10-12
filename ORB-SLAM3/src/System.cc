@@ -839,6 +839,16 @@ void System::SaveTrajectoryTUM(const string &filename)
     vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
 
+    // Empty-map guard: vpKFs[0] below is out of bounds if the run ended before
+    // any keyframe was created (e.g. mono init failed). Write an empty file
+    // instead of crashing.
+    if(vpKFs.empty())
+    {
+        ofstream f_empty(filename.c_str());
+        cerr << "[System] Empty map: writing empty trajectory to " << filename << endl;
+        return;
+    }
+
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
     Sophus::SE3f Two = vpKFs[0]->GetPoseInverse();
@@ -932,7 +942,7 @@ void System::SaveTrajectoryEuRoC(const string &filename)
 
     vector<Map*> vpMaps = mpAtlas->GetAllMaps();
     int numMaxKFs = 0;
-    Map* pBiggerMap;
+    Map* pBiggerMap = nullptr;
     std::cout << "There are " << std::to_string(vpMaps.size()) << " maps in the atlas" << std::endl;
     for(Map* pMap :vpMaps)
     {
@@ -944,8 +954,20 @@ void System::SaveTrajectoryEuRoC(const string &filename)
         }
     }
 
-    vector<KeyFrame*> vpKFs = pBiggerMap->GetAllKeyFrames();
-    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+    vector<KeyFrame*> vpKFs;
+    if(pBiggerMap)
+    {
+        vpKFs = pBiggerMap->GetAllKeyFrames();
+        sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+    }
+
+    // Empty-map guard (see SaveTrajectoryTUM).
+    if(vpKFs.empty())
+    {
+        ofstream f_empty(filename.c_str());
+        cerr << "[System] Empty map: writing empty trajectory to " << filename << endl;
+        return;
+    }
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
@@ -1320,7 +1342,7 @@ void System::SaveKeyFrameTrajectoryEuRoC(const string &filename)
     cout << endl << "Saving keyframe trajectory to " << filename << " ..." << endl;
 
     vector<Map*> vpMaps = mpAtlas->GetAllMaps();
-    Map* pBiggerMap;
+    Map* pBiggerMap = nullptr;
     int numMaxKFs = 0;
     for(Map* pMap :vpMaps)
     {
@@ -1475,6 +1497,14 @@ void System::SaveTrajectoryKITTI(const string &filename)
 
     vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+
+    // Empty-map guard (see SaveTrajectoryTUM).
+    if(vpKFs.empty())
+    {
+        ofstream f_empty(filename.c_str());
+        cerr << "[System] Empty map: writing empty trajectory to " << filename << endl;
+        return;
+    }
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.

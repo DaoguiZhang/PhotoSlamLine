@@ -273,8 +273,10 @@ int main(int argc, char **argv)
         total_time_out.close();
     }
 
-    // GPU peak usage
-    saveGpuPeakMemoryUsage(output_dir / "GpuPeakUsageMB.txt");
+    // GPU peak usage (only meaningful when the Gaussian mapper ran; in
+    // SLAM-only mode no CUDA context exists, so querying the allocator throws).
+    if (!slam_only)
+        saveGpuPeakMemoryUsage(output_dir / "GpuPeakUsageMB.txt");
 
     // Tracking time statistics
     saveTrackingTime(vTimesTrack, (output_dir / "TrackingTime.txt").string());
