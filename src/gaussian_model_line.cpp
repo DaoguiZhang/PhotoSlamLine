@@ -88,6 +88,19 @@ bool linePruneDiag() {
     }();
     return v;
 }
+// Densification strategy for the frozen-geometry mapper ablation.
+//   1 (default) = directional: line Gaussians are cloned/split along their own
+//                 axis by the line-aware routines.
+//   0           = ordinary: every Gaussian (including line-seeded ones) uses the
+//                 upstream 3DGS clone/split. Initialisation and pruning are
+//                 untouched, so this isolates the densification strategy.
+// NOTE: deliberately NOT cached in a static, because the matching
+//       mapper ablation replays several conditions inside one process and
+//       flips this switch between them.
+bool useDirectionalLineDensify() {
+    const char* e = std::getenv("PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY");
+    return e == nullptr ? true : (std::atoi(e) != 0);
+}
 
 // densify 内部分解（opt-in，PHOTO_SLAM_DENS_PROF=1）：prune / densify / emptyCache。
 struct DensifyProfiler {
@@ -2870,7 +2883,13 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     auto sorted_scale = std::get<0>(scale_sel.sort(1, true));
     auto geom_is_line = sorted_scale.index({Slice(), 0}) / (sorted_scale.index({Slice(), 1}) + 1e-6) > 4.0f;
     
-    auto mask_line_subset = torch::logical_and(is_line_sel, geom_is_line);
+    // Frozen-geometry ablation: with PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY=0 the
+    // line-specific 1D split along the line axis is disabled, so every
+    // Gaussian is split isotropically like a point (the line-aware routine is
+    // still used, which keeps the metadata tensors aligned with xyz_).
+    auto mask_line_subset = useDirectionalLineDensify()
+        ? torch::logical_and(is_line_sel, geom_is_line)
+        : torch::zeros_like(is_line_sel);
     auto mask_point_subset = ~mask_line_subset;
 
     // Containers
@@ -3084,7 +3103,12 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     // =========================================================================
     auto sorted_scale = std::get<0>(scale_sel.sort(1, true));
     auto geom_is_line = sorted_scale.index({Slice(), 0}) / (sorted_scale.index({Slice(), 1}) + 1e-6) > 4.0f;
-    auto mask_line_subset = torch::logical_and(is_line_sel, geom_is_line);
+    // Frozen-geometry ablation: with PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY=0 the
+    // line-directed clone offset is disabled and every Gaussian is cloned like
+    // a point.
+    auto mask_line_subset = useDirectionalLineDensify()
+        ? torch::logical_and(is_line_sel, geom_is_line)
+        : torch::zeros_like(is_line_sel);
     auto mask_point_subset = ~mask_line_subset;
 
     // Containers
@@ -3724,6 +3748,12 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // 4. 执行加密 (此时 N 已变，内部会更新状态)
     // =========================================================
     auto t_dens_start = std::chrono::steady_clock::now();
+    // The line-aware routines are always used: they own the line metadata
+    // invariants (is_line_ / line_dir_w_ / xyz_init_ must stay aligned with
+    // xyz_). useDirectionalLineDensify() only decides whether they apply
+    // line-specific geometry - see the classification inside the clone/split
+    // bodies. Calling the point-only routines here would grow xyz_ without
+    // extending that metadata and break the next forward pass.
     this->densifyAndCloneWithLineAwareness(grads_after_prune, max_grad, extent);
     this->densifyAndSplitWithLineAwareness(grads_after_prune, max_grad, extent, 2);
     auto t_dens_end = std::chrono::steady_clock::now();

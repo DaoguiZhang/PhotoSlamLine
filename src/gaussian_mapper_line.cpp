@@ -863,6 +863,18 @@ void GaussianMapperLine::run()
 // added by zdg
     // 当增量过程结束时，强制清空一次 SLAM 操作队列，确保最后的数据被加入
     //combineMappingOperations_withLine();
+
+    // ------------------------------------------------------------------
+    // Frozen-geometry mapper ablation: the SLAM-produced scene is now final
+    // and complete. Freeze it once and replay every mapper condition on that
+    // identical input instead of running a single global refinement.
+    // ------------------------------------------------------------------
+    if (frozenAblationEnabled()) {
+        runFrozenAblation();
+        signalStop();
+        return;
+    }
+
     // ====================================================================
     // 🌟 核心操作：重置所有关键帧的使用次数
     // ====================================================================
@@ -969,6 +981,235 @@ void GaussianMapperLine::run()
               << " refinement=" << phase_refine_s_ << "s\n";
 
     signalStop();
+}
+
+namespace {
+// Mean of the value column of a "keyframe_id value" metrics file written by
+// renderAndRecordAllKeyframes() (comment lines start with '#'). Returns -1 if
+// the file is missing or empty.
+double frozenAblMeanValueColumn(const std::filesystem::path& path)
+{
+    std::ifstream in(path);
+    if (!in.is_open())
+        return -1.0;
+    std::string line;
+    double sum = 0.0;
+    long n = 0;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        const auto sp = line.find(' ');
+        if (sp == std::string::npos)
+            continue;
+        const auto b = line.find_first_not_of(" \t", sp);
+        if (b == std::string::npos)
+            continue;
+        try {
+            sum += std::stod(line.substr(b));
+            ++n;
+        }
+        catch (const std::exception&) {
+            continue;
+        }
+    }
+    return n > 0 ? sum / static_cast<double>(n) : -1.0;
+}
+} // namespace
+
+bool GaussianMapperLine::frozenAblationEnabled() const
+{
+    const char* e = std::getenv("PHOTO_SLAM_FROZEN_ABLATION");
+    return e != nullptr && e[0] != '\0';
+}
+
+// Replay several mapper configurations on one frozen SLAM geometry.
+//
+// The SLAM side (trajectory, sparse point cloud, line samples, keyframe images)
+// is frozen once. Each condition then rebuilds the Gaussian model from that
+// exact same input, resets the iteration counter and the keyframe sampling
+// budget, and runs the same refinement entry point for the same number of
+// steps. Only the mapper-side switches differ:
+//   A  point baseline: no line-seeded Gaussians, no line loss, ordinary densify
+//   B  line sampling, no structural regularisation, ordinary densify
+//   C  B + structural (line) regularisation, ordinary densify
+//   D  C + directional (line-aware) densification
+// B, C and D therefore share an identical initialisation and pruning strategy.
+void GaussianMapperLine::runFrozenAblation()
+{
+    const char* dir_env = std::getenv("PHOTO_SLAM_FROZEN_ABLATION");
+    frozen_ablation_dir_ = std::filesystem::path(dir_env);
+    std::filesystem::create_directories(frozen_ablation_dir_);
+
+    // Fixed optimization budget (defaults to Optimization.refined_gaussian_max_iter_num).
+    frozen_ablation_steps_ = opt_params_.refined_gaussian_max_iter_num_;
+    if (const char* s = std::getenv("PHOTO_SLAM_FROZEN_STEPS")) {
+        const int v = std::atoi(s);
+        if (v > 0)
+            frozen_ablation_steps_ = v;
+    }
+
+    // Condition list, e.g. PHOTO_SLAM_FROZEN_CONDS="A,B,C,D".
+    frozen_conditions_.clear();
+    std::string conds = "A,B,C,D";
+    if (const char* c = std::getenv("PHOTO_SLAM_FROZEN_CONDS"))
+        conds = c;
+    {
+        std::string item;
+        for (std::size_t i = 0; i <= conds.size(); ++i) {
+            if (i < conds.size() && conds[i] != ',') {
+                item += conds[i];
+                continue;
+            }
+            const auto b = item.find_first_not_of(" \t");
+            const auto e = item.find_last_not_of(" \t");
+            item = (b == std::string::npos) ? std::string() : item.substr(b, e - b + 1);
+            if (!item.empty()) {
+                FrozenAblationCondition c;
+                c.tag = item;
+                if (item == "A") {
+                    c.use_line_gaussians = false; c.line_loss = false; c.directional_densify = false;
+                } else if (item == "B") {
+                    c.use_line_gaussians = true;  c.line_loss = false; c.directional_densify = false;
+                } else if (item == "C") {
+                    c.use_line_gaussians = true;  c.line_loss = true;  c.directional_densify = false;
+                } else if (item == "D") {
+                    c.use_line_gaussians = true;  c.line_loss = true;  c.directional_densify = true;
+                } else {
+                    std::cerr << "[FrozenABL] unknown condition '" << item << "' - skipped." << std::endl;
+                    item.clear();
+                    continue;
+                }
+                frozen_conditions_.push_back(c);
+            }
+            item.clear();
+        }
+    }
+    if (frozen_conditions_.empty()) {
+        std::cerr << "[FrozenABL] no valid conditions - aborting." << std::endl;
+        return;
+    }
+    if (scene_->keyframes().empty()) {
+        std::cerr << "[FrozenABL] empty scene - aborting." << std::endl;
+        return;
+    }
+
+    // ---- Freeze the geometry ONCE ----
+    const std::map<point3D_id_t, Point3D> frozen_pcd = scene_->cached_point_cloud_;
+    const float frozen_extent = scene_->cameras_extent_;
+    std::size_t n_map_point = 0, n_line_sample = 0;
+    for (const auto& kv : frozen_pcd) {
+        if (kv.second.source_ == PointSourceType::LINE_SAMPLED)
+            ++n_line_sample;
+        else
+            ++n_map_point;
+    }
+    frozen_line_w_coherence_ = opt_params_.weight_line_coherence_;
+    frozen_line_w_ecc_ = opt_params_.weight_line_shape_ecc_;
+    frozen_line_w_ori_ = opt_params_.weight_line_shape_ori_;
+
+    std::cerr << "[FrozenABL] frozen scene: kfs=" << scene_->keyframes().size()
+              << " map_points=" << n_map_point
+              << " line_samples=" << n_line_sample
+              << " cameras_extent=" << frozen_extent
+              << " steps=" << frozen_ablation_steps_
+              << " conditions=" << frozen_conditions_.size() << std::endl;
+
+    const std::filesystem::path base_result_dir = result_dir_;
+    std::ofstream csv(frozen_ablation_dir_ / "summary.csv");
+    csv << "condition,use_line_gaussians,line_loss,directional_densify,psnr,ssim,"
+           "gaussians,iterations,refine_seconds,nan,exit\n";
+
+    for (const auto& c : frozen_conditions_) {
+        std::cerr << "\n[FrozenABL] ===== condition " << c.tag << " =====" << std::endl;
+
+        double seconds = -1.0;
+        double psnr = -1.0, ssim = -1.0;
+        int64_t n_gauss = 0;
+        int has_nan = -1;
+        int exit_code = 0;
+
+        try {
+            // Identical input, minus the line-sampled seeds for the point baseline.
+            std::map<point3D_id_t, Point3D> pcd;
+            for (const auto& kv : frozen_pcd) {
+                if (!c.use_line_gaussians && kv.second.source_ == PointSourceType::LINE_SAMPLED)
+                    continue;
+                pcd.emplace(kv.first, kv.second);
+            }
+
+            // Fresh model/optimiser, exactly as the normal first-time setup does.
+            gaussians_.reset();
+            gaussians_ = std::make_shared<GaussianModelLine>(model_params_);
+            gaussians_->createFromPcd(pcd, frozen_extent);
+            gaussians_->trainingSetup(opt_params_);
+            n_gauss = gaussians_->getXYZ().size(0);
+
+            // Mapper-side switches.
+            opt_params_.weight_line_coherence_ = c.line_loss ? frozen_line_w_coherence_ : 0.0f;
+            opt_params_.weight_line_shape_ecc_ = c.line_loss ? frozen_line_w_ecc_ : 0.0f;
+            opt_params_.weight_line_shape_ori_ = c.line_loss ? frozen_line_w_ori_ : 0.0f;
+            ::setenv("PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY", c.directional_densify ? "1" : "0", 1);
+
+            // Identical iteration counter and keyframe sampling budget.
+            iteration_ = 0;
+            for (auto& kfit : scene_->keyframes())
+                kfit.second->remaining_times_of_use_ = 1000;
+
+            result_dir_ = base_result_dir / c.tag;
+            std::filesystem::create_directories(result_dir_);
+
+            const auto t0 = std::chrono::steady_clock::now();
+            while (getIteration() < frozen_ablation_steps_ && !isStopped()) {
+                trainForOneIterationErrorGuided();
+                if (getIteration() % 2000 == 0)
+                    std::cerr << "[FrozenABL][" << c.tag << "] iter "
+                              << getIteration() << " / " << frozen_ablation_steps_ << std::endl;
+            }
+            seconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - t0).count() / 1000.0;
+
+            renderAndRecordAllKeyframes("_shutdown");
+            savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
+
+            n_gauss = gaussians_->getXYZ().size(0);
+            has_nan = torch::isnan(gaussians_->getXYZ()).any().item<bool>() ? 1 : 0;
+            {
+                const auto pdir = result_dir_ / (std::to_string(getIteration()) + "_shutdown");
+                psnr = frozenAblMeanValueColumn(pdir / "psnr.txt");
+                ssim = frozenAblMeanValueColumn(pdir / "dssim.txt");
+            }
+        }
+        catch (const c10::Error& e) {
+            std::cerr << "[FrozenABL][" << c.tag << "] TORCH ERROR: " << e.msg() << std::endl;
+            exit_code = 3;
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[FrozenABL][" << c.tag << "] EXCEPTION: " << e.what() << std::endl;
+            exit_code = 1;
+        }
+        catch (...) {
+            std::cerr << "[FrozenABL][" << c.tag << "] UNKNOWN EXCEPTION" << std::endl;
+            exit_code = 2;
+        }
+
+        std::cerr << "[FrozenABL][" << c.tag << "] psnr=" << psnr
+                  << " ssim=" << ssim
+                  << " gaussians=" << n_gauss
+                  << " seconds=" << seconds
+                  << " nan=" << has_nan
+                  << " exit=" << exit_code << std::endl;
+        csv << c.tag << ',' << (c.use_line_gaussians ? 1 : 0) << ','
+            << (c.line_loss ? 1 : 0) << ',' << (c.directional_densify ? 1 : 0) << ','
+            << psnr << ',' << ssim << ',' << n_gauss << ','
+            << frozen_ablation_steps_ << ',' << seconds << ','
+            << has_nan << ',' << exit_code << '\n';
+        csv.flush();
+    }
+
+    ::unsetenv("PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY");
+    result_dir_ = base_result_dir;
+    std::cerr << "[FrozenABL] all conditions finished; summary: "
+              << (frozen_ablation_dir_ / "summary.csv").string() << std::endl;
 }
 
 // gaussian_mapper_line.cpp

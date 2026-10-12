@@ -112,6 +112,14 @@ public:
     void trainColmap();
     void trainForOneIteration();
 
+    // Frozen-geometry mapper ablation. The scene produced by SLAM (keyframe
+    // poses + images, sparse point cloud, line samples) is frozen once at the
+    // end of the run and several mapper conditions are replayed on that
+    // identical input, so that differences are attributable to the mapper
+    // configuration only. Enabled by PHOTO_SLAM_FROZEN_ABLATION=<dir>.
+    bool frozenAblationEnabled() const;
+    void runFrozenAblation();
+
     //先用 Tensor 掩码法跑通流程，如果发现线段断裂严重，再引入 buildPntIdMap 做精细化的分组约束
     std::map<point3D_id_t, int> buildPntIdMap();    //To do next...
 
@@ -291,6 +299,20 @@ public:
     // Reproducibility: <0 = PHOTO_SLAM_SEED not set (original behaviour).
     int random_seed_ = -1;
     unsigned long shuffle_counter_ = 0;
+    // Frozen-geometry mapper ablation state (see runFrozenAblation()).
+    struct FrozenAblationCondition {
+        std::string tag;
+        bool use_line_gaussians = true;   // seed line-sampled Gaussians
+        bool line_loss = true;            // structural (line) regularisation
+        bool directional_densify = true;  // line-aware vs ordinary densify
+    };
+    std::vector<FrozenAblationCondition> frozen_conditions_;
+    std::filesystem::path frozen_ablation_dir_;
+    int frozen_ablation_steps_ = 0;
+    float frozen_line_w_coherence_ = 0.0f;
+    float frozen_line_w_ecc_ = 0.0f;
+    float frozen_line_w_ori_ = 0.0f;
+
     std::map<camera_id_t, torch::Tensor> undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_main_undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_sub_undistort_mask_;
