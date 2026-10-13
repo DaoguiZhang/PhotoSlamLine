@@ -21,8 +21,11 @@
 
 
 #include <cassert>
+#include <algorithm>
+#include <cmath>
 #include <complex>
 #include <cstdlib>
+#include <set>
 
 #include <Eigen/StdVector>
 #include <Eigen/Dense>
@@ -2824,6 +2827,9 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
 
     if (IsLineEdgeDiag())
     {
+        // All counts below are derived from the OPTIMIZER-LOCAL edge vectors of
+        // THIS call (never from a Tracking member, so nothing can be stale or
+        // inherited from a previous frame).
         int nPtIn = 0, nPtOut = 0;
         double sumChi2Pt = 0.0;
         for (size_t i = 0; i < vpEdgesMono.size(); ++i)
@@ -2831,17 +2837,85 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
             if (pFrame->mvbOutlier[vnIndexEdgeMono[i]]) nPtOut++;
             else { nPtIn++; sumChi2Pt += vpEdgesMono[i]->chi2(); }
         }
+        int nPtStereoIn = 0, nPtStereoOut = 0;
+        for (size_t i = 0; i < vpEdgesStereo.size(); ++i)
+        {
+            if (pFrame->mvbOutlier[vnIndexEdgeStereo[i]]) nPtStereoOut++;
+            else nPtStereoIn++;
+        }
         int nLnIn = 0, nLnOut = 0;
         double sumChi2Ln = 0.0;
+        std::set<unsigned long> uniqLnId;
         for (size_t i = 0; i < vpEdgesLineMono.size(); ++i)
         {
+            MapLine* pML = pFrame->mvpMapLines[vnIndexEdgeLineMono[i]];
+            if (pML) uniqLnId.insert(pML->mnId);
             if (pFrame->mvbLineOutlier[vnIndexEdgeLineMono[i]]) nLnOut++;
             else { nLnIn++; sumChi2Ln += vpEdgesLineMono[i]->chi2(); }
         }
+        int nLnStereoIn = 0, nLnStereoOut = 0;
+        for (size_t i = 0; i < vpEdgesLineStereo.size(); ++i)
+        {
+            MapLine* pML = pFrame->mvpMapLines[vnIndexEdgeLineStereo[i]];
+            if (pML) uniqLnId.insert(pML->mnId);
+            if (pFrame->mvbLineOutlier[vnIndexEdgeLineStereo[i]]) nLnStereoOut++;
+            else nLnStereoIn++;
+        }
+        // Non-null MapLines actually handed to this optimization (the honest
+        // "lines tracked in this frame" count, independent of any Tracking member).
+        int nLnTrackedNonNull = 0;
+        for (int iL = 0; iL < pFrame->NL; ++iL)
+            if (pFrame->mvpMapLines[iL]) nLnTrackedNonNull++;
+
+        // Directional spread of the line edges ACTUALLY USED, as an angle of
+        // coverage in [0,180): 180 - (largest gap between consecutive
+        // directions, wrap-around included). Small spread => near-parallel /
+        // degenerate set that cannot constrain the pose. This MEASURES
+        // degeneracy instead of assuming it from the scene name.
+        std::vector<float> lnDirs;
+        for (size_t i = 0; i < vpEdgesLineMono.size(); ++i)
+        {
+            const cv::line_descriptor::KeyLine& kl =
+                pFrame->mvKeyLinesUn[vnIndexEdgeLineMono[i]];
+            float a = std::atan2(kl.endPointY - kl.startPointY,
+                                 kl.endPointX - kl.startPointX) * 57.2957795f;
+            if (a < 0.0f) a += 180.0f;
+            if (a >= 180.0f) a -= 180.0f;
+            lnDirs.push_back(a);
+        }
+        for (size_t i = 0; i < vpEdgesLineStereo.size(); ++i)
+        {
+            const cv::line_descriptor::KeyLine& kl =
+                pFrame->mvKeyLinesUn[vnIndexEdgeLineStereo[i]];
+            float a = std::atan2(kl.endPointY - kl.startPointY,
+                                 kl.endPointX - kl.startPointX) * 57.2957795f;
+            if (a < 0.0f) a += 180.0f;
+            if (a >= 180.0f) a -= 180.0f;
+            lnDirs.push_back(a);
+        }
+        float lnSpread = 0.0f;
+        if (lnDirs.size() >= 2)
+        {
+            std::sort(lnDirs.begin(), lnDirs.end());
+            float maxGap = 0.0f;
+            for (size_t k = 0; k + 1 < lnDirs.size(); ++k)
+                maxGap = std::max(maxGap, lnDirs[k + 1] - lnDirs[k]);
+            maxGap = std::max(maxGap, (180.0f - lnDirs.back()) + lnDirs.front());
+            lnSpread = 180.0f - maxGap;
+        }
+
         std::cerr << "[LineEdgeDiag] PO frame=" << pFrame->mnId
-                  << " ptEdges=" << vpEdgesMono.size() << " ptIn=" << nPtIn << " ptOut=" << nPtOut
+                  << " NL=" << pFrame->NL
+                  << " lnTrackedNonNull=" << nLnTrackedNonNull
+                  << " ptEdges=" << (vpEdgesMono.size() + vpEdgesStereo.size())
+                  << " ptIn=" << (nPtIn + nPtStereoIn) << " ptOut=" << (nPtOut + nPtStereoOut)
                   << " ptChi2=" << sumChi2Pt
-                  << " lnEdges=" << vpEdgesLineMono.size() << " lnIn=" << nLnIn << " lnOut=" << nLnOut
+                  << " lnEdges=" << (vpEdgesLineMono.size() + vpEdgesLineStereo.size())
+                  << " lnEdgesMono=" << vpEdgesLineMono.size()
+                  << " lnEdgesStereo=" << vpEdgesLineStereo.size()
+                  << " lnIn=" << (nLnIn + nLnStereoIn) << " lnOut=" << (nLnOut + nLnStereoOut)
+                  << " lnUniq=" << uniqLnId.size()
+                  << " lnSpread=" << lnSpread
                   << " lnChi2=" << sumChi2Ln << std::endl;
     }
 

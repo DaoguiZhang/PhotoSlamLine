@@ -40,6 +40,86 @@ inline int GetLineMode()
     return mode;
 }
 
+// ---------------------------------------------------------------------------
+// Line-rescue: when the point-only success test fails, allow a RELIABLE
+// point+line joint constraint to keep the frame alive. Default is OFF, so the
+// behaviour with the variables unset is byte-identical to the original code.
+// All thresholds are counts / degrees / ratios, i.e. independent of metric
+// scale; the motion cap is depth-normalised (see Tracking::HasReliableLineSupport).
+// ---------------------------------------------------------------------------
+inline bool GetLineRescueEnabled()
+{
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_RESCUE");
+        return e != nullptr && std::string(e) == "1";
+    }();
+    return v;
+}
+inline int GetLineRescueMinLines()
+{
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_RESCUE_MIN_LINES");
+        return e ? std::atoi(e) : 8;
+    }();
+    return v;
+}
+inline float GetLineRescueMinAngleDeg()
+{
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_RESCUE_MIN_ANGLE_DEG");
+        return e ? (float)std::atof(e) : 25.0f;
+    }();
+    return v;
+}
+inline int GetLineRescueMinPoints()
+{
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_RESCUE_MIN_POINTS");
+        return e ? std::atoi(e) : 10;
+    }();
+    return v;
+}
+inline float GetLineRescueMinRatio()
+{
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_RESCUE_MIN_RATIO");
+        return e ? (float)std::atof(e) : 0.5f;
+    }();
+    return v;
+}
+inline float GetLineRescueMaxMotionRatio()
+{
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_RESCUE_MAX_MOTION_RATIO");
+        return e ? (float)std::atof(e) : 0.5f;
+    }();
+    return v;
+}
+inline bool IsLineRescueDiag()
+{
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_LINE_RESCUE");
+        return e != nullptr && std::atoi(e) != 0;
+    }();
+    return v;
+}
+
+// Pre-bypass gate diagnostics (PHOTO_SLAM_DEBUG_LINE_GATE=1). Evaluated at the
+// exact point where the ORIGINAL point-only early return would have fired, i.e.
+// BEFORE any rescue bypass, and records the frame id, the point-match count and
+// whether the old control flow would have returned false there. This is kept
+// STRICTLY SEPARATE from the post-optimisation point verdict so the two can
+// never be conflated (the old path firing is not the same as the joint path
+// agreeing afterwards).
+inline bool IsLineGateDiag()
+{
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_LINE_GATE");
+        return e != nullptr && std::atoi(e) != 0;
+    }();
+    return v;
+}
+
 // Independent toggles for line edges in the two SLAM optimizers (used for the
 // B/P/L/C ablation). They only take effect when PHOTO_SLAM_LINE_MODE >= 2
 // (i.e., the line frontend is active). Default is enabled to preserve the

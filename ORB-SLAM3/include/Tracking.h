@@ -372,6 +372,29 @@ protected:
     //Current matches in frame with line
     int mnMatchesInliersLine;
 
+    // ---- Line-rescue (PHOTO_SLAM_LINE_RESCUE, default off) ----
+    // Reliability test on the POST-optimisation evidence. Unique MapLine
+    // inliers only (each MapLine counted once), residual (outlier-flag) based,
+    // requires angular spread so all-parallel / single-direction line sets are
+    // rejected as under-constrained, plus a point floor, an inlier ratio and a
+    // depth-normalised motion cap. Never Npoint+2*Nline, never line-count alone.
+    bool HasReliableLineSupport(int& reason);
+    // Central decision used by every gate: returns `old_ok` unchanged when the
+    // rescue is disabled, so the default path is identical to the original.
+    bool ApplyLineRescue(const char* stage_tag, bool old_ok);
+    int mLineRescueInliers = 0;   // unique non-outlier MapLines
+    int mLineRescueEdges = 0;     // lines actually handed to the optimizer
+    int mLineRescueReason = -1;   // 0 ok, 1..6 rejection reason
+
+    // ---- Pre-bypass gate record (PHOTO_SLAM_DEBUG_LINE_GATE, default off) ----
+    // Written at the original early-return sites BEFORE any bypass, so it tells
+    // whether the ORIGINAL control flow would have failed there. Distinct from
+    // the post-optimisation point verdict (ApplyLineRescue's oldPtVerdict).
+    int mGateTrkRefOldFail = -1;   // 1 = "nmatches<15" would have returned false
+    int mGateTrkRefPtMatches = -1; // nmatches seen at TrackReferenceKeyFrame
+    int mGateMmOldFail = -1;       // 1 = "nmatches<20" would have returned false
+    int mGateMmPtMatches = -1;     // nmatches seen at TrackWithMotionModel
+
     // Per-frame diagnostic counters (dormant unless PHOTO_SLAM_DEBUG_MONO_OFFICE1
     // is set; default values keep zero-cost hot path when the env var is unset).
     int mnPointMatchesBeforePO;

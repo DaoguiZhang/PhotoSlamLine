@@ -18,6 +18,7 @@
 
 
 #include "Tracking.h"
+#include "LineMode.h"
 
 #include "ORBmatcher.h"
 #include "FrameDrawer.h"
@@ -2975,6 +2976,10 @@ void Tracking::TrackWithLine()
     mnPointInliersAfterPO = 0;
     mnLineInliersAfterPO = 0;
     mbNewKfInserted = false;
+    mGateTrkRefOldFail = -1;
+    mGateTrkRefPtMatches = -1;
+    mGateMmOldFail = -1;
+    mGateMmPtMatches = -1;
 
     //std::cerr << "-------------------start to Track with line feature---------------------- " << std::endl;
 
@@ -3716,6 +3721,25 @@ void Tracking::StereoInitialization()
 
 void Tracking::StereoInitializationWithLine()
 {
+    // Default-off init diagnostic (PHOTO_SLAM_DEBUG_RGBD_INIT=1): per-frame
+    // point/line counts, valid-depth count and whether the N>500 point gate is
+    // passed. Needed to tell "too few point features" from "not enough frames".
+    {
+        const char* dbg = std::getenv("PHOTO_SLAM_DEBUG_RGBD_INIT");
+        if (dbg != nullptr && std::atoi(dbg) != 0)
+        {
+            int nValidDepth = 0;
+            for (int i = 0; i < mCurrentFrame.N; i++)
+                if (i < (int)mCurrentFrame.mvDepth.size() && mCurrentFrame.mvDepth[i] > 0.0f)
+                    nValidDepth++;
+            std::cerr << "[INIT-DBG] frame=" << mCurrentFrame.mnId
+                      << " N=" << mCurrentFrame.N
+                      << " NL=" << mCurrentFrame.NL
+                      << " validDepth=" << nValidDepth
+                      << " pass500=" << (mCurrentFrame.N > 500 ? 1 : 0)
+                      << " state=" << mState << std::endl;
+        }
+    }
     if(mCurrentFrame.N>500)
     {
         if (mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
@@ -4843,7 +4867,23 @@ bool Tracking::TrackReferenceKeyFrameWithLine()
     mnPointMatchesBeforePO = nmatches;
     mnLineMatchesBeforePO = nline_matches;
 
-    if(nmatches<15)
+    // RECORD BEFORE ANY BYPASS: does the ORIGINAL point-only test fail here?
+    mGateTrkRefOldFail = (nmatches < 15) ? 1 : 0;
+    mGateTrkRefPtMatches = nmatches;
+    if (IsLineGateDiag())
+        std::cerr << "[LineGate] site=TrackReferenceKeyFrame frame=" << mCurrentFrame.mnId
+                  << " ptMatches=" << nmatches << " lnMatches=" << nline_matches
+                  << " old_would_fail=" << mGateTrkRefOldFail
+                  << " rescueEnabled=" << (GetLineRescueEnabled() ? 1 : 0)
+                  << " action=" << ((nmatches < 15)
+                                     ? (GetLineRescueEnabled() ? "bypass_line_search" : "return_false")
+                                     : "continue")
+                  << std::endl;
+
+    // Line-rescue: with the rescue enabled the frame is NOT discarded on the
+    // point-only test before the joint point+line optimization; it is judged
+    // afterwards on the joint evidence. Disabled -> unchanged.
+    if(nmatches<15 && !GetLineRescueEnabled())
     {
         cout << "TRACK_REF_KF: Less than 15 matches!!\n";
         return false;
@@ -4919,7 +4959,7 @@ bool Tracking::TrackReferenceKeyFrameWithLine()
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
     else
-        return nmatchesMap>=10; //表示至少要有10个点特征匹配成功
+        return ApplyLineRescue("TrackReferenceKeyFrame", nmatchesMap>=10); //至少10个点匹配
 }
 
 
@@ -5289,13 +5329,25 @@ bool Tracking::TrackWithMotionModelWithLine()
         Verbose::PrintMess("Matches with wider search: " + to_string(nmatches), Verbose::VERBOSITY_NORMAL);
 
     }
+    // RECORD BEFORE ANY BYPASS: does the ORIGINAL point-only test fail here?
+    // Separate from the post-optimisation verdict printed by ApplyLineRescue.
+    mGateMmOldFail = (nmatches < 20) ? 1 : 0;
+    mGateMmPtMatches = nmatches;
     if(nmatches<20)
     {
+        if (IsLineGateDiag())
+            std::cerr << "[LineGate] site=MotionModel frame=" << mCurrentFrame.mnId
+                      << " ptMatches=" << nmatches
+                      << " old_would_fail=1"
+                      << " rescueEnabled=" << ((GetLineRescueEnabled() && GetLineMode() >= 2) ? 1 : 0)
+                      << " imu=" << ((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) ? 1 : 0)
+                      << std::endl;
         Verbose::PrintMess("Not enough matches!!", Verbose::VERBOSITY_NORMAL);
         if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
             return true;
-        else
+        else if (!(GetLineRescueEnabled() && GetLineMode() >= 2))
             return false;
+        // else: fall through - the line matching below may still rescue the frame
     }
 
     //fill lines 
@@ -5448,13 +5500,13 @@ bool Tracking::TrackWithMotionModelWithLine()
     if(mbOnlyTracking)
     {
         mbVO = nmatchesMap<10;
-        return nmatches>20;
+        return ApplyLineRescue("MotionModelVO", nmatches>20);
     }
 
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
     else
-        return nmatchesMap>=10;
+        return ApplyLineRescue("MotionModel", nmatchesMap>=10);
 }
 
 
@@ -5571,6 +5623,170 @@ bool Tracking::TrackLocalMap()
         else
             return true;
     }
+}
+
+bool Tracking::HasReliableLineSupport(int& reason)
+{
+    reason = 0;
+    if (GetLineMode() < 2 || !GetPoseOptLineEnabled())
+    {
+        reason = 1;
+        return false;
+    }
+
+    // Collect the accepted lines. Each MapLine is counted exactly ONCE (dedup by
+    // mnId), so a line never contributes twice through its two endpoints.
+    std::set<unsigned long> seen;
+    std::vector<float> dirs;   // image-plane line directions in [0,180)
+    int nLineEdgesUsed = 0;
+    int nUniqueLineInliers = 0;
+    const int NL = mCurrentFrame.NL;
+    const int nKeyLines = (int)mCurrentFrame.mvKeyLines.size();
+    for (int i = 0; i < NL; i++)
+    {
+        MapLine* pML = mCurrentFrame.mvpMapLines[i];
+        if (!pML)
+            continue;
+        nLineEdgesUsed++;
+        if (i < (int)mCurrentFrame.mvbLineOutlier.size() && mCurrentFrame.mvbLineOutlier[i])
+            continue;                       // residual-based rejection by the optimizer
+        if (pML->Observations() <= 0)
+            continue;
+        if (!seen.insert(pML->mnId).second)
+            continue;                       // duplicate MapLine, do not double count
+        nUniqueLineInliers++;
+        if (i < nKeyLines)
+        {
+            const cv::line_descriptor::KeyLine& kl = mCurrentFrame.mvKeyLines[i];
+            float a = std::atan2(kl.endPointY - kl.startPointY,
+                                 kl.endPointX - kl.startPointX) * 57.2957795f;
+            if (a < 0.0f) a += 180.0f;
+            if (a >= 180.0f) a -= 180.0f;
+            dirs.push_back(a);
+        }
+    }
+    mLineRescueInliers = nUniqueLineInliers;
+    mLineRescueEdges = nLineEdgesUsed;
+
+    if (nUniqueLineInliers < GetLineRescueMinLines())
+    {
+        reason = 1;                         // too few reliable lines
+        return false;
+    }
+
+    // Observability: the accepted lines must span enough directions, otherwise
+    // the pose is under-constrained (all-parallel / single-direction set).
+    if (dirs.size() < 2)
+    {
+        reason = 2;
+        return false;
+    }
+    std::sort(dirs.begin(), dirs.end());
+    float maxGap = 0.0f;
+    for (std::size_t k = 0; k + 1 < dirs.size(); ++k)
+        maxGap = std::max(maxGap, dirs[k + 1] - dirs[k]);
+    maxGap = std::max(maxGap, (180.0f - dirs.back()) + dirs.front());  // wrap-around
+    if ((180.0f - maxGap) < GetLineRescueMinAngleDeg())
+    {
+        reason = 2;                         // parallel / degenerate
+        return false;
+    }
+
+    if (nLineEdgesUsed <= 0 ||
+        ((float)nUniqueLineInliers / (float)nLineEdgesUsed) < GetLineRescueMinRatio())
+    {
+        reason = 3;                         // poor inlier ratio
+        return false;
+    }
+
+    // A lone line must never carry the frame: keep a point floor. The count is
+    // RECOMPUTED from THIS frame every call; it is never taken from a member
+    // such as mnMatchesInliers, which is only written in the local-map stage
+    // and would therefore be the PREVIOUS frame's value at the VO stages.
+    int nPtInliersNow = 0;
+    for (int i = 0; i < mCurrentFrame.N; i++)
+        if (mCurrentFrame.mvpMapPoints[i] && !mCurrentFrame.mvbOutlier[i]
+            && mCurrentFrame.mvpMapPoints[i]->Observations() > 0)
+            nPtInliersNow++;
+    if (nPtInliersNow < GetLineRescueMinPoints())
+    {
+        reason = 4;                         // point floor not met
+        return false;
+    }
+
+    // Pose sanity: finite, with a depth-normalised motion cap (scale-free).
+    const Sophus::SE3f Tcw = mCurrentFrame.GetPose();
+    if (!Tcw.rotationMatrix().allFinite() || !Tcw.translation().allFinite())
+    {
+        reason = 5;
+        return false;
+    }
+    {
+        std::vector<float> depths;
+        for (int i = 0; i < mCurrentFrame.N; i++)
+            if (mCurrentFrame.mvpMapPoints[i] && !mCurrentFrame.mvbOutlier[i]
+                && mCurrentFrame.mvDepth[i] > 0.0f)
+                depths.push_back(mCurrentFrame.mvDepth[i]);
+        if (depths.empty())
+        {
+            reason = 6;
+            return false;
+        }
+        std::nth_element(depths.begin(), depths.begin() + depths.size() / 2, depths.end());
+        const float medDepth = depths[depths.size() / 2];
+        const Sophus::SE3f Tprev = mLastFrame.GetPose();
+        if (!Tprev.translation().allFinite())
+        {
+            reason = 6;
+            return false;
+        }
+        if ((Tcw.translation() - Tprev.translation()).norm() >
+            GetLineRescueMaxMotionRatio() * medDepth)
+        {
+            reason = 6;                     // implausible jump
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Tracking::ApplyLineRescue(const char* stage_tag, bool old_ok)
+{
+    int reason = -1;
+    bool final_ok = old_ok;
+    // Per-call reset: these two are only meaningful when the rescue test below
+    // actually runs, so they must never carry a value across calls/frames.
+    mLineRescueInliers = 0;
+    mLineRescueEdges = 0;
+    if (GetLineRescueEnabled() && !old_ok)
+    {
+        final_ok = HasReliableLineSupport(reason);
+    }
+    if (final_ok && !old_ok)
+        mLineRescueReason = reason;
+    else
+        mLineRescueReason = old_ok ? -1 : reason;
+    if (IsLineRescueDiag())
+    {
+        Map* pMap = mpAtlas->GetCurrentMap();
+        std::cerr << "[LineRescue] stage=" << stage_tag
+                  << " map=" << (pMap ? (long)pMap->GetId() : -1L)
+                  << " frame=" << mCurrentFrame.mnId
+                  << " ptBeforePO=" << mnPointMatchesBeforePO
+                  << " lnBeforePO=" << mnLineMatchesBeforePO
+                  << " ptAfterPO=" << mnPointInliersAfterPO
+                  << " lnAfterPO=" << mnLineInliersAfterPO
+                  << " oldPtVerdict=" << (old_ok ? "OK" : "FAIL")
+                  << " new=" << (final_ok ? "OK" : "FAIL")
+                  << " reason=" << mLineRescueReason
+                  << " rescueLnUniq=" << mLineRescueInliers
+                  << " rescueLnEdges=" << mLineRescueEdges
+                  << " gateMmOldFail=" << mGateMmOldFail
+                  << " gateTrkRefOldFail=" << mGateTrkRefOldFail
+                  << " rescue=" << (GetLineRescueEnabled() ? 1 : 0)
+                  << " state=" << mState << std::endl;
+    }
+    return final_ok;
 }
 
 bool Tracking::TrackLocalMapWithLine()
@@ -5703,7 +5919,7 @@ bool Tracking::TrackLocalMapWithLine()
     // More restrictive if there was a relocalization recently
     mpLocalMapper->mnMatchesInliers=mnMatchesInliers;
     if(mCurrentFrame.mnId<mnLastRelocFrameId+mMaxFrames && mnMatchesInliers<50)
-        return false;
+        return ApplyLineRescue("LocalMapRelocWindow", false);
 
     if((mnMatchesInliers>10)&&(mState==RECENTLY_LOST))
         return true;
@@ -5730,7 +5946,7 @@ bool Tracking::TrackLocalMapWithLine()
     else
     {
         if(mnMatchesInliers<30)
-            return false;
+            return ApplyLineRescue("LocalMapVisual", false);
         else
             return true;
     }
