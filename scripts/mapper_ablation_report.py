@@ -58,45 +58,108 @@ def find_shutdown(run_dir, cond):
     return d[0] if d else None
 
 
-def lpips_for(run_dir, cond):
-    """Mean LPIPS over the shutdown renders of one condition run."""
+def image_pairs(run_dir, cond):
+    """(render, ground-truth) paths of one condition run, matched by basename."""
     d = find_shutdown(run_dir, cond)
     if not d:
-        return None
-    gts = sorted(glob.glob(os.path.join(d, "image_gt", "*_gt.*")))
-    if not gts:
-        return None
-    vals = []
-    for g in gts:
-        base = os.path.basename(g)
-        stem, ext = os.path.splitext(base)
+        return []
+    out = []
+    for g in sorted(glob.glob(os.path.join(d, "image_gt", "*_gt.*"))):
+        stem, ext = os.path.splitext(os.path.basename(g))
         stem = stem[:-3] if stem.endswith("_gt") else stem
         r = os.path.join(d, "image", stem + ext)
-        if not os.path.exists(r):
-            continue
-        a = _cv2.imread(r)
-        b = _cv2.imread(g)
-        if a is None or b is None or a.shape != b.shape:
-            continue
-        ta = _torch.from_numpy(a[:, :, ::-1].copy()).float().permute(2, 0, 1)[None] / 127.5 - 1.0
-        tb = _torch.from_numpy(b[:, :, ::-1].copy()).float().permute(2, 0, 1)[None] / 127.5 - 1.0
-        with _torch.no_grad():
-            vals.append(float(_net(ta, tb).item()))
-    if not vals:
+        if os.path.exists(r):
+            out.append((r, g))
+    return out
+
+
+def _lpips_pair(net, r_path, g_path, device):
+    """LPIPS of one render/GT pair.
+
+    Metric is intentionally identical to the CPU reference implementation:
+    alex trunk, images read as-is (1200x680, no resize / no centre-crop /
+    no frame selection), BGR->RGB, x/127.5 - 1.0, NCHW. Only the tensor
+    placement changes (model and inputs both on `device`).
+    """
+    a = _cv2.imread(r_path)
+    b = _cv2.imread(g_path)
+    if a is None or b is None or a.shape != b.shape:
         return None
-    return sum(vals) / len(vals)
+    ta = _torch.from_numpy(a[:, :, ::-1].copy()).float().permute(2, 0, 1)[None]
+    tb = _torch.from_numpy(b[:, :, ::-1].copy()).float().permute(2, 0, 1)[None]
+    ta = (ta / 127.5 - 1.0).to(device)
+    tb = (tb / 127.5 - 1.0).to(device)
+    with _torch.inference_mode():
+        return float(net(ta, tb).item())
 
 
-# ---- lazy LPIPS import so the script still runs without the package ----
+def lpips_for(run_dir, cond, net=None, device=None):
+    """Mean LPIPS over the shutdown renders of one condition run."""
+    net = _net if net is None else net
+    device = DEVICE if device is None else device
+    if net is None:
+        return None
+    vals = []
+    for rp, gp in image_pairs(run_dir, cond):
+        v = _lpips_pair(net, rp, gp, device)
+        if v is not None:
+            vals.append(v)
+    return (sum(vals) / len(vals)) if vals else None
+
+
+# ---- LPIPS: model AND inputs on the same device, eval + inference_mode ----
 _cv2 = _torch = _net = None
-try:
-    import cv2 as _cv2
-    import torch as _torch
-    import lpips as _lpips
-    _net = _lpips.LPIPS(net="alex")
+DEVICE = "cpu"
+
+
+def init_lpips(device="cuda"):
+    global _cv2, _torch, _net, DEVICE
+    import cv2 as cv2_mod
+    import torch as torch_mod
+    import lpips as lpips_mod
+    _cv2, _torch = cv2_mod, torch_mod
+    if device == "cuda" and not torch_mod.cuda.is_available():
+        print("[warn] CUDA unavailable, falling back to CPU", file=sys.stderr, flush=True)
+        device = "cpu"
+    DEVICE = device
+    _net = lpips_mod.LPIPS(net="alex").to(device)
     _net.eval()
-except Exception as e:  # pragma: no cover
-    print(f"[warn] LPIPS unavailable: {e}", file=sys.stderr)
+    print(f"[lpips] net=alex device={DEVICE}", flush=True)
+
+
+def verify_cpu_vs_gpu(rows, root, n_pairs):
+    """Cross-check the SAME images on CPU and CUDA before the full sweep."""
+    global _cv2, _torch
+    import cv2 as cv2_mod
+    import torch as torch_mod
+    import lpips as lpips_mod
+    _cv2, _torch = cv2_mod, torch_mod
+    if not torch_mod.cuda.is_available():
+        print("[check] CUDA unavailable; nothing to compare", flush=True)
+        return
+    cpu_net = lpips_mod.LPIPS(net="alex")
+    cpu_net.eval()
+    gpu_net = lpips_mod.LPIPS(net="alex").to("cuda")
+    gpu_net.eval()
+    for r in rows:
+        if r["_failed"]:
+            continue
+        run_dir = os.path.join(root, "runs", r["mode"], r["scene"], f"seed{r['seed']}")
+        pairs = image_pairs(run_dir, r["condition"])[:n_pairs]
+        if not pairs:
+            continue
+        tag = f"{r['mode']}/{r['scene']}/seed{r['seed']}/{r['condition']}"
+        print(f"[check] {tag} pairs={len(pairs)}", flush=True)
+        diffs = []
+        for rp, gp in pairs:
+            v_cpu = _lpips_pair(cpu_net, rp, gp, "cpu")
+            v_gpu = _lpips_pair(gpu_net, rp, gp, "cuda")
+            diffs.append(abs(v_cpu - v_gpu))
+            print(f"  cpu={v_cpu:.6f} gpu={v_gpu:.6f} |diff|={abs(v_cpu - v_gpu):.2e}", flush=True)
+        print(f"[check] {tag} max|diff|={max(diffs):.3e} mean|diff|={sum(diffs) / len(diffs):.3e}",
+              flush=True)
+        return
+    print("[check] no images found", flush=True)
 
 
 def mean_sd(vals):
@@ -131,23 +194,73 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="results/mapper_ablation_full")
     ap.add_argument("--scenes", default="office0 office1 office2 office3 office4 room0 room1 room2")
-    ap.add_argument("--no-lpips", action="store_true")
+    ap.add_argument("--no-lpips", action="store_true",
+                    help="emit tables with an EMPTY LPIPS column (temporary stage)")
+    ap.add_argument("--stage", default="final", choices=["tmp", "final"],
+                    help="tmp and final tables are written to separate directories")
+    ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"])
+    ap.add_argument("--check-lpips", type=int, default=0, metavar="N",
+                    help="compare CPU vs CUDA LPIPS on N identical images, then exit")
+    ap.add_argument("--fresh-cache", action="store_true", help="ignore the resumable LPIPS cache")
     args = ap.parse_args()
 
     root = args.root
-    rep_dir = os.path.join(root, "report")
+    # temporary and final tables live in separate directories by construction
+    rep_dir = os.path.join(root, f"report_{args.stage}")
     os.makedirs(rep_dir, exist_ok=True)
     scenes = args.scenes.split()
 
     rows = load_runs(os.path.join(root, "runs.csv"))
+    print(f"[report] stage={args.stage} rows={len(rows)} out={rep_dir}", flush=True)
 
-    # ---- attach LPIPS per run ----
+    if args.check_lpips:
+        verify_cpu_vs_gpu(rows, root, args.check_lpips)
+        return
+
+    # ---- resumable LPIPS cache: one JSON line appended per finished run ----
+    cache_path = os.path.join(root, "lpips_cache.jsonl")
+    cache = {}
+    if not args.fresh_cache and os.path.exists(cache_path):
+        with open(cache_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                    cache[(d["mode"], d["scene"], str(d["seed"]), d["condition"])] = d["lpips"]
+                except Exception:
+                    pass
+
     for r in rows:
         r["lpips"] = None
-        if r["_failed"] or args.no_lpips or _net is None:
-            continue
-        run_dir = os.path.join(root, "runs", r["mode"], r["scene"], f"seed{r['seed']}")
-        r["lpips"] = lpips_for(run_dir, r["condition"])
+
+    if args.no_lpips:
+        print("[lpips] skipped (--no-lpips): LPIPS column stays empty", flush=True)
+    else:
+        init_lpips(args.device)
+        print(f"[lpips] cached runs: {len(cache)}", flush=True)
+        total = len(rows)
+        with open(cache_path, "a") as cf:
+            for i, r in enumerate(rows, 1):
+                if r["_failed"]:
+                    continue
+                key = (r["mode"], r["scene"], str(r["seed"]), r["condition"])
+                tag = f"{key[0]}/{key[1]}/seed{key[2]}/{key[3]}"
+                if key in cache:
+                    r["lpips"] = cache[key]
+                    print(f"[{i}/{total}] {tag} lpips={cache[key]:.4f} (cached)", flush=True)
+                    continue
+                run_dir = os.path.join(root, "runs", r["mode"], r["scene"], f"seed{r['seed']}")
+                v = lpips_for(run_dir, r["condition"])
+                r["lpips"] = v
+                if v is not None:
+                    cf.write(json.dumps({"mode": key[0], "scene": key[1], "seed": key[2],
+                                         "condition": key[3], "lpips": v}) + "\n")
+                    cf.flush()
+                    os.fsync(cf.fileno())
+                    cache[key] = v
+                print(f"[{i}/{total}] {tag} lpips=" + ("--" if v is None else f"{v:.4f}"), flush=True)
 
     # ---- full per-run CSV ----
     full_path = os.path.join(rep_dir, "runs_full.csv")

@@ -312,6 +312,16 @@ public:
     float frozen_line_w_coherence_ = 0.0f;
     float frozen_line_w_ecc_ = 0.0f;
     float frozen_line_w_ori_ = 0.0f;
+    // REAL optimizer steps executed (counted next to optimizer_->step(),
+    // independent of the loop/iteration counter).
+    long long frozen_opt_steps_ = 0;
+    // Pre-generated keyframe sampling sequence (indices into scene keyframe
+    // order), generated once and replayed identically by every condition and
+    // every repeat.
+    std::vector<std::size_t> frozen_kf_seq_;
+    bool frozen_kf_replay_ = false;
+    std::size_t frozen_kf_step_ = 0;
+    void preGenerateFrozenKfSequence(int n_steps);
 
     std::map<camera_id_t, torch::Tensor> undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_main_undistort_mask_;

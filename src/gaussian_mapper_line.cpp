@@ -1014,12 +1014,140 @@ double frozenAblMeanValueColumn(const std::filesystem::path& path)
     }
     return n > 0 ? sum / static_cast<double>(n) : -1.0;
 }
+
+// Fixed-precision float formatting for deterministic snapshot text.
+std::string frozenAblF(double v)
+{
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.9g", v);
+    return std::string(buf);
+}
+
+// FNV-1a 64-bit over a byte string, rendered as hex.
+std::string frozenAblHashHex(const std::string& s)
+{
+    std::uint64_t h = 1469598103934665603ULL;
+    for (unsigned char ch : s) {
+        h ^= static_cast<std::uint64_t>(ch);
+        h *= 1099511628211ULL;
+    }
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
+    return std::string(buf);
+}
+
+// Serialise the frozen scene (poses, camera ids, image identity, sparse point
+// cloud incl. line-sampled points and their directions) into deterministic
+// text. This text IS the frozen input snapshot and its hash is the input hash.
+std::string frozenAblSerializeScene(
+    GaussianSceneLine& scene,
+    const std::map<point3D_id_t, Point3D>& pcd,
+    float extent,
+    std::size_t n_pt,
+    std::size_t n_ln)
+{
+    std::string s;
+    s.reserve(1 << 20);
+    s += "# photo-slam-l frozen geometry snapshot v1\n";
+    s += "# kfs=" + std::to_string(scene.keyframes().size())
+       + " map_points=" + std::to_string(n_pt)
+       + " line_samples=" + std::to_string(n_ln)
+       + " cameras_extent=" + frozenAblF(extent) + "\n";
+    for (auto& kv : scene.keyframes()) {
+        auto& pkf = kv.second;
+        const Sophus::SE3f T = pkf->getPosef();
+        const Eigen::Quaternionf q = T.unit_quaternion();
+        const Eigen::Vector3f t = T.translation();
+        s += "KF " + std::to_string(pkf->fid_) + ' ' + std::to_string(pkf->camera_id_);
+        s += ' ' + frozenAblF(q.w()) + ' ' + frozenAblF(q.x()) + ' ' + frozenAblF(q.y()) + ' ' + frozenAblF(q.z());
+        s += ' ' + frozenAblF(t.x()) + ' ' + frozenAblF(t.y()) + ' ' + frozenAblF(t.z());
+        s += ' ' + std::to_string(pkf->image_width_) + 'x' + std::to_string(pkf->image_height_);
+        s += " | " + pkf->img_filename_ + "\n";
+    }
+    for (const auto& kv : pcd) {
+        const Point3D& p = kv.second;
+        s += "P " + std::to_string(kv.first);
+        s += ' ' + frozenAblF(p.xyz_[0]) + ' ' + frozenAblF(p.xyz_[1]) + ' ' + frozenAblF(p.xyz_[2]);
+        s += ' ' + frozenAblF(p.color_[0]) + ' ' + frozenAblF(p.color_[1]) + ' ' + frozenAblF(p.color_[2]);
+        s += ' ' + std::to_string(p.source_ == PointSourceType::LINE_SAMPLED ? 1 : 0);
+        s += ' ' + frozenAblF(p.line_dir_[0]) + ' ' + frozenAblF(p.line_dir_[1]) + ' ' + frozenAblF(p.line_dir_[2]);
+        s += ' ' + frozenAblF(p.sample_step_) + "\n";
+    }
+    return s;
+}
+
+// Identity/hash of the image set actually consumed (path + byte size per KF).
+std::string frozenAblImageKey(GaussianSceneLine& scene)
+{
+    std::string s;
+    for (auto& kv : scene.keyframes()) {
+        const std::string& f = kv.second->img_filename_;
+        std::error_code ec;
+        const auto sz = std::filesystem::file_size(f, ec);
+        s += std::to_string(kv.second->fid_) + ' ' + f + ' '
+           + (ec ? std::string("?") : std::to_string(static_cast<unsigned long long>(sz))) + '\n';
+    }
+    return s;
+}
+
+std::string frozenAblJoinSeq(const std::vector<std::size_t>& seq)
+{
+    std::string s;
+    s.reserve(seq.size() * 4 + 16);
+    for (std::size_t v : seq) {
+        s += std::to_string(v);
+        s += ',';
+    }
+    return s;
+}
 } // namespace
 
 bool GaussianMapperLine::frozenAblationEnabled() const
 {
     const char* e = std::getenv("PHOTO_SLAM_FROZEN_ABLATION");
     return e != nullptr && e[0] != '\0';
+}
+
+// Pre-generate the keyframe sampling sequence ONCE per frozen scene. Every
+// condition and every repeat replays this exact sequence, so the viewpoint
+// order is not a source of difference between them (it is, by construction, the
+// same 10000-step sequence for the whole scene x sensor grid).
+void GaussianMapperLine::preGenerateFrozenKfSequence(int n_steps)
+{
+    frozen_kf_seq_.clear();
+    if (n_steps <= 0 || scene_->keyframes().empty())
+        return;
+
+    auto resetUsage = [&]() {
+        for (auto& kfit : scene_->keyframes())
+            kfit.second->remaining_times_of_use_ = 1000;
+        kfs_used_times_.clear();
+        kfid_shuffle_idx_ = 0;
+    };
+
+    int seq_seed = 12345;
+    if (const char* e = std::getenv("PHOTO_SLAM_FROZEN_SEQ_SEED"))
+        seq_seed = std::atoi(e);
+
+    resetUsage();
+    std::srand(static_cast<unsigned>(seq_seed));
+    frozen_kf_seq_.reserve(static_cast<std::size_t>(n_steps));
+    for (int i = 0; i < n_steps; ++i) {
+        auto sel = useOneTrainingErrorSlidingWindowKeyframe();
+        if (!sel)
+            break;
+        std::size_t idx = 0;
+        for (auto it = scene_->keyframes().begin(); it != scene_->keyframes().end(); ++it, ++idx) {
+            if (it->second == sel)
+                break;
+        }
+        frozen_kf_seq_.push_back(idx);
+    }
+    resetUsage();
+    frozen_kf_step_ = 0;
+    frozen_kf_replay_ = false;
+    std::cerr << "[FrozenABL] pre-generated kf sampling sequence: "
+              << frozen_kf_seq_.size() << " steps (seed " << seq_seed << ")" << std::endl;
 }
 
 // Replay several mapper configurations on one frozen SLAM geometry.
@@ -1115,17 +1243,63 @@ void GaussianMapperLine::runFrozenAblation()
               << " conditions=" << frozen_conditions_.size() << std::endl;
 
     const std::filesystem::path base_result_dir = result_dir_;
+
+    // ---- Save the frozen snapshot + hashes (input identity) ----
+    const std::string snap_text = frozenAblSerializeScene(
+        *scene_, frozen_pcd, frozen_extent, n_map_point, n_line_sample);
+    {
+        std::ofstream snap(frozen_ablation_dir_ / "snapshot.txt");
+        snap << snap_text;
+    }
+    const std::string image_key = frozenAblImageKey(*scene_);
+    const std::string input_hash = frozenAblHashHex(snap_text);
+    const std::string image_hash = frozenAblHashHex(image_key);
+    std::cerr << "[FrozenABL] input_hash=" << input_hash
+              << " image_hash=" << image_hash << std::endl;
+
+    // ---- Pre-generate the shared keyframe sampling sequence ----
+    preGenerateFrozenKfSequence(frozen_ablation_steps_);
+    const std::string seq_hash = frozenAblHashHex(frozenAblJoinSeq(frozen_kf_seq_));
+    {
+        std::ofstream sf(frozen_ablation_dir_ / "kf_sequence.txt");
+        sf << "# steps=" << frozen_kf_seq_.size() << " hash=" << seq_hash << "\n";
+        for (std::size_t i = 0; i < frozen_kf_seq_.size(); ++i)
+            sf << i << ' ' << frozen_kf_seq_[i] << '\n';
+    }
+    std::cerr << "[FrozenABL] kf_sequence steps=" << frozen_kf_seq_.size()
+              << " hash=" << seq_hash << std::endl;
+
+    // ---- Condition order: rotated per repeat so no condition always goes first ----
+    std::vector<FrozenAblationCondition> order;
+    const int n_cond = static_cast<int>(frozen_conditions_.size());
+    int rot = 0;
+    if (const char* r = std::getenv("PHOTO_SLAM_FROZEN_ROTATE"))
+        rot = std::atoi(r);
+    rot = n_cond > 0 ? ((rot % n_cond) + n_cond) % n_cond : 0;
+    for (int i = 0; i < n_cond; ++i)
+        order.push_back(frozen_conditions_[(i + rot) % n_cond]);
+    {
+        std::string os;
+        for (const auto& c : order)
+            os += c.tag;
+        std::cerr << "[FrozenABL] condition order=" << os << std::endl;
+    }
+
     std::ofstream csv(frozen_ablation_dir_ / "summary.csv");
     csv << "condition,use_line_gaussians,line_loss,directional_densify,psnr,ssim,"
-           "gaussians,iterations,refine_seconds,nan,exit\n";
+           "gaussians_init,gaussians_final,gaussians_point,gaussians_line,"
+           "opt_steps,refine_seconds,nan,grad_finite,exit,"
+           "input_hash,image_hash,kf_seq_hash\n";
 
-    for (const auto& c : frozen_conditions_) {
+    for (const auto& c : order) {
         std::cerr << "\n[FrozenABL] ===== condition " << c.tag << " =====" << std::endl;
 
         double seconds = -1.0;
         double psnr = -1.0, ssim = -1.0;
-        int64_t n_gauss = 0;
+        long long n_gauss_init = 0, n_gauss_final = 0, n_pt_gauss = 0, n_line_gauss = 0;
+        long long opt_steps = 0;
         int has_nan = -1;
+        int grad_finite = -1;
         int exit_code = 0;
 
         try {
@@ -1142,7 +1316,7 @@ void GaussianMapperLine::runFrozenAblation()
             gaussians_ = std::make_shared<GaussianModelLine>(model_params_);
             gaussians_->createFromPcd(pcd, frozen_extent);
             gaussians_->trainingSetup(opt_params_);
-            n_gauss = gaussians_->getXYZ().size(0);
+            n_gauss_init = gaussians_->getXYZ().size(0);
 
             // Mapper-side switches.
             opt_params_.weight_line_coherence_ = c.line_loss ? frozen_line_w_coherence_ : 0.0f;
@@ -1150,29 +1324,55 @@ void GaussianMapperLine::runFrozenAblation()
             opt_params_.weight_line_shape_ori_ = c.line_loss ? frozen_line_w_ori_ : 0.0f;
             ::setenv("PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY", c.directional_densify ? "1" : "0", 1);
 
-            // Identical iteration counter and keyframe sampling budget.
+            // Identical iteration counter, keyframe sampling budget and
+            // sampling sequence for every condition and every repeat.
             iteration_ = 0;
+            frozen_opt_steps_ = 0;
+            frozen_kf_replay_ = true;
+            frozen_kf_step_ = 0;
             for (auto& kfit : scene_->keyframes())
                 kfit.second->remaining_times_of_use_ = 1000;
+            kfs_used_times_.clear();
+            {
+                int seq_seed = 12345;
+                if (const char* e = std::getenv("PHOTO_SLAM_FROZEN_SEQ_SEED"))
+                    seq_seed = std::atoi(e);
+                std::srand(static_cast<unsigned>(seq_seed));
+            }
 
             result_dir_ = base_result_dir / c.tag;
             std::filesystem::create_directories(result_dir_);
 
+            // Train wall time covers exactly the optimizer steps (boundaries
+            // synchronised so pending CUDA work is not billed to metrics).
+            auto syncDevice = [&]() {
+                if (device_type_ == torch::kCUDA && gaussians_ && gaussians_->xyz_.defined()
+                    && gaussians_->xyz_.numel() > 0)
+                    (void)gaussians_->xyz_.select(0, 0).sum().item<double>();
+            };
+            syncDevice();
             const auto t0 = std::chrono::steady_clock::now();
-            while (getIteration() < frozen_ablation_steps_ && !isStopped()) {
+            while (frozen_opt_steps_ < frozen_ablation_steps_ && !isStopped()) {
                 trainForOneIterationErrorGuided();
-                if (getIteration() % 2000 == 0)
-                    std::cerr << "[FrozenABL][" << c.tag << "] iter "
-                              << getIteration() << " / " << frozen_ablation_steps_ << std::endl;
+                if (frozen_opt_steps_ % 2000 == 0 && frozen_opt_steps_ > 0)
+                    std::cerr << "[FrozenABL][" << c.tag << "] opt_steps "
+                              << frozen_opt_steps_ << " / " << frozen_ablation_steps_ << std::endl;
             }
+            syncDevice();
             seconds = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count() / 1000.0;
+            opt_steps = frozen_opt_steps_;
 
             renderAndRecordAllKeyframes("_shutdown");
             savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
 
-            n_gauss = gaussians_->getXYZ().size(0);
+            n_gauss_final = gaussians_->getXYZ().size(0);
+            n_line_gauss = gaussians_->is_line_.defined()
+                               ? gaussians_->is_line_.sum().item<int64_t>() : 0;
+            n_pt_gauss = n_gauss_final - n_line_gauss;
             has_nan = torch::isnan(gaussians_->getXYZ()).any().item<bool>() ? 1 : 0;
+            grad_finite = (gaussians_->xyz_gradient_accum_.defined()
+                           && torch::isfinite(gaussians_->xyz_gradient_accum_).all().item<bool>()) ? 1 : 0;
             {
                 const auto pdir = result_dir_ / (std::to_string(getIteration()) + "_shutdown");
                 psnr = frozenAblMeanValueColumn(pdir / "psnr.txt");
@@ -1194,19 +1394,27 @@ void GaussianMapperLine::runFrozenAblation()
 
         std::cerr << "[FrozenABL][" << c.tag << "] psnr=" << psnr
                   << " ssim=" << ssim
-                  << " gaussians=" << n_gauss
+                  << " gaussians=" << n_gauss_final
+                  << " point=" << n_pt_gauss
+                  << " line=" << n_line_gauss
+                  << " opt_steps=" << opt_steps
                   << " seconds=" << seconds
                   << " nan=" << has_nan
+                  << " grad_finite=" << grad_finite
                   << " exit=" << exit_code << std::endl;
         csv << c.tag << ',' << (c.use_line_gaussians ? 1 : 0) << ','
             << (c.line_loss ? 1 : 0) << ',' << (c.directional_densify ? 1 : 0) << ','
-            << psnr << ',' << ssim << ',' << n_gauss << ','
-            << frozen_ablation_steps_ << ',' << seconds << ','
-            << has_nan << ',' << exit_code << '\n';
+            << psnr << ',' << ssim << ','
+            << n_gauss_init << ',' << n_gauss_final << ','
+            << n_pt_gauss << ',' << n_line_gauss << ','
+            << opt_steps << ',' << seconds << ','
+            << has_nan << ',' << grad_finite << ',' << exit_code << ','
+            << input_hash << ',' << image_hash << ',' << seq_hash << '\n';
         csv.flush();
     }
 
     ::unsetenv("PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY");
+    frozen_kf_replay_ = false;
     result_dir_ = base_result_dir;
     std::cerr << "[FrozenABL] all conditions finished; summary: "
               << (frozen_ablation_dir_ / "summary.csv").string() << std::endl;
@@ -1593,6 +1801,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         // Optimizer step
         if (getIteration() < opt_params_.iterations_) {
             gaussians_->optimizer_->step();
+            ++frozen_opt_steps_;   // real optimizer-step counter (ablation)
             gaussians_->optimizer_->zero_grad(true);
             // Keep rotation quaternions unit-norm: the raw rotation_ norm is
             // unconstrained (losses only see the normalized quaternion), so it
@@ -1899,6 +2108,7 @@ void GaussianMapperLine::trainForOneIteration()
         // Optimizer step
         if (getIteration() < opt_params_.iterations_) {
             gaussians_->optimizer_->step();
+            ++frozen_opt_steps_;   // real optimizer-step counter (ablation)
             gaussians_->optimizer_->zero_grad(true);
             // Keep rotation quaternions unit-norm: the raw rotation_ norm is
             // unconstrained (losses only see the normalized quaternion), so it
@@ -3102,6 +3312,29 @@ GaussianMapperLine::useOneTrainingErrorSlidingWindowKeyframe()
 {
     if (scene_->keyframes().empty())
         return nullptr;
+
+    // Frozen-geometry ablation: replay the pre-generated keyframe sampling
+    // sequence so that every condition and every repeat sees an identical
+    // viewpoint order. Bookkeeping (remaining/used times) is kept identical to
+    // the roulette path. Only the reference view is frozen; the trained
+    // parameters are not touched.
+    if (frozen_kf_replay_ && frozen_kf_step_ < frozen_kf_seq_.size()) {
+        const std::size_t target = frozen_kf_seq_[frozen_kf_step_++];
+        auto it = scene_->keyframes().begin();
+        for (std::size_t i = 0; i < target && it != scene_->keyframes().end(); ++i)
+            ++it;
+        if (it == scene_->keyframes().end())
+            return nullptr;
+        std::shared_ptr<GaussianKeyframeLine> sel = it->second;
+        --(sel->remaining_times_of_use_);
+        auto fid = sel->fid_;
+        auto found = kfs_used_times_.find(fid);
+        if (found == kfs_used_times_.end())
+            kfs_used_times_[fid] = 1;
+        else
+            ++found->second;
+        return sel;
+    }
 
     float total_error = 0.0f;
     std::vector<std::shared_ptr<GaussianKeyframeLine>> valid_kfs;
