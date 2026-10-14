@@ -14367,7 +14367,36 @@ void Optimizer::OptimizeEssentialGraphWithLine(KeyFrame* pCurKF, vector<KeyFrame
     optimizer.setAlgorithm(solver);
 
     Map* pMap = pCurKF->GetMap();
-    const unsigned int nMaxKFid = pMap->GetMaxKFid();
+
+    // The arrays below are indexed directly by KeyFrame::mnId. In a map merge the
+    // keyframe lists hold entries from BOTH maps, but pMap->GetMaxKFid() only
+    // covers pCurKF's map, so an id coming from the other map wrote past the end
+    // of these vectors. A 28-byte g2o::Sim3 store or a bit write into the packed
+    // vector<bool> corrupts heap metadata: "corrupted double-linked list" ->
+    // SIGABRT, or a wild access -> SIGSEGV, both observed immediately after
+    // "EGL2 begin" on desk_3 under the point-drop stress (which is what creates
+    // several maps and then merges them). Bound the arrays over every id that can
+    // actually be used as an index: the keyframe lists, pCurKF, and the reference
+    // keyframes of the points/lines that are corrected below. pLKF/pKFn need no
+    // separate term because they are gated by spKFs.find(...).
+    const unsigned int nMapMaxKFid = (unsigned int)pMap->GetMaxKFid();
+    unsigned int nMaxKFid = nMapMaxKFid;
+    {
+        auto bumpId = [&nMaxKFid](const KeyFrame* pKF) {
+            if(pKF && (unsigned int)pKF->mnId > nMaxKFid)
+                nMaxKFid = (unsigned int)pKF->mnId;
+        };
+        bumpId(pCurKF);
+        for(KeyFrame* pKF : vpFixedKFs) bumpId(pKF);
+        for(KeyFrame* pKF : vpFixedCorrectedKFs) bumpId(pKF);
+        for(KeyFrame* pKF : vpNonFixedKFs) bumpId(pKF);
+        for(MapPoint* pMP : vpNonCorrectedMPs) if(pMP) bumpId(pMP->GetReferenceKeyFrame());
+        for(MapLine* pML : vpNonCorrectedMLs) if(pML) bumpId(pML->GetReferenceKeyFrame());
+        if(IsMergeDiag() && nMaxKFid != nMapMaxKFid)
+            std::cerr << "[MergeDiag] EGL2 idrange map_max=" << nMapMaxKFid
+                      << " id_used=" << nMaxKFid
+                      << " arrays_resized=1" << std::endl;
+    }
 
     vector<g2o::Sim3,Eigen::aligned_allocator<g2o::Sim3> > vScw(nMaxKFid+1);
     vector<g2o::Sim3,Eigen::aligned_allocator<g2o::Sim3> > vCorrectedSwc(nMaxKFid+1);

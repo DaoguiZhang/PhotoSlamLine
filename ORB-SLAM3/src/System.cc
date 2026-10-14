@@ -794,20 +794,23 @@ void System::Shutdown()
             usleep(5000);
     }
 
-    // Wait until all thread have effectively stopped
-    /*while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
-    {
-        if(!mpLocalMapper->isFinished())
-            cout << "mpLocalMapper is not finished" << endl;
-        if(!mpLoopCloser->isFinished())
-            cout << "mpLoopCloser is not finished" << endl;
-        if(mpLoopCloser->isRunningGBA()){
-            cout << "mpLoopCloser is running GBA" << endl;
-            cout << "break anyway..." << endl;
-            break;
-        }
+    // Wait until the mapping threads have effectively stopped, then JOIN them.
+    // In this fork the wait below was commented out and mptLocalMapping /
+    // mptLoopClosing were never joined, so Shutdown() returned while
+    // LocalMapping could still be inside a local bundle adjustment. main then
+    // went on to save the trajectories and returned; static destructors
+    // destroyed OpenCV's TLS container underneath that still-live thread, which
+    // threw "Can't fetch data from terminated TLS container." -> terminate ->
+    // SIGABRT (exit 134). Observed on desk_3 drop-50% condition P.
+    // isRunningGBA() is part of the condition because the GBA thread is detached
+    // (see LoopClosing.cc) and therefore cannot be joined here.
+    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
         usleep(5000);
-    }*/
+
+    if(mptLocalMapping && mptLocalMapping->joinable())
+        mptLocalMapping->join();
+    if(mptLoopClosing && mptLoopClosing->joinable())
+        mptLoopClosing->join();
 
     /*if(!mStrSaveAtlasToFile.empty())
     {

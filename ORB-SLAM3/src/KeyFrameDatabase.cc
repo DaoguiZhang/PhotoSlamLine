@@ -709,6 +709,17 @@ void KeyFrameDatabase::DetectNBestCandidates(KeyFrame *pKF, vector<KeyFrame*> &v
     while(i < lAccScoreAndMatch.size() && (vpLoopCand.size() < nNumCandidates || vpMergeCand.size() < nNumCandidates))
     {
         KeyFrame* pKFi = it->second;
+
+        // Advance the counter and the iterator BEFORE the bad-keyframe skip.
+        // Previously `continue` below jumped over the trailing i++/it++, so a
+        // candidate whose keyframe was bad left both the counter and the
+        // iterator unchanged and the loop could never terminate. Captured at
+        // drop-50%: LoopClosing spun here forever (i==0, lAccScoreAndMatch
+        // size 1, both candidate lists empty) while Tracking waited in
+        // LoopClosing::RequestResetActiveMap and never got the active-map reset.
+        i++;
+        it++;
+
         if(pKFi->isBad())
             continue;
 
@@ -724,8 +735,6 @@ void KeyFrameDatabase::DetectNBestCandidates(KeyFrame *pKF, vector<KeyFrame*> &v
             }
             spAlreadyAddedKF.insert(pKFi);
         }
-        i++;
-        it++;
     }
 }
 

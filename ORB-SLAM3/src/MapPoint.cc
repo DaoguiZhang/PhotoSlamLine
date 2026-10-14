@@ -205,7 +205,7 @@ void MapPoint::EraseObservation(KeyFrame* pKF)
             int leftIndex = get<0>(indexes), rightIndex = get<1>(indexes);
 
             if(leftIndex != -1){
-                if(!pKF->mpCamera2 && pKF->mvuRight[leftIndex]>=0)
+                if(!pKF->mpCamera2 && leftIndex >= 0 && leftIndex < (int)pKF->mvuRight.size() && pKF->mvuRight[leftIndex]>=0)
                     nObs-=2;
                 else
                     nObs--;
@@ -216,7 +216,18 @@ void MapPoint::EraseObservation(KeyFrame* pKF)
 
             mObservations.erase(pKF);
 
-            if(mpRefKF==pKF)
+            // Guard: if the erased observation was the reference AND the last
+            // one, mObservations is now empty and begin()==end(), so the
+            // original `mpRefKF=mObservations.begin()->first` was undefined
+            // behaviour and stored a garbage pointer. Every subsequent
+            // GetReferenceKeyFrame() use then dereferenced it (wild read ->
+            // SIGSEGV) and its junk mnId indexed vpBadPose[] out of bounds.
+            // MapLine::EraseLineObservation already carries this guard; the
+            // MapPoint version did not. Leaving mpRefKF pointing at pKF keeps it
+            // a valid, non-null pointer (keyframes are not freed by this path)
+            // and avoids introducing null dereferences in callers that do not
+            // check.
+            if(mpRefKF==pKF && !mObservations.empty())
                 mpRefKF=mObservations.begin()->first;
 
             // If only 2 observations or less, discard point
