@@ -138,11 +138,16 @@ inline bool IsLineScanDiag()
 
 // ---------------------------------------------------------------------------
 // Map-merge / essential-graph segmented diagnostics (PHOTO_SLAM_DEBUG_MERGE=1).
-// Default OFF. Emits [MergeDiag] records from MergeLocal2 / SearchAndFuseWithLine
-// / OptimizeEssentialGraphWithLine and the stop-wait loops, carrying the OS
-// thread id so a livelock can be attributed to a specific thread. Purely
-// observational: no behaviour change, no extra locking beyond what the code
-// already takes.
+// Default OFF. Emits [MergeDiag] records from BOTH overloads of
+// Optimizer::OptimizeEssentialGraphWithLine. The overload taking
+// (KeyFrame*, vpFixedKFs, ...) is the one LoopClosing::MergeLocalWithLine calls
+// (LoopClosing.cc:3667) and is tagged "EGL2"; the overload taking
+// (Map* pMap, ...) is reached from CorrectLoop and is tagged "EGL". Records
+// carry the OS thread id so a stall can be attributed to a thread, plus
+// per-section and per-100-element timings. Instrumenting only the Map*
+// overload previously made an empty stream look like "no merge ran" when merges
+// were in fact running through the other one.
+// Purely observational: no behaviour change, no extra locking.
 // ---------------------------------------------------------------------------
 inline bool IsMergeDiag()
 {

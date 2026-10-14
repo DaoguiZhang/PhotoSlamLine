@@ -861,8 +861,13 @@ void KeyFrame::SetBadFlag()
 
 bool KeyFrame::isBad()
 {
-    unique_lock<mutex> lock(mMutexConnections);
-    return mbBad;
+    // Deliberately lock-free. Taking mMutexConnections here created a
+    // cross-keyframe ABBA cycle with SetBadFlag (see mbBad in KeyFrame.h):
+    // SetBadFlag(A) -> EraseConnection(B) -> B.UpdateBestCovisibles() holds B's
+    // mMutexConnections and calls A.isBad(), while a concurrent SetBadFlag(B)
+    // holds A's and calls B.isBad(). mbBad is atomic and only ever written under
+    // mMutexConnections in SetBadFlag(), so this read is as safe as before.
+    return mbBad.load();
 }
 
 void KeyFrame::EraseConnection(KeyFrame* pKF)

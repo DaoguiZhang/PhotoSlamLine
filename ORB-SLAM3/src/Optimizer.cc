@@ -22,6 +22,7 @@
 
 #include <cassert>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdlib>
@@ -13977,6 +13978,20 @@ void Optimizer::OptimizeEssentialGraphWithLine(Map* pMap, KeyFrame* pLoopKF, Key
     const vector<MapPoint*> vpMPs = pMap->GetAllMapPoints();
     const vector<MapLine*> vpMLs = pMap->GetAllMapLines(); // 🌟 [新增] 获取所有地图线
 
+    // ---- merge diagnostics (PHOTO_SLAM_DEBUG_MERGE, default off) -----------
+    // Declared here so every section record below shares one timer. Records are
+    // O(1) per section plus one per 100 MapLines; nothing per element.
+    const auto tEGL0 = std::chrono::steady_clock::now();
+    auto eglMs = [&tEGL0]() -> long long {
+        return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - tEGL0).count();
+    };
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] EGL begin tid=" << MergeDiagTid()
+                  << " map=" << (long)pMap->GetId()
+                  << " nKF=" << vpKFs.size() << " nMP=" << vpMPs.size()
+                  << " nML=" << vpMLs.size() << std::endl;
+
     const unsigned int nMaxKFid = pMap->GetMaxKFid();
 
     vector<g2o::Sim3,Eigen::aligned_allocator<g2o::Sim3> > vScw(nMaxKFid+1);
@@ -14210,6 +14225,9 @@ void Optimizer::OptimizeEssentialGraphWithLine(Map* pMap, KeyFrame* pLoopKF, Key
 
         opr.addKeyFrame(pKFi, LoopKeyFrameIds.find(pKFi->mnId) != LoopKeyFrameIds.end());
     }
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] KF section done n=" << vpKFs.size()
+                  << " t_ms=" << eglMs() << std::endl;
 
     // -------------------------------------------------------------
     // Correct MapPoints
@@ -14249,6 +14267,9 @@ void Optimizer::OptimizeEssentialGraphWithLine(Map* pMap, KeyFrame* pLoopKF, Key
             opr.addMapPoint(pMP);
         }
     }
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] MP section done n=" << vpMPs.size()
+                  << " t_ms=" << eglMs() << std::endl;
 
     // -------------------------------------------------------------
     // 🌟 [新增] Correct MapLines and Resample
@@ -14257,6 +14278,14 @@ void Optimizer::OptimizeEssentialGraphWithLine(Map* pMap, KeyFrame* pLoopKF, Key
     for(size_t i=0, iend=vpMLs.size(); i<iend; i++)
     {
         MapLine* pML = vpMLs[i];
+
+        // Progress record. If the run stalls, the LAST printed i/lineId is the
+        // culprit (a line that never returns), whereas a steadily growing i with
+        // a growing t_ms means the section is merely too slow.
+        if (IsMergeDiag() && (i % 100) == 0)
+            std::cerr << "[MergeDiag] ML progress i=" << i << "/" << iend
+                      << " lineId=" << (pML ? (long)pML->mnId : -1L)
+                      << " t_ms=" << eglMs() << std::endl;
 
         if(pML->isBad())
             continue;
@@ -14291,9 +14320,15 @@ void Optimizer::OptimizeEssentialGraphWithLine(Map* pMap, KeyFrame* pLoopKF, Key
             opr.addMapLine(pML);
         }
     }
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] ML section done n=" << vpMLs.size()
+                  << " t_ms=" << eglMs() << std::endl;
 
     // TODO Check this changeindex
     pMap->IncreaseChangeIndex();
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] EGL end tid=" << MergeDiagTid()
+                  << " t_ms=" << eglMs() << std::endl;
 }
 
 
@@ -14302,6 +14337,20 @@ void Optimizer::OptimizeEssentialGraphWithLine(KeyFrame* pCurKF, vector<KeyFrame
                                        vector<KeyFrame*> &vpNonFixedKFs, vector<MapPoint*> &vpNonCorrectedMPs,
                                        vector<MapLine*> &vpNonCorrectedMLs) // 🌟 新增参数
 {
+    // ---- merge diagnostics (PHOTO_SLAM_DEBUG_MERGE, default off) -----------
+    // NOTE: this is the overload that LoopClosing::MergeLocalWithLine actually
+    // calls (LoopClosing.cc:3667); the other overload is reached from CorrectLoop.
+    const auto tEGL2 = std::chrono::steady_clock::now();
+    auto egl2Ms = [&tEGL2]() -> long long {
+        return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - tEGL2).count();
+    };
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] EGL2 begin tid=" << MergeDiagTid()
+                  << " nFixedKF=" << vpFixedKFs.size()
+                  << " nNonFixedKF=" << vpNonFixedKFs.size()
+                  << " nNonCorrectedMP=" << vpNonCorrectedMPs.size()
+                  << " nNonCorrectedML=" << vpNonCorrectedMLs.size() << std::endl;
     Verbose::PrintMess("Opt_Essential: There are " + to_string(vpFixedKFs.size()) + " KFs fixed in the merged map", Verbose::VERBOSITY_DEBUG);
     Verbose::PrintMess("Opt_Essential: There are " + to_string(vpFixedCorrectedKFs.size()) + " KFs fixed in the old map", Verbose::VERBOSITY_DEBUG);
     Verbose::PrintMess("Opt_Essential: There are " + to_string(vpNonFixedKFs.size()) + " KFs non-fixed in the merged map", Verbose::VERBOSITY_DEBUG);
@@ -14598,16 +14647,20 @@ void Optimizer::OptimizeEssentialGraphWithLine(KeyFrame* pCurKF, vector<KeyFrame
             continue;
 
         KeyFrame* pRefKF = pMPi->GetReferenceKeyFrame();
-        while(pRefKF->isBad())
+        // Repair a bad reference keyframe. The null test must come BEFORE the
+        // dereference, and the repair must be required to make progress: when
+        // EraseObservation is a no-op the reference cannot advance, and the old
+        // form spun forever while holding pMap->mMutexMapUpdate.
+        while(pRefKF && pRefKF->isBad())
         {
-            if(!pRefKF)
+            pMPi->EraseObservation(pRefKF);
+            KeyFrame* pNextRefKF = pMPi->GetReferenceKeyFrame();
+            if(pNextRefKF == pRefKF)
             {
                 Verbose::PrintMess("MP " + to_string(pMPi->mnId) + " without a valid reference KF", Verbose::VERBOSITY_DEBUG);
                 break;
             }
-
-            pMPi->EraseObservation(pRefKF);
-            pRefKF = pMPi->GetReferenceKeyFrame();
+            pRefKF = pNextRefKF;
         }
 
         if(!pRefKF) continue; // 安全检查
@@ -14628,25 +14681,43 @@ void Optimizer::OptimizeEssentialGraphWithLine(KeyFrame* pCurKF, vector<KeyFrame
         }
     }
 
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] EGL2 points done t_ms=" << egl2Ms() << std::endl;
+
     // =========================================================================
     // 🌟 [新增] Correct Lines. 使用相同的刚体变换修正未固定的 MapLine 端点
     // =========================================================================
+    int nMLdiag = 0;
     for(MapLine* pMLi : vpNonCorrectedMLs)
     {
+        if (IsMergeDiag() && (nMLdiag++ % 100) == 0)
+            std::cerr << "[MergeDiag] EGL2 ML progress i=" << (nMLdiag-1)
+                      << "/" << vpNonCorrectedMLs.size()
+                      << " lineId=" << (pMLi ? (long)pMLi->mnId : -1L)
+                      << " t_ms=" << egl2Ms() << std::endl;
+
         if(pMLi->isBad())
             continue;
 
         KeyFrame* pRefKF = pMLi->GetReferenceKeyFrame();
-        while(pRefKF->isBad())
+        // Repair a bad reference keyframe. Two defects in the previous form:
+        //  (a) `while(pRefKF->isBad())` dereferenced a null pRefKF before the
+        //      `if(!pRefKF)` guard, which runs only after EraseLineObservation
+        //      has emptied mLineObservations and set mpRefKF to nullptr;
+        //  (b) when EraseLineObservation is a no-op (pRefKF is not among
+        //      mLineObservations) the reference never advanced, so the loop spun
+        //      forever. That spin holds pMap->mMutexMapUpdate, which is why
+        //      Tracking blocks at Tracking.cc:3055 -- the captured livelock.
+        while(pRefKF && pRefKF->isBad())
         {
-            if(!pRefKF)
+            pMLi->EraseLineObservation(pRefKF);
+            KeyFrame* pNextRefKF = pMLi->GetReferenceKeyFrame();
+            if(pNextRefKF == pRefKF)
             {
                 Verbose::PrintMess("ML " + to_string(pMLi->mnId) + " without a valid reference KF", Verbose::VERBOSITY_DEBUG);
                 break;
             }
-
-            pMLi->EraseLineObservation(pRefKF);
-            pRefKF = pMLi->GetReferenceKeyFrame();
+            pRefKF = pNextRefKF;
         }
 
         if(!pRefKF) continue; // 安全检查
@@ -14685,6 +14756,13 @@ void Optimizer::OptimizeEssentialGraphWithLine(KeyFrame* pCurKF, vector<KeyFrame
             cout << "ERROR: MapLine has a reference KF from another map" << endl;
         }
     }
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] EGL2 ML done n=" << vpNonCorrectedMLs.size()
+                  << " t_ms=" << egl2Ms() << std::endl;
+
+    if (IsMergeDiag())
+        std::cerr << "[MergeDiag] EGL2 end tid=" << MergeDiagTid()
+                  << " t_ms=" << egl2Ms() << std::endl;
 }
 
 

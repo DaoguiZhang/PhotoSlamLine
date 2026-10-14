@@ -2287,6 +2287,12 @@ void MapLine::SamplePointsAlongLinesWorld3D_old()
 // post-merge geometry, never to bound legitimate resampling work.
 // ---------------------------------------------------------------------------
 static const float kMaxLineLengthM = 1000.0f;
+// Hard ceiling on the resample count itself. The length bound alone is NOT
+// sufficient: sample_step comes from the config and can be arbitrarily small, so
+// length/sample_step could still reach ~1e9. This is a safety net on the
+// VALIDATED geometry, not a cap on legitimate work (a 0.2 m step over a 1 km
+// line is only 5000 samples).
+static const int kMaxLineSamples = 20000;
 
 void MapLine::SamplePointsAlongLinesWorld3D(float sample_step /* e.g. 0.2f */)
 {
@@ -2303,6 +2309,11 @@ void MapLine::SamplePointsAlongLinesWorld3D(float sample_step /* e.g. 0.2f */)
     if (!std::isfinite(length_d)) return;
     if (!(sample_step > 1e-6f) || !std::isfinite(static_cast<double>(sample_step))) return;
     if (length_d > static_cast<double>(kMaxLineLengthM)) return;
+    // The length bound alone is NOT sufficient: sample_step is configurable and
+    // can be arbitrarily small, so length/step could still reach ~1e9. Bound the
+    // COUNT itself as well, before the int cast.
+    if (length_d / static_cast<double>(sample_step) >
+        static_cast<double>(kMaxLineSamples)) return;
 
     const float length = static_cast<float>(length_d);
     if (length < 1e-6f) return;
@@ -2311,6 +2322,7 @@ void MapLine::SamplePointsAlongLinesWorld3D(float sample_step /* e.g. 0.2f */)
 
     const int num_samples = std::max(
         2, static_cast<int>(std::ceil(length_d / static_cast<double>(sample_step))));
+    if (num_samples < 2 || num_samples > kMaxLineSamples) return;
 
     for (int i = 0; i <= num_samples; ++i)
     {
@@ -2494,6 +2506,11 @@ void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
     if (!std::isfinite(length_d)) return;
     if (!(sample_step > 1e-6f) || !std::isfinite(static_cast<double>(sample_step))) return;
     if (length_d > static_cast<double>(kMaxLineLengthM)) return;
+    // The length bound alone is NOT sufficient: sample_step is configurable and
+    // can be arbitrarily small, so length/step could still reach ~1e9. Bound the
+    // COUNT itself as well, before the int cast.
+    if (length_d / static_cast<double>(sample_step) >
+        static_cast<double>(kMaxLineSamples)) return;
 
     const float length = static_cast<float>(length_d);
     if (length < 1e-6f) return;
@@ -2502,6 +2519,7 @@ void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
 
     const int num_samples = std::max(
         2, static_cast<int>(std::ceil(length_d / static_cast<double>(sample_step))));
+    if (num_samples < 2 || num_samples > kMaxLineSamples) return;
 
     const auto& obs = GetLineObservations();
 

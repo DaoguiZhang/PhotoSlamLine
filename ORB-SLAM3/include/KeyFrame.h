@@ -34,6 +34,7 @@
 #include "SerializationUtils.h"
 
 #include <mutex>
+#include <atomic>
 
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/vector.hpp>
@@ -161,7 +162,14 @@ class KeyFrame
         // Bad flags
         ar & mbNotErase;
         ar & mbToBeErased;
-        ar & mbBad;
+        // mbBad is std::atomic<bool> (see isBad()); boost cannot bind an atomic
+        // directly, so route the value through a plain bool. Save and load are
+        // symmetric, so this is equivalent to the previous `ar & mbBad`.
+        {
+            bool bBad = mbBad.load();
+            ar & bBad;
+            mbBad.store(bBad);
+        }
         ar & mHalfBaseline;
         ar & mnOriginMapId;
         // Camera variables
@@ -552,7 +560,15 @@ protected:
     // Bad flags
     bool mbNotErase;
     bool mbToBeErased;
-    bool mbBad;    
+    // Atomic so that isBad() can be read WITHOUT taking mMutexConnections.
+    // Taking it made isBad() a cross-keyframe lock: SetBadFlag(A) holds a peer
+    // keyframe B's mMutexConnections (transitively, via EraseConnection ->
+    // UpdateBestCovisibles) and then calls isBad() on A, while a concurrent
+    // SetBadFlag(B) holds A's and calls isBad() on B. That is an ABBA cycle and
+    // is what froze tracking/local-mapping/loop-closing in the captured stall
+    // (all three threads in KeyFrame::isBad, no progress for 600 s).
+    // Writes still happen under mMutexConnections in SetBadFlag().
+    std::atomic<bool> mbBad;
 
     float mHalfBaseline; // Only for visualization
 
