@@ -330,6 +330,12 @@ void LoopClosing::RunWithLine()
 
     while(1)
     {
+        // Diagnostic (PHOTO_SLAM_DEBUG_MERGE, default off): only printed while a
+        // reset is pending, so the last "iter-begin"/"iter-detect-done" record
+        // says which phase LoopClosing was inside when a caller blocked.
+        if(IsMergeDiag() && mbResetActiveMapRequested)
+            std::cerr << "[MergeDiag] LC stage=iter-begin pending_reset=1" << std::endl;
+
         // -------------------------------------------------------------
         // NEW LOOP AND MERGE DETECTION ALGORITHM WITH LINES
         // -------------------------------------------------------------
@@ -559,6 +565,9 @@ void LoopClosing::RunWithLine()
             }
             mpLastCurrentKF = mpCurrentKF;
         }
+
+        if(IsMergeDiag() && mbResetActiveMapRequested)
+            std::cerr << "[MergeDiag] LC stage=iter-detect-done pending_reset=1" << std::endl;
 
         ResetIfRequested();
 
@@ -4304,6 +4313,18 @@ void LoopClosing::RequestResetActiveMap(Map *pMap)
         mpMapToReset = pMap;
     }
 
+    // Diagnostic (PHOTO_SLAM_DEBUG_MERGE, default off): this wait is only ever
+    // released by LoopClosing itself, via ResetIfRequested() at the bottom of
+    // Run()/RunWithLine(). If LoopClosing is busy inside one detection/correction
+    // iteration, the caller blocks here -- and the caller is Tracking, which
+    // holds pCurrentMap->mMutexMapUpdate (Tracking.cc:3055). Record how long the
+    // wait actually lasts so a stall can be attributed to a stage, not guessed.
+    const auto tReset0 = std::chrono::steady_clock::now();
+    long long nReported = -1;
+    if(IsMergeDiag())
+        std::cerr << "[MergeDiag] LC reset request tid=" << MergeDiagTid()
+                  << " map=" << (long)(pMap ? pMap->GetId() : -1) << std::endl;
+
     while(1)
     {
         {
@@ -4311,8 +4332,23 @@ void LoopClosing::RequestResetActiveMap(Map *pMap)
             if(!mbResetActiveMapRequested)
                 break;
         }
+        if(IsMergeDiag())
+        {
+            const long long nSec = (long long)std::chrono::duration_cast<std::chrono::seconds>(
+                                       std::chrono::steady_clock::now() - tReset0).count();
+            if(nSec != nReported && nSec >= 1)
+            {
+                nReported = nSec;
+                std::cerr << "[MergeDiag] LC reset still waiting t_s=" << nSec << std::endl;
+            }
+        }
         usleep(3000);
     }
+
+    if(IsMergeDiag())
+        std::cerr << "[MergeDiag] LC reset request done t_ms="
+                  << (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now() - tReset0).count() << std::endl;
 }
 
 void LoopClosing::ResetIfRequested()
@@ -4342,6 +4378,9 @@ void LoopClosing::ResetIfRequested()
 
         mLastLoopKFid=mpAtlas->GetLastInitKFid(); //TODO old variable, it is not use in the new algorithm
         mbResetActiveMapRequested=false;
+
+        if(IsMergeDiag())
+            std::cerr << "[MergeDiag] LC reset serviced tid=" << MergeDiagTid() << std::endl;
 
     }
 }
