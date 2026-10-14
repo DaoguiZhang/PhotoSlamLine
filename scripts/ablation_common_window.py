@@ -28,7 +28,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ = os.path.dirname(ROOT_DIR)
 EVAL = os.path.join(ROOT_DIR, "eval_tum_se3_v2.py")
 DATASETS = "/workspace/code/SEGS-SLAM/datasets/tum"
-RUN_RX = re.compile(r"^(near|far)_(rgbd|mono)_([ABC])$")
+RUN_RX = re.compile(r"^(near|far)_(rgbd|mono)_([ABCP])$")
 
 
 # --------------------------------------------------------------- statistics --
@@ -179,7 +179,7 @@ def main():
               f"({tmax - tmin:.2f} s) over {len(valid)} valid runs "
               f"(of {sum(len(c) for c in conds.values())} total)")
 
-        for cond in "ABC":
+        for cond in "ABCP":
             for r in conds.get(cond, []):
                 res = evaluate(r["dir"], scene, mode, tmin, tmax, "cw")
                 row = dict(scene=scene, mode=mode, cond=cond, run=r["run"],
@@ -206,7 +206,7 @@ def main():
     print(hdr)
     metrics = {}
     for (scene, mode) in sorted(runs_all):
-        for cond in "ABC":
+        for cond in "ABCP":
             sub = [r for r in rows if r["scene"] == scene and r["mode"] == mode
                    and r["cond"] == cond]
             if not sub:
@@ -226,19 +226,28 @@ def main():
                   f"{fmean(vals['rpe30_m']):<10}{fmean(vals['rpe30_deg']):<10}")
 
     print("\n" + "=" * 100)
-    print("EFFECT SIZES (A-B = effect of enabling lines; B-C = null control, rescue never fires)")
+    print("EFFECT SIZES")
+    print("  P-B : adds line edges to the optimizers, SAME entry point (clean test)")
+    print("  A-P : switches to the other monocular entry point (A vs A-prime)")
+    print("  B-C : null control (identical logic; the rescue never fires)")
     print("=" * 100)
-    print(f"{'scene':<6}{'mode':<6}{'metric':<12}{'A-B diff':<13}{'t':<9}{'p':<11}"
-          f"{'B-C diff':<13}{'t':<9}{'p':<11}")
+    print(f"{'scene':<6}{'mode':<6}{'metric':<12}"
+          f"{'P-B':<13}{'t':<9}{'p':<11}"
+          f"{'A-P':<13}{'t':<9}{'p':<11}"
+          f"{'B-C':<13}{'t':<9}{'p':<11}")
     for (scene, mode) in sorted(runs_all):
         for key in ("ate", "rpe1_m", "rpe1_deg", "rpe30_m"):
             A = metrics.get((scene, mode, "A"), {}).get(key, [])
+            P = metrics.get((scene, mode, "P"), {}).get(key, [])
             B = metrics.get((scene, mode, "B"), {}).get(key, [])
             C = metrics.get((scene, mode, "C"), {}).get(key, [])
-            d1, t1, p1 = welch(A, B)
+            d0, t0, p0 = welch(P, B)
+            d1, t1, p1 = welch(A, P)
             d2, t2, p2 = welch(B, C)
             pf = lambda x: ("-" if x != x else f"{x:.4f}")
-            print(f"{scene:<6}{mode:<6}{key:<12}{d1:<13.6g}{t1:<9.3f}{pf(p1):<11}"
+            print(f"{scene:<6}{mode:<6}{key:<12}"
+                  f"{d0:<13.6g}{t0:<9.3f}{pf(p0):<11}"
+                  f"{d1:<13.6g}{t1:<9.3f}{pf(p1):<11}"
                   f"{d2:<13.6g}{t2:<9.3f}{pf(p2):<11}")
 
     out = os.path.join(outdir, "common_window.csv")

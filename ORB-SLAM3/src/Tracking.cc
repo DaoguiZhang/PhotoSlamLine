@@ -5625,9 +5625,9 @@ bool Tracking::TrackLocalMap()
     }
 }
 
-bool Tracking::HasReliableLineSupport(int& reason)
+bool Tracking::LineSupportEvidence(int& nUniq, int& nEdges, float& spread, int& reason)
 {
-    reason = 0;
+    nUniq = 0; nEdges = 0; spread = 0.0f; reason = 0;
     if (GetLineMode() < 2 || !GetPoseOptLineEnabled())
     {
         reason = 1;
@@ -5665,8 +5665,19 @@ bool Tracking::HasReliableLineSupport(int& reason)
             dirs.push_back(a);
         }
     }
-    mLineRescueInliers = nUniqueLineInliers;
-    mLineRescueEdges = nLineEdgesUsed;
+    nUniq = nUniqueLineInliers;
+    nEdges = nLineEdgesUsed;
+
+    // Directional coverage in [0,180): 180 - (largest gap, wrap-around included).
+    if (dirs.size() >= 2)
+    {
+        std::sort(dirs.begin(), dirs.end());
+        float maxGap = 0.0f;
+        for (std::size_t k = 0; k + 1 < dirs.size(); ++k)
+            maxGap = std::max(maxGap, dirs[k + 1] - dirs[k]);
+        maxGap = std::max(maxGap, (180.0f - dirs.back()) + dirs.front());
+        spread = 180.0f - maxGap;
+    }
 
     if (nUniqueLineInliers < GetLineRescueMinLines())
     {
@@ -5681,12 +5692,7 @@ bool Tracking::HasReliableLineSupport(int& reason)
         reason = 2;
         return false;
     }
-    std::sort(dirs.begin(), dirs.end());
-    float maxGap = 0.0f;
-    for (std::size_t k = 0; k + 1 < dirs.size(); ++k)
-        maxGap = std::max(maxGap, dirs[k + 1] - dirs[k]);
-    maxGap = std::max(maxGap, (180.0f - dirs.back()) + dirs.front());  // wrap-around
-    if ((180.0f - maxGap) < GetLineRescueMinAngleDeg())
+    if (spread < GetLineRescueMinAngleDeg())
     {
         reason = 2;                         // parallel / degenerate
         return false;
@@ -5698,6 +5704,22 @@ bool Tracking::HasReliableLineSupport(int& reason)
         reason = 3;                         // poor inlier ratio
         return false;
     }
+    return true;
+}
+
+bool Tracking::HasReliableLineSupport(int& reason)
+{
+    reason = 0;
+    // Line-only evidence first; the non-line criteria (point floor, motion cap)
+    // stay below so that the rescue decision is unchanged.
+    int nUniqueLineInliers = 0, nLineEdgesUsed = 0;
+    float lnSpread = 0.0f;
+    const bool bLineOk = LineSupportEvidence(nUniqueLineInliers, nLineEdgesUsed,
+                                             lnSpread, reason);
+    mLineRescueInliers = nUniqueLineInliers;
+    mLineRescueEdges = nLineEdgesUsed;
+    if (!bLineOk)
+        return false;
 
     // A lone line must never carry the frame: keep a point floor. The count is
     // RECOMPUTED from THIS frame every call; it is never taken from a member
@@ -5758,6 +5780,36 @@ bool Tracking::ApplyLineRescue(const char* stage_tag, bool old_ok)
     // actually runs, so they must never carry a value across calls/frames.
     mLineRescueInliers = 0;
     mLineRescueEdges = 0;
+
+    // ---- rescue-opportunity scan (PHOTO_SLAM_DEBUG_LINE_SCAN) ------------
+    // Unconditional: evaluates the LINE evidence on THIS frame whether or not
+    // the point-only verdict failed, and independent of the rescue switch. This
+    // is how natural rescue opportunities are counted without enabling the
+    // rescue (and therefore without changing the trajectory).
+    if (IsLineScanDiag())
+    {
+        int sUniq = 0, sEdges = 0, sReason = 0;
+        float sSpread = 0.0f;
+        const bool lnOk = LineSupportEvidence(sUniq, sEdges, sSpread, sReason);
+        Map* pScanMap = mpAtlas->GetCurrentMap();
+        std::cerr << "[LineScan] stage=" << stage_tag
+                  << " map=" << (pScanMap ? (long)pScanMap->GetId() : -1L)
+                  << " frame=" << mCurrentFrame.mnId
+                  << " ptBeforePO=" << mnPointMatchesBeforePO
+                  << " lnBeforePO=" << mnLineMatchesBeforePO
+                  << " ptAfterPO=" << mnPointInliersAfterPO
+                  << " lnAfterPO=" << mnLineInliersAfterPO
+                  << " oldPtVerdict=" << (old_ok ? "OK" : "FAIL")
+                  << " lnUniq=" << sUniq
+                  << " lnEdges=" << sEdges
+                  << " lnSpread=" << sSpread
+                  << " lnOk=" << (lnOk ? 1 : 0)
+                  << " lnReason=" << sReason
+                  << " gateMmOldFail=" << mGateMmOldFail
+                  << " gateTrkRefOldFail=" << mGateTrkRefOldFail
+                  << " state=" << mState << std::endl;
+    }
+
     if (GetLineRescueEnabled() && !old_ok)
     {
         final_ok = HasReliableLineSupport(reason);

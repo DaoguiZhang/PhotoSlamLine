@@ -23,7 +23,7 @@ RUN_IDX="${5:-0}"
 
 case "${SCENE}" in near|far) ;; *) echo "bad scene '${SCENE}'" >&2; exit 2 ;; esac
 case "${MODE}"  in mono|rgbd) ;; *) echo "bad mode '${MODE}'" >&2; exit 2 ;; esac
-case "${COND}"  in A|B|C) ;; *) echo "bad condition '${COND}'" >&2; exit 2 ;; esac
+case "${COND}"  in A|B|C|P) ;; *) echo "bad condition '${COND}'" >&2; exit 2 ;; esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -49,6 +49,10 @@ done
 
 case "${COND}" in
     A) export PHOTO_SLAM_LINE_MODE=0; export PHOTO_SLAM_LINE_RESCUE=0 ;;
+    P) # A-prime: SAME entry point and SAME state machine as B/C (the line
+       # pipeline), lines detected/matched and MapLines built, but NO line edges
+       # in PoseOptimization (Optimizer.cc:2620) nor in Local BA (5674).
+       export PHOTO_SLAM_LINE_MODE=1; export PHOTO_SLAM_LINE_RESCUE=0 ;;
     B) export PHOTO_SLAM_LINE_MODE=2; export PHOTO_SLAM_LINE_RESCUE=0 ;;
     C) export PHOTO_SLAM_LINE_MODE=2; export PHOTO_SLAM_LINE_RESCUE=1 ;;
 esac
@@ -56,6 +60,7 @@ esac
 # All diagnostics on; SLAM-only so no image-quality metric is produced.
 export PHOTO_SLAM_DEBUG_LINE_GATE=1
 export PHOTO_SLAM_DEBUG_LINE_RESCUE=1
+export PHOTO_SLAM_DEBUG_LINE_SCAN=1
 export PHOTO_SLAM_DEBUG_LINE_EDGES=1
 export PHOTO_SLAM_SLAM_ONLY=1
 
@@ -72,6 +77,10 @@ LOG="${OUTDIR}/log.txt"
     echo "gauss_cfg=${GAUSS_CFG}"
     echo "sequence=${SEQ}"
     echo "association=${ASSO}"
+    if [ "${PHOTO_SLAM_STRESS_DROP_POINT_RATIO:-0}" != "0" ]; then
+        echo "stress_drop_point_ratio=${PHOTO_SLAM_STRESS_DROP_POINT_RATIO}"
+        echo "stress_start_frame=${PHOTO_SLAM_STRESS_START_FRAME:-0}"
+    fi
 } > "${OUTDIR}/run.meta"
 
 START=$(date +%s)

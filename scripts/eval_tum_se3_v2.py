@@ -47,6 +47,7 @@ Usage:
         [--rpe-deltas 1,10,30]
 """
 import sys
+import os
 import json
 import math
 import numpy as np
@@ -174,6 +175,7 @@ def main():
     mode = "se3"
     tmin = None
     tmax = None
+    only_ts = None
     rpe_deltas = [1, 10, 30]
     pos = []
     i = 0
@@ -189,6 +191,8 @@ def main():
             tmin = float(argv[i + 1]); i += 2; continue
         if a == "--tmax":
             tmax = float(argv[i + 1]); i += 2; continue
+        if a == "--only-ts":
+            only_ts = argv[i + 1]; i += 2; continue
         if a == "--rpe-deltas":
             rpe_deltas = [int(x) for x in argv[i + 1].split(",")]; i += 2; continue
         pos.append(a); i += 1
@@ -210,6 +214,16 @@ def main():
         keep = (ts_est >= lo) & (ts_est <= hi)
         ts_est, T_est = ts_est[keep], T_est[keep]
 
+    # Restrict to an explicit set of common frame timestamps (one per line). This
+    # is how runs with different coverage are compared on the SAME frame IDs
+    # rather than merely the same time span.
+    if only_ts is not None and os.path.exists(only_ts) and os.path.getsize(only_ts) > 0:
+        allow = np.atleast_1d(np.loadtxt(only_ts))
+        if allow.size:
+            keep = np.array([float(np.min(np.abs(allow - t))) <= max_dt
+                             for t in ts_est])
+            ts_est, T_est = ts_est[keep], T_est[keep]
+
     res = {
         "gt_path": gt_path,
         "est_path": est_path,
@@ -218,6 +232,7 @@ def main():
         "max_dt": max_dt,
         "tmin": tmin,
         "tmax": tmax,
+        "only_ts": only_ts,
         "gt_lines": int(len(ts_gt)),
         "gt_uniq_ts": int(len(np.unique(ts_gt))),
         "est_lines": int(len(ts_est)),

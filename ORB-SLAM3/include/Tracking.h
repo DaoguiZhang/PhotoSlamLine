@@ -379,6 +379,12 @@ protected:
     // rejected as under-constrained, plus a point floor, an inlier ratio and a
     // depth-normalised motion cap. Never Npoint+2*Nline, never line-count alone.
     bool HasReliableLineSupport(int& reason);
+    // Line-only evidence on the CURRENT frame (unique reliable MapLines, the
+    // number of line edges they came from, and their directional spread in
+    // degrees). Does NOT apply the point floor or the motion cap, and does not
+    // touch any member, so it can be called from the diagnostic scan as well.
+    // Returns true iff the line-only criteria (count / spread / ratio) hold.
+    bool LineSupportEvidence(int& nUniq, int& nEdges, float& spread, int& reason);
     // Central decision used by every gate: returns `old_ok` unchanged when the
     // rescue is disabled, so the default path is identical to the original.
     bool ApplyLineRescue(const char* stage_tag, bool old_ok);

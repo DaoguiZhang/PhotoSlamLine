@@ -35,7 +35,7 @@ PROJ = os.path.dirname(ROOT_DIR)
 DATASETS = "/workspace/code/SEGS-SLAM/datasets/tum"
 EVAL = os.path.join(ROOT_DIR, "eval_tum_se3_v2.py")
 
-RUN_RX = re.compile(r"^(near|far)_(rgbd|mono)_([ABC])$")
+RUN_RX = re.compile(r"^(near|far)_(rgbd|mono)_([ABCP])$")
 RX_EDGE = re.compile(r"\[LineEdgeDiag\] PO frame=(\d+) NL=(\d+) lnTrackedNonNull=(\d+)"
                      r" ptEdges=(\d+) ptIn=(\d+) ptOut=(\d+) ptChi2=(\S+)"
                      r" lnEdges=(\d+) lnEdgesMono=(\d+) lnEdgesStereo=(\d+)"
@@ -272,7 +272,7 @@ def main():
           f"{'lost':<6}{'wall':<6}")
     print("=" * 104)
     for scene, mode in groups:
-        for cond in "ABC":
+        for cond in "ABCP":
             sub = [r for r in rows if r["scene"] == scene and r["mode"] == mode
                    and r["cond"] == cond]
             if not sub:

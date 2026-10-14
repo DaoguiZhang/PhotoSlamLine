@@ -1780,11 +1780,18 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     {
     unique_lock<mutex> lock(MapPoint::mGlobalMutex);
 
+    int nPtSeenStress = 0;
     for(int i=0; i<N; i++)
     {
         MapPoint* pMP = pFrame->mvpMapPoints[i];
         if(pMP)
         {
+            // SEPARATELY-LABELLED STRESS TEST (default off, PHOTO_SLAM_STRESS_*).
+            if (StressDropPoint(pFrame->mnId, nPtSeenStress++))
+            {
+                pFrame->mvbOutlier[i] = true;
+                continue;
+            }
             //Conventional SLAM
             if(!pFrame->mpCamera2){
                 // Monocular observation
@@ -2494,10 +2501,21 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         unique_lock<mutex> lock(MapPoint::mGlobalMutex);
 
         // === existing MapPoints edges (unchanged) ===
+        int nPtSeenStress = 0;
         for (int i = 0; i < N; i++)
         {
             MapPoint* pMP = pFrame->mvpMapPoints[i];
             if (!pMP) continue;
+
+            // SEPARATELY-LABELLED STRESS TEST (default off, PHOTO_SLAM_STRESS_*).
+            // Drops a fixed fraction of POINT observations from this pose
+            // optimization so the point-only verdict can fail; line observations
+            // are untouched and the rule is identical in every condition.
+            if (StressDropPoint(pFrame->mnId, nPtSeenStress++))
+            {
+                pFrame->mvbOutlier[i] = true;
+                continue;
+            }
 
             // --- same logic as original (points) ---
             if (!pFrame->mpCamera2) {

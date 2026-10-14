@@ -120,6 +120,66 @@ inline bool IsLineGateDiag()
     return v;
 }
 
+// Rescue-opportunity scan (PHOTO_SLAM_DEBUG_LINE_SCAN=1). Emits one [LineScan]
+// line per decision point that evaluates the LINE evidence on the current frame
+// UNCONDITIONALLY -- i.e. whether or not the point-only gate failed, and with
+// the rescue itself switched off. This is what lets us count natural rescue
+// opportunities on a sequence without enabling, or biasing, the rescue.
+// Relay point floor / diagnostics are above. Below: the STRESS-TEST instrument.
+inline bool IsLineScanDiag()
+{
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_LINE_SCAN");
+        return e != nullptr && std::atoi(e) != 0;
+    }();
+    return v;
+}
+
+// ---------------------------------------------------------------------------
+// SEPARATELY-LABELLED STRESS TEST (default OFF, never used in normal runs).
+//
+// Purpose: the natural sequences never make the point-only gate fail, so the
+// rescue can only be exercised by inducing that failure. This instrument drops
+// a FIXED fraction of POINT observations from pose optimization, starting from
+// a FIXED frame index (so initialization is untouched and the rule is identical
+// in every condition). Line observations are never modified.
+//
+//   PHOTO_SLAM_STRESS_DROP_POINT_RATIO  fraction in [0,1); 0 = off (default)
+//   PHOTO_SLAM_STRESS_START_FRAME       first frame id the drop applies to
+//
+// Results obtained with this enabled must always be reported separately from
+// natural-sequence results.
+// ---------------------------------------------------------------------------
+inline float GetStressDropPointRatio()
+{
+    static const float v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_STRESS_DROP_POINT_RATIO");
+        return e ? (float)std::atof(e) : 0.0f;
+    }();
+    return v;
+}
+inline int GetStressStartFrame()
+{
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_STRESS_START_FRAME");
+        return e ? std::atoi(e) : 0;
+    }();
+    return v;
+}
+// Deterministic selector: drop the i-th point of every k-th matched point.
+inline bool StressDropPoint(int frameId, int matchedIndex)
+{
+    const float frac = GetStressDropPointRatio();
+    if (frac <= 0.0f || frac >= 1.0f)
+        return false;
+    if (frameId < GetStressStartFrame())
+        return false;
+    int k = (int)(1.0f / frac + 0.5f);
+    if (k < 1)
+        k = 1;
+    return (matchedIndex % k) == 0;
+}
+
 // Independent toggles for line edges in the two SLAM optimizers (used for the
 // B/P/L/C ablation). They only take effect when PHOTO_SLAM_LINE_MODE >= 2
 // (i.e., the line frontend is active). Default is enabled to preserve the

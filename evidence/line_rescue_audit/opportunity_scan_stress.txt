@@ -1,0 +1,94 @@
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_stress/r1/near_rgbd_B/log.txt
+====================================================================================
+  decisions: 498   frames: 497
+  stages    : {'TrackReferenceKeyFrame': 469, 'MotionModel': 29}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 469
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 3
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=3 p90=5 max=10   lnOk=1 in 3 decisions
+    lnEdges  min=0 p50=3 max=10
+    lnSpread min=0.0 p50=76.2 p90=102.4 max=118.4 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {1: 466, 0: 3}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+  OPPORTUNITY FRAMES (oldPtVerdict=FAIL and lnOk=1):
+    frame=595    stage=TrackReferenceKeyFrame ptBefore=481    ptAfter=0     uniq=8    edges=8    spread=94.1
+    frame=599    stage=TrackReferenceKeyFrame ptBefore=364    ptAfter=0     uniq=8    edges=8    spread=96.1
+    frame=631    stage=TrackReferenceKeyFrame ptBefore=455    ptAfter=0     uniq=10   edges=10   spread=97.5
+
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_stress/r1/desk_3_rgbd_B/log.txt
+====================================================================================
+  decisions: 980   frames: 979
+  stages    : {'TrackReferenceKeyFrame': 951, 'MotionModel': 29}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 951
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 780
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=16 p90=36 max=77   lnOk=1 in 795 decisions
+    lnEdges  min=0 p50=16 max=77
+    lnSpread min=0.0 p50=115.5 p90=146.8 max=167.8 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {1: 165, 0: 780, 2: 6}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+  OPPORTUNITY FRAMES (oldPtVerdict=FAIL and lnOk=1):
+    frame=32     stage=TrackReferenceKeyFrame ptBefore=275    ptAfter=0     uniq=29   edges=29   spread=142.2
+    frame=34     stage=TrackReferenceKeyFrame ptBefore=286    ptAfter=0     uniq=33   edges=33   spread=142.7
+    frame=36     stage=TrackReferenceKeyFrame ptBefore=282    ptAfter=0     uniq=21   edges=21   spread=142.3
+    frame=38     stage=TrackReferenceKeyFrame ptBefore=356    ptAfter=0     uniq=22   edges=22   spread=132.5
+    frame=40     stage=TrackReferenceKeyFrame ptBefore=261    ptAfter=0     uniq=19   edges=19   spread=138.6
+    frame=42     stage=TrackReferenceKeyFrame ptBefore=269    ptAfter=0     uniq=13   edges=13   spread=122.6
+    frame=44     stage=TrackReferenceKeyFrame ptBefore=223    ptAfter=0     uniq=15   edges=15   spread=118.7
+    frame=46     stage=TrackReferenceKeyFrame ptBefore=224    ptAfter=0     uniq=13   edges=13   spread=138.9
+    frame=48     stage=TrackReferenceKeyFrame ptBefore=247    ptAfter=0     uniq=18   edges=18   spread=103.2
+    frame=50     stage=TrackReferenceKeyFrame ptBefore=254    ptAfter=0     uniq=26   edges=26   spread=70.5
+    frame=52     stage=TrackReferenceKeyFrame ptBefore=265    ptAfter=0     uniq=28   edges=28   spread=107.1
+    frame=54     stage=TrackReferenceKeyFrame ptBefore=286    ptAfter=0     uniq=28   edges=28   spread=109.0
+    frame=56     stage=TrackReferenceKeyFrame ptBefore=255    ptAfter=0     uniq=34   edges=34   spread=112.7
+    frame=58     stage=TrackReferenceKeyFrame ptBefore=245    ptAfter=0     uniq=42   edges=42   spread=100.9
+    frame=60     stage=TrackReferenceKeyFrame ptBefore=273    ptAfter=0     uniq=24   edges=24   spread=103.7
+    frame=62     stage=TrackReferenceKeyFrame ptBefore=232    ptAfter=0     uniq=49   edges=49   spread=118.4
+    frame=64     stage=TrackReferenceKeyFrame ptBefore=251    ptAfter=0     uniq=40   edges=40   spread=31.7
+    frame=66     stage=TrackReferenceKeyFrame ptBefore=234    ptAfter=0     uniq=42   edges=42   spread=30.7
+    frame=68     stage=TrackReferenceKeyFrame ptBefore=198    ptAfter=0     uniq=28   edges=28   spread=33.6
+    frame=70     stage=TrackReferenceKeyFrame ptBefore=256    ptAfter=0     uniq=30   edges=30   spread=38.2
+    frame=72     stage=TrackReferenceKeyFrame ptBefore=246    ptAfter=0     uniq=27   edges=27   spread=38.1
+    frame=74     stage=TrackReferenceKeyFrame ptBefore=228    ptAfter=0     uniq=39   edges=39   spread=40.3
+    frame=76     stage=TrackReferenceKeyFrame ptBefore=269    ptAfter=0     uniq=30   edges=30   spread=59.5
+    frame=78     stage=TrackReferenceKeyFrame ptBefore=288    ptAfter=0     uniq=25   edges=25   spread=58.4
+    frame=80     stage=TrackReferenceKeyFrame ptBefore=289    ptAfter=0     uniq=24   edges=24   spread=40.2
+    frame=82     stage=TrackReferenceKeyFrame ptBefore=215    ptAfter=0     uniq=10   edges=10   spread=99.0
+    frame=84     stage=TrackReferenceKeyFrame ptBefore=173    ptAfter=0     uniq=10   edges=10   spread=98.8
+    frame=86     stage=TrackReferenceKeyFrame ptBefore=222    ptAfter=0     uniq=20   edges=20   spread=102.2
+    frame=88     stage=TrackReferenceKeyFrame ptBefore=172    ptAfter=0     uniq=12   edges=12   spread=102.0
+    frame=94     stage=TrackReferenceKeyFrame ptBefore=127    ptAfter=0     uniq=12   edges=12   spread=64.1
+    frame=96     stage=TrackReferenceKeyFrame ptBefore=86     ptAfter=0     uniq=14   edges=14   spread=79.8
+    frame=98     stage=TrackReferenceKeyFrame ptBefore=51     ptAfter=0     uniq=10   edges=10   spread=64.0
+    frame=102    stage=TrackReferenceKeyFrame ptBefore=76     ptAfter=0     uniq=12   edges=12   spread=129.9
+    frame=108    stage=TrackReferenceKeyFrame ptBefore=119    ptAfter=0     uniq=14   edges=14   spread=129.0
+    frame=110    stage=TrackReferenceKeyFrame ptBefore=107    ptAfter=0     uniq=14   edges=14   spread=106.1
+    frame=112    stage=TrackReferenceKeyFrame ptBefore=95     ptAfter=0     uniq=9    edges=9    spread=114.0
+    frame=120    stage=TrackReferenceKeyFrame ptBefore=133    ptAfter=0     uniq=16   edges=16   spread=107.8
+    frame=122    stage=TrackReferenceKeyFrame ptBefore=149    ptAfter=0     uniq=18   edges=18   spread=135.0
+    frame=124    stage=TrackReferenceKeyFrame ptBefore=144    ptAfter=0     uniq=13   edges=13   spread=118.6
+    frame=126    stage=TrackReferenceKeyFrame ptBefore=113    ptAfter=0     uniq=11   edges=11   spread=90.5
+    ... and 740 more
+
