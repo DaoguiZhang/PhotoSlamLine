@@ -19,12 +19,32 @@ Correct procedure (this script)
    interpolate GT at that timestamp (linear on translation, slerp on rotation)
    or take the nearest GT sample; one estimate frame => at most one error.
 3. Report the true pair count (<= number of estimate frames), the time-residual
-   distribution, SE(3) ATE RMSE (Umeyama, scale fixed to 1), per-frame error
-   mean/std, and RPE for several delta steps.
+   distribution, the ATE translation RMSE, the per-frame translation sigma, and
+   the RPE (relative pose error) for several delta steps.
+
+Alignment / mode
+    --mode se3  (default, for RGB-D / stereo): rigid Umeyama, scale fixed to 1.
+    --mode sim3 (for Monocular)              : Umeyama with scale (Sim(3)).
+    The alignment is applied to the trajectory BEFORE the RPE is computed.
+
+RPE definition (this is the one used everywhere below)
+    For each estimate frame pair (k, k+d) that both have a GT association:
+        dt        = t[k+d] - t[k]                                 [s]
+        e_trans   = || (p_al[k+d]-p_al[k]) - (p_gt[k+d]-p_gt[k]) || [m]
+        dR_est    = R_est[k]^T R_est[k+d]
+        dR_gt     = R_gt[k]^T  R_gt[k+d]
+        e_rot     = angle( dR_gt^T dR_est )                        [deg]
+    where p_al is the ALIGNED estimate position. Using the raw, unaligned
+    estimate would contaminate the translation difference with the global
+    world-frame rotation and is therefore wrong. e_rot is invariant to the
+    global alignment (a common rotation cancels in dR).
+    Reported per delta: e_trans in metres AND in m/s (rms/mean/median/max/std),
+    and e_rot in degrees (rms/mean/median/max).
 
 Usage:
     python3 scripts/eval_tum_se3_v2.py <gt.txt> <est.txt> [out_prefix]
-        [--max-dt 0.02] [--method interp|nearest] [--rpe-deltas 1,10,30]
+        [--max-dt 0.02] [--method interp|nearest] [--mode se3|sim3]
+        [--rpe-deltas 1,10,30]
 """
 import sys
 import json
@@ -119,19 +139,31 @@ def build_pairs(ts_est, ts_gt, max_dt, method):
             np.array(pairs_dt, dtype=np.float64), order, n_unmatched)
 
 
-def umeyama_rigid(src, dst):
+def umeyama(src, dst, with_scale=False):
+    """dst ~= s * R @ src + t.  s is fixed to 1 unless with_scale (Sim(3))."""
     mu_s = src.mean(axis=0)
     mu_d = dst.mean(axis=0)
     src_c = src - mu_s
     dst_c = dst - mu_d
     cov = dst_c.T @ src_c / len(src)
-    U, _, Vt = np.linalg.svd(cov)
+    U, D, Vt = np.linalg.svd(cov)
     S = np.eye(3)
     if np.linalg.det(U) * np.linalg.det(Vt) < 0:
         S[2, 2] = -1
     R = U @ S @ Vt
-    t = mu_d - R @ mu_s
-    return R, t
+    if with_scale:
+        var_s = float(np.sum(src_c ** 2) / len(src))
+        s = float(np.trace(np.diag(D) @ S) / var_s) if var_s > 0 else 1.0
+    else:
+        s = 1.0
+    t = mu_d - s * (R @ mu_s)
+    return R, t, s
+
+
+def rot_angle_deg(Rm):
+    """Rotation angle of a 3x3 rotation matrix, in degrees."""
+    c = (float(np.trace(Rm)) - 1.0) / 2.0
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
 
 # ------------------------------------------------------------------- main ---
@@ -139,6 +171,9 @@ def main():
     argv = [a for a in sys.argv[1:]]
     max_dt = 0.02
     method = "interp"
+    mode = "se3"
+    tmin = None
+    tmax = None
     rpe_deltas = [1, 10, 30]
     pos = []
     i = 0
@@ -148,6 +183,12 @@ def main():
             max_dt = float(argv[i + 1]); i += 2; continue
         if a == "--method":
             method = argv[i + 1]; i += 2; continue
+        if a == "--mode":
+            mode = argv[i + 1]; i += 2; continue
+        if a == "--tmin":
+            tmin = float(argv[i + 1]); i += 2; continue
+        if a == "--tmax":
+            tmax = float(argv[i + 1]); i += 2; continue
         if a == "--rpe-deltas":
             rpe_deltas = [int(x) for x in argv[i + 1].split(",")]; i += 2; continue
         pos.append(a); i += 1
@@ -160,11 +201,23 @@ def main():
     ts_gt, T_gt = load_tum(gt_path)
     ts_est, T_est = load_tum(est_path)
 
+    # Optional common-window restriction: only estimate frames inside [tmin,tmax]
+    # are evaluated. Used to compare runs whose coverage differs, so that the
+    # reported ATE/RPE refer to the SAME time span in every condition.
+    if tmin is not None or tmax is not None:
+        lo = -np.inf if tmin is None else tmin
+        hi = np.inf if tmax is None else tmax
+        keep = (ts_est >= lo) & (ts_est <= hi)
+        ts_est, T_est = ts_est[keep], T_est[keep]
+
     res = {
         "gt_path": gt_path,
         "est_path": est_path,
         "method": method,
+        "mode": mode,
         "max_dt": max_dt,
+        "tmin": tmin,
+        "tmax": tmax,
         "gt_lines": int(len(ts_gt)),
         "gt_uniq_ts": int(len(np.unique(ts_gt))),
         "est_lines": int(len(ts_est)),
@@ -215,9 +268,10 @@ def main():
                         for a, b, ww in zip(i0, i1, w)])
 
     p_est = T_est[ie, 0:3]
-    R, t = umeyama_rigid(p_est, pos_gt)
-    p_al = (R @ p_est.T).T + t
+    R, t, s = umeyama(p_est, pos_gt, with_scale=(mode == "sim3"))
+    p_al = (s * (R @ p_est.T)).T + t
     err = np.linalg.norm(p_al - pos_gt, axis=1)
+    res["align_scale"] = float(s)
 
     res["time_residual"] = {
         "mean": float(dt_res.mean()),
@@ -238,14 +292,15 @@ def main():
         (p_al - pos_gt) - (p_al - pos_gt).mean(axis=0), axis=1).std(ddof=1)) \
         if len(err) > 1 else 0.0
 
-    # ---- RPE ------------------------------------------------------------
+    # ---- RPE (relative pose error), computed on the ALIGNED trajectory ----
+    R_gt_m = np.array([quat_to_R(*q) for q in quat_gt])
+    R_est_m = np.array([quat_to_R(*T_est[ie[k], 3:7]) for k in range(n_pairs)])
     rpe = {}
     for d in rpe_deltas:
         if d <= 0 or n_pairs <= d:
             continue
-        # pairs are in estimate order; require consecutive accepted indices
-        e_t, e_gt, e_est = [], [], []
         idx = {int(v): k for k, v in enumerate(ie)}
+        e_t, e_r, dts = [], [], []
         for k in range(len(ie)):
             if ie[k] + d > ie[-1]:
                 continue
@@ -255,20 +310,29 @@ def main():
             dt = ts_est[ie[k2]] - ts_est[ie[k]]
             if dt <= 0:
                 continue
-            d_est = p_est[k2] - p_est[k]
+            d_est = p_al[k2] - p_al[k]
             d_gt = pos_gt[k2] - pos_gt[k]
-            e_t.append(np.linalg.norm(d_est - d_gt) / dt)
-            e_gt.append(d_gt / dt)
-            e_est.append(d_est / dt)
+            e_t.append(np.linalg.norm(d_est - d_gt))
+            dR_est = R_est_m[k].T @ R_est_m[k2]
+            dR_gt = R_gt_m[k].T @ R_gt_m[k2]
+            e_r.append(rot_angle_deg(dR_gt.T @ dR_est))
+            dts.append(dt)
         if not e_t:
             continue
-        e_t = np.array(e_t)
+        e_t = np.array(e_t); e_r = np.array(e_r); dts = np.array(dts)
         rpe[d] = {
             "n": int(len(e_t)),
-            "trans_drift_rms_m_per_s": float(np.sqrt(np.mean(e_t ** 2))),
-            "trans_drift_mean_m_per_s": float(e_t.mean()),
-            "trans_drift_std_m_per_s": float(e_t.std(ddof=1)) if len(e_t) > 1 else 0.0,
-            "trans_drift_max_m_per_s": float(e_t.max()),
+            "dt_mean_s": float(dts.mean()),
+            "trans_rms_m": float(np.sqrt(np.mean(e_t ** 2))),
+            "trans_mean_m": float(e_t.mean()),
+            "trans_median_m": float(np.median(e_t)),
+            "trans_std_m": float(e_t.std(ddof=1)) if len(e_t) > 1 else 0.0,
+            "trans_max_m": float(e_t.max()),
+            "trans_rms_m_per_s": float(np.sqrt(np.mean(e_t ** 2)) / dts.mean()),
+            "rot_rms_deg": float(np.sqrt(np.mean(e_r ** 2))),
+            "rot_mean_deg": float(e_r.mean()),
+            "rot_median_deg": float(np.median(e_r)),
+            "rot_max_deg": float(e_r.max()),
         }
     res["rpe"] = rpe
     res["status"] = "OK"
@@ -286,16 +350,19 @@ def main():
             json.dump(res, f, indent=2)
 
     a = res["ate_se3"]
-    print(f"[ATE v2/{method}] pairs={n_pairs}/{len(ts_est)} "
+    print(f"[ATE v2/{mode}/{method}] pairs={n_pairs}/{len(ts_est)} "
           f"(unmatched={n_unmatched})  dt med={res['time_residual']['median']:.4f}s "
-          f"max={res['time_residual']['max']:.4f}s")
+          f"max={res['time_residual']['max']:.4f}s  align_scale={res['align_scale']:.6f}")
     print(f"[ATE v2] rmse={a['rmse']:.6f} mean={a['mean']:.6f} "
           f"median={a['median']:.6f} std={a['std']:.6f} max={a['max']:.6f} "
           f"p95={a['p95']:.6f} m")
     for d, v in rpe.items():
-        print(f"[RPE v2] d={d} n={v['n']} drift_rms={v['trans_drift_rms_m_per_s']:.6f} "
-              f"m/s mean={v['trans_drift_mean_m_per_s']:.6f} "
-              f"std={v['trans_drift_std_m_per_s']:.6f}")
+        print(f"[RPE v2] d={d} n={v['n']} dt={v['dt_mean_s']:.4f}s "
+              f"trans_rms={v['trans_rms_m']:.6f} m "
+              f"({v['trans_rms_m_per_s']:.4f} m/s) "
+              f"trans_mean={v['trans_mean_m']:.6f} m "
+              f"rot_rms={v['rot_rms_deg']:.4f} deg "
+              f"rot_mean={v['rot_mean_deg']:.4f} deg")
     return 0
 
 
