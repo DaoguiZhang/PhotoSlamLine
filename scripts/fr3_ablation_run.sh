@@ -84,15 +84,28 @@ LOG="${OUTDIR}/log.txt"
 } > "${OUTDIR}/run.meta"
 
 START=$(date +%s)
+# Bounded per-run wall clock + explicit completeness, so a stuck or crashed run
+# can never be aggregated into metrics (see README/SUMMARY for the merge livelock).
 if [ "${MODE}" = "mono" ]; then
-    "${BIN}" "${VOCAB}" "${ORB_CFG}" "${GAUSS_CFG}" "${SEQ}" "${OUTDIR}" no_viewer \
+    timeout --signal=TERM --kill-after=60 "${RUN_TIMEOUT:-1800}" \
+        "${BIN}" "${VOCAB}" "${ORB_CFG}" "${GAUSS_CFG}" "${SEQ}" "${OUTDIR}" no_viewer \
         > "${LOG}" 2>&1
 else
-    "${BIN}" "${VOCAB}" "${ORB_CFG}" "${GAUSS_CFG}" "${SEQ}" "${ASSO}" "${OUTDIR}" no_viewer \
+    timeout --signal=TERM --kill-after=60 "${RUN_TIMEOUT:-1800}" \
+        "${BIN}" "${VOCAB}" "${ORB_CFG}" "${GAUSS_CFG}" "${SEQ}" "${ASSO}" "${OUTDIR}" no_viewer \
         > "${LOG}" 2>&1
 fi
 RC=$?
 END=$(date +%s)
-echo "exit=${RC}"      >> "${OUTDIR}/run.meta"
-echo "wall_s=$((END-START))" >> "${OUTDIR}/run.meta"
+LAST_FRAME=$(grep -oE 'frame=[0-9]+' "${LOG}" 2>/dev/null | sed 's/frame=//' | sort -n | tail -1)
+SAVED=$(grep -c "Saving keyframe trajectory" "${LOG}" 2>/dev/null)
+if [ "${RC}" = "0" ] && [ "${SAVED:-0}" -ge 1 ]; then COMPLETE=1; else COMPLETE=0; fi
+{
+    echo "exit=${RC}"
+    echo "wall_s=$((END-START))"
+    echo "last_frame=${LAST_FRAME:-0}"
+    echo "saved_keyframe_trajectory=${SAVED:-0}"
+    echo "timeout_s=${RUN_TIMEOUT:-1800}"
+    echo "complete=${COMPLETE}"
+} >> "${OUTDIR}/run.meta"
 exit ${RC}

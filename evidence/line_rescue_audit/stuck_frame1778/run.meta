@@ -1,0 +1,14 @@
+scene=desk_3
+mode=rgbd
+cond=C
+run_idx=1
+line_mode=2
+rescue=1
+orb_cfg=/workspace/code/Photo-SLAM-L/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml
+gauss_cfg=/workspace/code/Photo-SLAM-L/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_desk_3.yaml
+sequence=/workspace/code/Photo-SLAM/datasets/eth3d/desk_3
+association=/workspace/code/Photo-SLAM/datasets/eth3d/desk_3/associated.txt
+stress_drop_point_ratio=0.3
+stress_start_frame=30
+exit=143
+wall_s=4869

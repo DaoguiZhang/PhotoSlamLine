@@ -70,12 +70,24 @@ mkdir -p "${OUTDIR}"
 } > "${OUTDIR}/run.meta"
 
 START=$(date +%s)
-"${ROOT}/bin/eth3d_rgbd" "${VOCAB}" "${ORB_CFG}" "${GAUSS_CFG}" \
+# Bounded per-run wall clock. A stuck run (e.g. the line-aware map-merge path can
+# livelock or segfault) is killed instead of burning hours, and is then marked
+# INCOMPLETE so it can never be aggregated into metrics.
+timeout --signal=TERM --kill-after=60 "${RUN_TIMEOUT:-1800}" \
+    "${ROOT}/bin/eth3d_rgbd" "${VOCAB}" "${ORB_CFG}" "${GAUSS_CFG}" \
     "${DATA}" "${ASSO}" "${OUTDIR}" no_viewer > "${OUTDIR}/log.txt" 2>&1
 RC=$?
 END=$(date +%s)
+LAST_FRAME=$(grep -oE 'frame=[0-9]+' "${OUTDIR}/log.txt" 2>/dev/null | sed 's/frame=//' | sort -n | tail -1)
+SAVED=$(grep -c "Saving keyframe trajectory" "${OUTDIR}/log.txt" 2>/dev/null)
+# complete: clean exit AND the trajectory was actually written at shutdown.
+if [ "${RC}" = "0" ] && [ "${SAVED:-0}" -ge 1 ]; then COMPLETE=1; else COMPLETE=0; fi
 {
     echo "exit=${RC}"
     echo "wall_s=$((END-START))"
+    echo "last_frame=${LAST_FRAME:-0}"
+    echo "saved_keyframe_trajectory=${SAVED:-0}"
+    echo "timeout_s=${RUN_TIMEOUT:-1800}"
+    echo "complete=${COMPLETE}"
 } >> "${OUTDIR}/run.meta"
 exit ${RC}

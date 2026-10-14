@@ -192,6 +192,9 @@ def main():
 
         row = dict(scene=scene, mode=mode, cond=cond, run=run_idx,
                    exit=meta.get("exit", ""), wall_s=meta.get("wall_s", ""),
+                   complete=meta.get("complete", ""),
+                   last_frame=meta.get("last_frame", ""),
+                   timeout_s=meta.get("timeout_s", ""),
                    fed=cov["fed"], traj_frames=cov["traj_n"],
                    coverage=round(cov["coverage"], 4),
                    longest_seg=cov["longest"],
@@ -233,6 +236,7 @@ def main():
         return 1
 
     fields = ["scene", "mode", "cond", "run", "exit", "wall_s",
+              "complete", "last_frame", "timeout_s",
               "pairs", "unmatched", "align_scale", "ate_rmse", "ate_mean",
               "ate_median", "ate_sigma", "ate_max",
               "rpe1_trans_m", "rpe1_trans_ms", "rpe1_rot_deg",
@@ -277,6 +281,25 @@ def main():
                    and r["cond"] == cond]
             if not sub:
                 continue
+            # A group is only usable if it finished cleanly AND wrote its
+            # trajectory. Timed-out / crashed groups stay in the CSV flagged with
+            # complete=0 but never contribute to the numeric aggregates.
+            n_tot = len(sub)
+            # A group is usable only if it finished cleanly AND wrote its
+            # trajectory. Runs flagged complete=0, or (legacy runs without the
+            # flag) with a non-zero/absent exit code, are kept in the CSV but
+            # never contribute to the numeric aggregates.
+            def _usable(r):
+                if r.get("complete", "") == "0":
+                    return False
+                if r.get("complete", "") == "" and str(r.get("exit", "")) not in ("0",):
+                    return False
+                return True
+            sub = [r for r in sub if _usable(r)]
+            if not sub:
+                print(f"{scene:<6}{mode:<6}{cond:<5}{'0/' + str(n_tot):<10}"
+                      f"ALL INCOMPLETE (excluded)")
+                continue
             ate = [r["ate_rmse"] for r in sub if isinstance(r["ate_rmse"], float)]
             cov = [r["coverage"] for r in sub if isinstance(r["coverage"], float)]
             kf = [r["kf"] for r in sub if isinstance(r["kf"], int)]
@@ -295,7 +318,8 @@ def main():
                   f"{(int(st.mean(le)) if le else 0):<9}"
                   f"{sum(resc):<6}{sum(gf):<9}"
                   f"{(int(st.mean(nl)) if nl else 0):<6}"
-                  f"{(st.mean(wl) if wl else 0):<6.0f}")
+                  f"{(st.mean(wl) if wl else 0):<6.0f}"
+                  + (f"  INCOMPLETE={n_tot - len(sub)}" if n_tot != len(sub) else ""))
     print()
     print("CSV:", all_csv)
     for scene, mode in groups:
