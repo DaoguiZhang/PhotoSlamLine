@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <string>
+#include <thread>
 
 namespace ORB_SLAM3
 {
@@ -133,6 +134,28 @@ inline bool IsLineScanDiag()
         return e != nullptr && std::atoi(e) != 0;
     }();
     return v;
+}
+
+// ---------------------------------------------------------------------------
+// Map-merge / essential-graph segmented diagnostics (PHOTO_SLAM_DEBUG_MERGE=1).
+// Default OFF. Emits [MergeDiag] records from MergeLocal2 / SearchAndFuseWithLine
+// / OptimizeEssentialGraphWithLine and the stop-wait loops, carrying the OS
+// thread id so a livelock can be attributed to a specific thread. Purely
+// observational: no behaviour change, no extra locking beyond what the code
+// already takes.
+// ---------------------------------------------------------------------------
+inline bool IsMergeDiag()
+{
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_DEBUG_MERGE");
+        return e != nullptr && std::atoi(e) != 0;
+    }();
+    return v;
+}
+
+inline unsigned long long MergeDiagTid()
+{
+    return (unsigned long long)std::hash<std::thread::id>{}(std::this_thread::get_id());
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,15 @@
+REPRODUCTION ATTEMPTS of desk_3 RGB-D drop30, condition B (LINE_MODE=2, rescue OFF)
+
+run  exit  last_frame  outcome
+1    139   1784        SIGSEGV (core dumped)
+2    (timeout 1800s)  1777   STALL -> killed by outer timeout, gdb 'run' never returned
+3    (timeout 420s)   1785   STALL -> interrupted with SIGINT, backtrace captured
+
+B is NOT deterministically SIGSEGV: the same merge condition yields either a
+SIGSEGV or a stall. C (rescue=1) stalled at 1778. Not asserted to be one root
+cause from the crash alone; the stall backtrace shows the lock involved.
+
+CORE DUMPS: not obtainable. /proc/sys/kernel/core_pattern is a pipe to apport
+and is on a read-only filesystem in this container; no cores were produced.
+gdb CAN run a child (only PTRACE_ATTACH is blocked), which is what produced
+the stall backtrace via: timeout -s INT 420 gdb --batch -ex run -ex bt ...
