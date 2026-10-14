@@ -2271,6 +2271,23 @@ void MapLine::SamplePointsAlongLinesWorld3D_old()
     }
 }
 
+// ---------------------------------------------------------------------------
+// Map-merge hardening.
+//
+// After a map merge the corrected endpoints can become non-finite, or the line
+// can become absurdly long when the Sim(3) correction is degenerate. The
+// resamplers derive their sample count from the line length, so an unvalidated
+// length makes them iterate up to INT_MAX times while their caller
+// (Optimizer::OptimizeEssentialGraphWithLine) holds Map::mMutexMapUpdate -- which
+// stalls Tracking at Tracking.cc:3055 waiting for the same mutex.
+//
+// A mapped line segment is a real physical structure, so a length beyond this
+// cannot be one; the bound is orders of magnitude above any plausible scene
+// extent (fr3 / ETH3D scenes span < 30 m). It is used ONLY to reject corrupt
+// post-merge geometry, never to bound legitimate resampling work.
+// ---------------------------------------------------------------------------
+static const float kMaxLineLengthM = 1000.0f;
+
 void MapLine::SamplePointsAlongLinesWorld3D(float sample_step /* e.g. 0.2f */)
 {
     mSampledPoints3D.clear();
@@ -2280,12 +2297,20 @@ void MapLine::SamplePointsAlongLinesWorld3D(float sample_step /* e.g. 0.2f */)
     Eigen::Vector3f P1 = mLineWorldPos.tail<3>();
 
     Eigen::Vector3f d = P1 - P0;
-    float length = d.norm();
+    // ---- geometry validity guard (see kMaxLineLengthM above) ----
+    if (!P0.allFinite() || !P1.allFinite()) return;
+    const double length_d = static_cast<double>(d.norm());
+    if (!std::isfinite(length_d)) return;
+    if (!(sample_step > 1e-6f) || !std::isfinite(static_cast<double>(sample_step))) return;
+    if (length_d > static_cast<double>(kMaxLineLengthM)) return;
+
+    const float length = static_cast<float>(length_d);
     if (length < 1e-6f) return;
 
     Eigen::Vector3f dir = d / length;
 
-    int num_samples = std::max(2, static_cast<int>(std::ceil(length / sample_step)));
+    const int num_samples = std::max(
+        2, static_cast<int>(std::ceil(length_d / static_cast<double>(sample_step))));
 
     for (int i = 0; i <= num_samples; ++i)
     {
@@ -2463,13 +2488,20 @@ void MapLine::SamplePointsAlongLine_MultiViewWeighted_Advanced(
     Eigen::Vector3f P1 = mLineWorldPos.tail<3>();
 
     Eigen::Vector3f d = P1 - P0;
-    float length = d.norm();
+    // ---- geometry validity guard (see kMaxLineLengthM) --------------------
+    if (!P0.allFinite() || !P1.allFinite()) return;
+    const double length_d = static_cast<double>(d.norm());
+    if (!std::isfinite(length_d)) return;
+    if (!(sample_step > 1e-6f) || !std::isfinite(static_cast<double>(sample_step))) return;
+    if (length_d > static_cast<double>(kMaxLineLengthM)) return;
+
+    const float length = static_cast<float>(length_d);
     if (length < 1e-6f) return;
 
     Eigen::Vector3f line_dir = d / length;
 
-    int num_samples = std::max(
-        2, static_cast<int>(std::ceil(length / sample_step)));
+    const int num_samples = std::max(
+        2, static_cast<int>(std::ceil(length_d / static_cast<double>(sample_step))));
 
     const auto& obs = GetLineObservations();
 
