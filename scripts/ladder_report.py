@@ -250,7 +250,14 @@ def main():
                 # Evaluate the DE-DUPLICATED trajectory. The raw file repeats the
                 # previous (timestamp, pose) once per unset frame, which would
                 # otherwise over-weight those instants in the association.
-                dedup_path = os.path.join(outdir, os.path.basename(d) + "_traj_dedup.txt")
+                #
+                # The artefact name must contain EVERY distinguishing key. The
+                # run-directory basename alone is not unique across stress
+                # levels (drop30/50/70/90 all contain e.g. desk_3_rgbd_B), so
+                # level-less names let later levels overwrite earlier ones in
+                # the same outdir. Prefix the level directory.
+                tag = os.path.basename(os.path.dirname(d)) + "_" + os.path.basename(d)
+                dedup_path = os.path.join(outdir, tag + "_traj_dedup.txt")
                 seen_w = set()
                 with open(traj_path) as fin, open(dedup_path, "w") as fout:
                     for line in fin:
@@ -265,7 +272,7 @@ def main():
                             continue
                         seen_w.add(k)
                         fout.write(" ".join(p) + "\n")
-                prefix = os.path.join(outdir, os.path.basename(d) + "_ate")
+                prefix = os.path.join(outdir, tag + "_ate")
                 subprocess.run([sys.executable, EVAL, gt, dedup_path,
                                 prefix, "--mode", "se3", "--rpe-deltas", "1"],
                                check=False, capture_output=True)

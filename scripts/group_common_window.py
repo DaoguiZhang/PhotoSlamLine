@@ -29,6 +29,19 @@ import subprocess
 import sys
 
 EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval_tum_se3_v2.py")
+
+
+def sha16(path):
+    """Short digest of every file the evaluation reads, so reuse is detectable."""
+    import hashlib
+    if not os.path.exists(path):
+        return "MISSING"
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for blk in iter(lambda: f.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()[:16]
+
 RX_SCAN = re.compile(r"\[LineScan\] stage=(\S+) map=(-?\d+) frame=(\d+)"
                      r" ptBeforePO=(\d+) lnBeforePO=(\d+) ptAfterPO=(\d+)")
 RX_RESCUE = re.compile(r"\[LineRescue\] stage=(\S+) map=(-?\d+) frame=(\d+)"
@@ -87,7 +100,9 @@ def main():
     runs = []
     for d in sorted(glob.glob(os.path.join(root, "drop*", "*"))):
         b = os.path.basename(d)
-        m = re.match(r"r(\d+)_desk_3_rgbd_([PBCA])$", b)
+        # The camera mode is part of the run identity, so mono and RGB-D rounds
+        # can never be aggregated into one another by accident.
+        m = re.match(r"r(\d+)_desk_3_(rgbd|mono)_([PBCA])$", b)
         lm = re.search(r"drop(\d+)", os.path.dirname(d))
         if not (m and lm):
             continue
@@ -101,7 +116,8 @@ def main():
         seq = meta.get("sequence", "")
         fed = fed_list(os.path.join(seq, "rgb.txt")) if seq else []
         runs.append(dict(dir=d, level=int(lm.group(1)), rep=int(m.group(1)),
-                         cond=m.group(2), meta=meta, seq=seq, fed=fed))
+                         mode=m.group(2), cond=m.group(3), meta=meta, seq=seq,
+                         fed=fed))
 
     if not runs:
         print("no runs found under", root)
@@ -110,7 +126,11 @@ def main():
     # ---------- per-run reconstruction -------------------------------------
     for r in runs:
         tpath = os.path.join(r["dir"], "CameraTrajectory_TUM.txt")
-        dedup = os.path.join(outdir, f"{os.path.basename(r['dir'])}_dedup.txt")
+        # The name MUST carry the level: rN_desk_3_rgbd_X exists in every dropNN
+        # directory, so a level-less name is overwritten by the later level and
+        # the earlier level is then evaluated on the wrong trajectory.
+        dedup = os.path.join(outdir,
+                             f"L{r['level']}_{os.path.basename(r['dir'])}_dedup.txt")
         r["traj_path"] = dedup
         r["traj"] = dedup_traj(tpath, dedup) if os.path.exists(tpath) else []
         r["fed"] = r["fed"] or []
@@ -215,6 +235,7 @@ def main():
               f"{'YES' if min(hits) == len(cts) else 'NO'} "
               f"(per-run hit min={min(hits)} max={max(hits)}, need {len(cts)})")
         gt = os.path.join(ok[0]["seq"], "groundtruth.txt")
+        print(f"  ground truth: {gt}  sha256 {sha16(gt)}")
         # Iterate to a frame set that every run ACTUALLY contains, using the
         # restricted files as the evidence: an in-memory containment check can
         # disagree with what the evaluator ends up seeing, and the files are what
@@ -258,7 +279,14 @@ def main():
             if r not in ok or not os.path.exists(gt):
                 r["ate"] = r["rpe1"] = None
                 continue
-            prefix = os.path.join(outdir, f"{os.path.basename(r['dir'])}_ate")
+            prefix = os.path.join(outdir,
+                                  f"L{lvl}_{os.path.basename(r['dir'])}_ate")
+            # Audit trail: the exact files this run's numbers come from, so reuse
+            # or an overwritten input is detectable from the report itself.
+            print(f"    L{lvl} {os.path.basename(r['dir'])}: "
+                  f"est={r['restrict_path']} sha256={sha16(r['restrict_path'])} | "
+                  f"gt={gt} sha256={sha16(gt)} | common={only_ts_path} "
+                  f"sha256={sha16(only_ts_path)}")
             subprocess.run([sys.executable, EVAL, gt, r["restrict_path"], prefix,
                             "--mode", "se3", "--rpe-deltas", "1,30"], check=False,
                            capture_output=True)
@@ -333,7 +361,7 @@ def main():
             continue
         # per-frame error ratios vs this run's own median, on its own alignment
         gt = os.path.join(r["seq"], "groundtruth.txt")
-        prefix = os.path.join(outdir, f"{os.path.basename(r['dir'])}_full")
+        prefix = os.path.join(outdir, f"L{r['level']}_{os.path.basename(r['dir'])}_full")
         med = None
         if os.path.exists(gt):
             subprocess.run([sys.executable, EVAL, gt, r["traj_path"], prefix,

@@ -22,6 +22,8 @@
 #include "Converter.h"
 #include <thread>
 #include <iomanip>
+#include <cstdlib>
+#include <fstream>
 #include <openssl/md5.h>
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/string.hpp>
@@ -247,6 +249,88 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     Verbose::SetTh(Verbose::VERBOSITY_QUIET);
 
 }
+
+namespace {
+
+// Optional ONLINE pose trace, used to compare the pose the estimator produced for
+// a frame with the pose the exporter later writes for that SAME frame.
+//
+// Disabled by default (PHOTO_SLAM_POSE_TRACE unset): the cost while disabled is a
+// single branch per frame. When enabled it appends one line per fed frame with the
+// timestamp, frame id, tracking state, whether the frame entered the trajectory
+// lists, how many entries those lists hold, the reference keyframe and its map,
+// the reference keyframe's parent, and the online Tcw. Roughly 15 numbers per
+// frame, so it can stay on for a whole run without perturbing the schedule.
+std::ofstream* gpPoseTrace = nullptr;
+int gPoseTraceState = -1;   // -1 = not probed yet, 0 = disabled, 1 = enabled
+
+void TraceOnlinePose(const Tracking* pTracker, const Sophus::SE3f& Tcw)
+{
+    if(gPoseTraceState < 0)
+    {
+        const char* strPath = std::getenv("PHOTO_SLAM_POSE_TRACE");
+        if(strPath)
+        {
+            std::ofstream* pOut = new std::ofstream(strPath);
+            if(pOut->is_open())
+            {
+                *pOut << std::fixed << std::setprecision(9);
+                *pOut << "# ts frame_id state is_set n_frame_entries refKF_id refKF_map"
+                         " parentKF_id Tcw(tx ty tz qx qy qz qw)"
+                         " Tcr(tx ty tz qx qy qz qw) refKFpose_now(tx ty tz qx qy qz qw)"
+                      << std::endl;
+                gpPoseTrace = pOut;
+                gPoseTraceState = 1;
+            }
+            else
+            {
+                delete pOut;
+                gPoseTraceState = 0;
+            }
+        }
+        else
+        {
+            gPoseTraceState = 0;
+        }
+    }
+    if(gPoseTraceState != 1 || !gpPoseTrace || !pTracker)
+        return;
+
+    const Frame& F = pTracker->mCurrentFrame;
+    KeyFrame* pRefKF = F.mpReferenceKF;
+    KeyFrame* pParentKF = pRefKF ? pRefKF->GetParent() : nullptr;
+    // KeyFrame::GetMap() may legitimately return NULL (Map::clear() sets it), so
+    // the pointer is only tested, and its id is read only when it is non-null.
+    Map* pRefMap = pRefKF ? pRefKF->GetMap() : nullptr;
+
+    const Eigen::Vector3f t = Tcw.translation();
+    const Eigen::Quaternionf q = Tcw.unit_quaternion();
+    // Tcr exactly as it entered the trajectory lists: the object stored for this
+    // frame is what the exporter will multiply by the keyframe pose, so reading it
+    // back avoids re-deriving it from a keyframe pose that may already have been
+    // updated by a concurrent optimization.
+    const Sophus::SE3f Tcr = (F.isSet() && !pTracker->mlRelativeFramePoses.empty())
+                             ? pTracker->mlRelativeFramePoses.back() : Sophus::SE3f();
+    const Sophus::SE3f TrefNow = pRefKF ? pRefKF->GetPose() : Sophus::SE3f();
+    const Eigen::Vector3f tcr = Tcr.translation();
+    const Eigen::Quaternionf qcr = Tcr.unit_quaternion();
+    const Eigen::Vector3f trf = TrefNow.translation();
+    const Eigen::Quaternionf qrf = TrefNow.unit_quaternion();
+    *gpPoseTrace << F.mTimeStamp << " " << F.mnId << " " << (int)pTracker->mState
+                 << " " << (F.isSet() ? 1 : 0) << " " << pTracker->mlFrameTimes.size()
+                 << " " << (pRefKF ? (long)pRefKF->mnId : -1)
+                 << " " << (pRefMap ? (long)pRefMap->GetId() : -1)
+                 << " " << (pParentKF ? (long)pParentKF->mnId : -1)
+                 << " " << t(0) << " " << t(1) << " " << t(2)
+                 << " " << q.x() << " " << q.y() << " " << q.z() << " " << q.w()
+                 << " " << tcr(0) << " " << tcr(1) << " " << tcr(2)
+                 << " " << qcr.x() << " " << qcr.y() << " " << qcr.z() << " " << qcr.w()
+                 << " " << trf(0) << " " << trf(1) << " " << trf(2)
+                 << " " << qrf.x() << " " << qrf.y() << " " << qrf.z() << " " << qrf.w()
+                 << std::endl;
+}
+
+} // namespace
 
 void System::SetLineFeatrues(bool check_line)
 {
@@ -564,6 +648,8 @@ Sophus::SE3f System::TrackRGBDWithLine(const cv::Mat &im, const cv::Mat &depthma
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
     mTrackedMapline = mpTracker->mCurrentFrame.mvpMapLines;
     mTrackedKeylineUn = mpTracker->mCurrentFrame.mvKeyLinesUn;
+    // Online pose trace (default off, see TraceOnlinePose).
+    TraceOnlinePose(mpTracker, Tcw);
     return Tcw;
 }
 
@@ -735,6 +821,8 @@ Sophus::SE3f System::TrackMonocularWithLine(const cv::Mat &im, const double &tim
         mTrackedKeylineUn = mpTracker->mCurrentFrame.mvKeyLinesUn;
     }
 
+    // Online pose trace (default off, see TraceOnlinePose).
+    TraceOnlinePose(mpTracker, Tcw);
     return Tcw;
 }
 
@@ -830,6 +918,65 @@ bool System::isShutDown() {
     return mbShutDown;
 }
 
+namespace {
+
+// A trajectory must be expressed in ONE world frame. After a tracking failure
+// the atlas can hold several populated maps, each with its own world frame.
+// Frame poses are stored relative to their reference keyframe, and that
+// keyframe belongs to whichever map was current when the frame was processed,
+// so:
+//   * pinning one origin taken from the CURRENT map while writing frames whose
+//     reference keyframes live in other maps silently mixes world frames (the
+//     exported trajectory then jumps metres between consecutive frames), and
+//   * using the current map as the existence test writes an EMPTY file when the
+//     current map happens to hold no keyframe (observed on monocular runs).
+// SaveTrajectoryEuRoC already avoided this by selecting the map with the most
+// keyframes and skipping frames whose reference keyframe is elsewhere. This
+// helper applies the same rule to every exporter and prints the census so the
+// selection is auditable from the log.
+//
+// It can also hand back a KeyFrame -> map id lookup. Callers must NOT obtain a
+// map id by dereferencing KeyFrame::GetMap(): that accessor returns mpMap, which
+// Map::clear() sets to NULL (Map.cc:271), so the dereference segfaults on any
+// keyframe whose map was cleared, and it additionally locks the keyframe's
+// mutex on every call.
+Map* SelectExportMap(Atlas* pAtlas, vector<KeyFrame*>& vpKFs, const char* tag,
+                     std::map<const KeyFrame*, unsigned long>* pkfMapId = nullptr)
+{
+    vpKFs.clear();
+    Map* pBest = nullptr;
+    size_t bestNumKFs = 0;
+
+    vector<Map*> vpMaps = pAtlas->GetAllMaps();
+    Map* pCurrent = pAtlas->GetCurrentMap();
+    cout << "[System] " << tag << ": atlas holds " << vpMaps.size() << " map(s)" << endl;
+    for(Map* pMap : vpMaps)
+    {
+        if(!pMap)
+            continue;
+        vector<KeyFrame*> vpKFsInMap = pMap->GetAllKeyFrames();
+        if(pkfMapId)
+            for(KeyFrame* pKF : vpKFsInMap)
+                if(pKF)
+                    (*pkfMapId)[pKF] = pMap->GetId();
+        const size_t numKFs = vpKFsInMap.size();
+        cout << "[System] " << tag << ":   map " << pMap->GetId() << " has " << numKFs
+             << " keyframe(s)" << (pMap == pCurrent ? "  [current]" : "") << endl;
+        if(numKFs > bestNumKFs)
+        {
+            bestNumKFs = numKFs;
+            pBest = pMap;
+        }
+    }
+
+    if(pBest)
+        vpKFs = pBest->GetAllKeyFrames();
+    sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
+    return pBest;
+}
+
+} // namespace
+
 void System::SaveTrajectoryTUM(const string &filename)
 {
     cout << endl << "Saving camera trajectory to " << filename << " ..." << endl;
@@ -839,8 +986,10 @@ void System::SaveTrajectoryTUM(const string &filename)
     //     return;
     // }
 
-    vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
-    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+    vector<KeyFrame*> vpKFs;
+    // KeyFrame -> map id, taken from the census (see SelectExportMap).
+    std::map<const KeyFrame*, unsigned long> kfMapId;
+    Map* pExportMap = SelectExportMap(mpAtlas, vpKFs, "SaveTrajectoryTUM", &kfMapId);
 
     // Empty-map guard: vpKFs[0] below is out of bounds if the run ended before
     // any keyframe was created (e.g. mono init failed). Write an empty file
@@ -869,24 +1018,87 @@ void System::SaveTrajectoryTUM(const string &filename)
     list<ORB_SLAM3::KeyFrame*>::iterator lRit = mpTracker->mlpReferences.begin();
     list<double>::iterator lT = mpTracker->mlFrameTimes.begin();
     list<bool>::iterator lbL = mpTracker->mlbLost.begin();
+    size_t nWritten = 0, nLost = 0, nOtherMap = 0, nNoRefKF = 0;
+    // Optional per-frame export diagnosis, off unless PHOTO_SLAM_EXPORT_DIAG is
+    // set to a file path. For every written frame it records which reference
+    // keyframe tracking had recorded, which live keyframe the culling walk ended
+    // on, and how many hops were needed. A frame-to-frame inconsistency can then
+    // be attributed either to the estimate itself or to this post-hoc
+    // reconstruction (relative pose x final keyframe pose, with re-parenting).
+    std::ofstream fDiag;
+    const char* strDiag = std::getenv("PHOTO_SLAM_EXPORT_DIAG");
+    if(strDiag)
+    {
+        fDiag.open(strDiag);
+        fDiag << fixed;
+        // The exporter expresses every pose as Two^-1 * (online pose), where Two
+        // is the inverse pose of the first keyframe of the exported map. Writing
+        // it here lets an ONLINE pose and the EXPORTED pose of the same frame be
+        // compared exactly instead of only up to that rigid transform.
+        fDiag << "# Two " << setprecision(9)
+              << Two.translation()(0) << " " << Two.translation()(1) << " " << Two.translation()(2)
+              << " " << Two.unit_quaternion().x() << " " << Two.unit_quaternion().y()
+              << " " << Two.unit_quaternion().z() << " " << Two.unit_quaternion().w() << endl;
+        fDiag << "# ts refKF_id refKF_map liveKF_id cull_hops x y z"
+                 " liveKFpose(tx ty tz qx qy qz qw)" << endl;
+    }
+    // Frame entries per reference-keyframe map. Frames whose reference keyframe
+    // lives in a map other than the exported one are excluded from the file, so
+    // this census is what makes the exclusion auditable: the numbers must sum to
+    // the number of frame entries, and only the exported map's count is written.
+    const unsigned long kNoMapId = ~0UL;   // keyframe no longer in any atlas map
+    std::map<unsigned long, size_t> nFramesByRefMap;
     for(list<Sophus::SE3f>::iterator lit=mpTracker->mlRelativeFramePoses.begin(),
         lend=mpTracker->mlRelativeFramePoses.end();lit!=lend;lit++, lRit++, lT++, lbL++)
     {
         if(*lbL)
+        {
+            nLost++;
             continue;
+        }
 
-        KeyFrame* pKF = *lRit;
+        KeyFrame* pKF0 = *lRit;
+        KeyFrame* pKF = pKF0;
+        size_t nCullHops = 0;
 
         Sophus::SE3f Trw;
 
         // If the reference keyframe was culled, traverse the spanning tree to get a suitable keyframe.
-        while(pKF->isBad())
+        while(pKF && pKF->isBad())
         {
             Trw = Trw * pKF->mTcp;
-            pKF = pKF->GetParent();
+            KeyFrame* pParent = pKF->GetParent();
+            if(!pParent)
+                break;
+            pKF = pParent;
+            nCullHops++;
         }
 
-        Trw = Trw * pKF->GetPose() * Two;
+        if(!pKF)
+        {
+            nNoRefKF++;
+            continue;
+        }
+
+        // Counted BEFORE the map filter, so every frame entry is accounted for.
+        // The id comes from the census lookup, never from KeyFrame::GetMap().
+        std::map<const KeyFrame*, unsigned long>::const_iterator itMapId = kfMapId.find(pKF);
+        nFramesByRefMap[itMapId == kfMapId.end() ? kNoMapId : itMapId->second]++;
+
+        // Only frames whose reference keyframe belongs to the exported map are
+        // expressed in that map's world frame (see SelectExportMap).
+        if(pKF->GetMap() != pExportMap)
+        {
+            nOtherMap++;
+            continue;
+        }
+
+        // Live keyframe pose AFTER the culling chain, i.e. what the source
+        // formula multiplies Tcr by (before the Two origin shift). Recorded so
+        // the exported pose can be rebuilt exactly from Tcr, this pose and Two:
+        //   Tcw_export = Tcr * (Trw * pKF->GetPose()) * Two
+        Sophus::SE3f TrwKF = Trw * pKF->GetPose();
+        Trw = TrwKF * Two;
 
         Sophus::SE3f Tcw = (*lit) * Trw;
         Sophus::SE3f Twc = Tcw.inverse();
@@ -894,18 +1106,49 @@ void System::SaveTrajectoryTUM(const string &filename)
         Eigen::Vector3f twc = Twc.translation();
         Eigen::Quaternionf q = Twc.unit_quaternion();
 
+        if(fDiag.is_open())
+        {
+            const Eigen::Vector3f tkf = TrwKF.translation();
+            const Eigen::Quaternionf qkf = TrwKF.unit_quaternion();
+            fDiag << setprecision(6) << *lT
+                  << " " << pKF0->mnId
+                  << " " << (long)(itMapId == kfMapId.end() ? -1L : (long)itMapId->second)
+                  << " " << pKF->mnId << " " << nCullHops
+                  << setprecision(9) << " " << twc(0) << " " << twc(1) << " " << twc(2)
+                  << " " << tkf(0) << " " << tkf(1) << " " << tkf(2)
+                  << " " << qkf.x() << " " << qkf.y() << " " << qkf.z() << " " << qkf.w()
+                  << endl;
+        }
+
+        nWritten++;
         f << setprecision(6) << *lT << " " <<  setprecision(9) << twc(0) << " " << twc(1) << " " << twc(2) << " " << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << endl;
     }
     f.close();
-    // cout << endl << "trajectory saved!" << endl;
+    cout << "[System] SaveTrajectoryTUM: exported map="
+         << (long)(pExportMap ? (long)pExportMap->GetId() : -1)
+         << " refKFs=" << vpKFs.size() << " written=" << nWritten
+         << " skipped_lost=" << nLost << " skipped_other_map=" << nOtherMap
+         << " skipped_no_refkf=" << nNoRefKF
+         << " (of " << mpTracker->mlRelativeFramePoses.size() << " frame entries)" << endl;
+    cout << "[System] SaveTrajectoryTUM: frame entries by reference-KF map:";
+    size_t nCounted = 0;
+    for(const auto& kv : nFramesByRefMap)
+    {
+        if(kv.first == kNoMapId)
+            cout << " no_live_map=" << kv.second;
+        else
+            cout << " map" << kv.first << "=" << kv.second;
+        nCounted += kv.second;
+    }
+    cout << " mapTotal=" << nCounted << endl;
 }
 
 void System::SaveKeyFrameTrajectoryTUM(const string &filename)
 {
     cout << endl << "Saving keyframe trajectory to " << filename << " ..." << endl;
 
-    vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
-    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+    vector<KeyFrame*> vpKFs;
+    Map* pExportMap = SelectExportMap(mpAtlas, vpKFs, "SaveKeyFrameTrajectoryTUM");
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
@@ -931,6 +1174,9 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
     }
 
     f.close();
+    cout << "[System] SaveKeyFrameTrajectoryTUM: exported map="
+         << (long)(pExportMap ? (long)pExportMap->GetId() : -1)
+         << " refKFs=" << vpKFs.size() << endl;
 }
 
 void System::SaveTrajectoryEuRoC(const string &filename)
@@ -943,26 +1189,11 @@ void System::SaveTrajectoryEuRoC(const string &filename)
         return;
     }*/
 
-    vector<Map*> vpMaps = mpAtlas->GetAllMaps();
-    int numMaxKFs = 0;
-    Map* pBiggerMap = nullptr;
-    std::cout << "There are " << std::to_string(vpMaps.size()) << " maps in the atlas" << std::endl;
-    for(Map* pMap :vpMaps)
-    {
-        std::cout << "  Map " << std::to_string(pMap->GetId()) << " has " << std::to_string(pMap->GetAllKeyFrames().size()) << " KFs" << std::endl;
-        if(pMap->GetAllKeyFrames().size() > numMaxKFs)
-        {
-            numMaxKFs = pMap->GetAllKeyFrames().size();
-            pBiggerMap = pMap;
-        }
-    }
-
+    // Same selection rule as the TUM/KITTI exporters (see SelectExportMap), so
+    // that all exported formats describe the SAME map and can be cross-checked
+    // against each other.
     vector<KeyFrame*> vpKFs;
-    if(pBiggerMap)
-    {
-        vpKFs = pBiggerMap->GetAllKeyFrames();
-        sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
-    }
+    Map* pBiggerMap = SelectExportMap(mpAtlas, vpKFs, "SaveTrajectoryEuRoC");
 
     // Empty-map guard (see SaveTrajectoryTUM).
     if(vpKFs.empty())
@@ -1498,8 +1729,8 @@ void System::SaveTrajectoryKITTI(const string &filename)
     //     return;
     // }
 
-    vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
-    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+    vector<KeyFrame*> vpKFs;
+    Map* pExportMap = SelectExportMap(mpAtlas, vpKFs, "SaveTrajectoryKITTI");
 
     // Empty-map guard (see SaveTrajectoryTUM).
     if(vpKFs.empty())
@@ -1525,6 +1756,7 @@ void System::SaveTrajectoryKITTI(const string &filename)
     // which is true when tracking failed (lbL).
     list<ORB_SLAM3::KeyFrame*>::iterator lRit = mpTracker->mlpReferences.begin();
     list<double>::iterator lT = mpTracker->mlFrameTimes.begin();
+    size_t nWritten = 0, nOtherMap = 0;
     for(list<Sophus::SE3f>::iterator lit=mpTracker->mlRelativeFramePoses.begin(),
         lend=mpTracker->mlRelativeFramePoses.end();lit!=lend;lit++, lRit++, lT++)
     {
@@ -1535,10 +1767,21 @@ void System::SaveTrajectoryKITTI(const string &filename)
         if(!pKF)
             continue;
 
-        while(pKF->isBad())
+        while(pKF && pKF->isBad())
         {
             Trw = Trw * pKF->mTcp;
-            pKF = pKF->GetParent();
+            KeyFrame* pParent = pKF->GetParent();
+            if(!pParent)
+                break;
+            pKF = pParent;
+        }
+
+        // Only frames whose reference keyframe belongs to the exported map are
+        // expressed in that map's world frame (see SelectExportMap).
+        if(!pKF || pKF->GetMap() != pExportMap)
+        {
+            nOtherMap++;
+            continue;
         }
 
         Trw = Trw * pKF->GetPose() * Tow;
@@ -1548,11 +1791,17 @@ void System::SaveTrajectoryKITTI(const string &filename)
         Eigen::Matrix3f Rwc = Twc.rotationMatrix();
         Eigen::Vector3f twc = Twc.translation();
 
+        nWritten++;
         f << setprecision(9) << Rwc(0,0) << " " << Rwc(0,1)  << " " << Rwc(0,2) << " "  << twc(0) << " " <<
              Rwc(1,0) << " " << Rwc(1,1)  << " " << Rwc(1,2) << " "  << twc(1) << " " <<
              Rwc(2,0) << " " << Rwc(2,1)  << " " << Rwc(2,2) << " "  << twc(2) << endl;
     }
     f.close();
+    cout << "[System] SaveTrajectoryKITTI: exported map="
+         << (long)(pExportMap ? (long)pExportMap->GetId() : -1)
+         << " refKFs=" << vpKFs.size() << " written=" << nWritten
+         << " skipped_other_map=" << nOtherMap
+         << " (of " << mpTracker->mlRelativeFramePoses.size() << " frame entries)" << endl;
 }
 
 

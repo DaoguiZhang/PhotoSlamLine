@@ -2916,11 +2916,14 @@ void Tracking::Track()
         }
         else
         {
-            // This can happen if tracking is lost
-            mlRelativeFramePoses.push_back(mlRelativeFramePoses.back());
-            mlpReferences.push_back(mlpReferences.back());
-            mlFrameTimes.push_back(mlFrameTimes.back());
-            mlbLost.push_back(mState==LOST);
+            // The frame never got a pose, so there is nothing to record.
+            // Appending a copy of the previous entry would put two identical
+            // (timestamp, pose) pairs in the exported trajectory: the timestamp
+            // sequence would no longer be strictly increasing, and any
+            // evaluation associating one pose per timestamp would count that
+            // instant twice. The four parallel lists are only ever advanced
+            // together, so skipping the append keeps them aligned and leaves
+            // exactly one entry per frame that produced a pose.
         }
 
     }
@@ -3566,11 +3569,14 @@ void Tracking::TrackWithLine()
         }
         else
         {
-            // This can happen if tracking is lost
-            mlRelativeFramePoses.push_back(mlRelativeFramePoses.back());
-            mlpReferences.push_back(mlpReferences.back());
-            mlFrameTimes.push_back(mlFrameTimes.back());
-            mlbLost.push_back(mState==LOST);
+            // The frame never got a pose, so there is nothing to record.
+            // Appending a copy of the previous entry would put two identical
+            // (timestamp, pose) pairs in the exported trajectory: the timestamp
+            // sequence would no longer be strictly increasing, and any
+            // evaluation associating one pose per timestamp would count that
+            // instant twice. The four parallel lists are only ever advanced
+            // together, so skipping the append keeps them aligned and leaves
+            // exactly one entry per frame that produced a pose.
         }
 
     }
@@ -4967,6 +4973,10 @@ void Tracking::UpdateLastFrame()
 {
     // Update pose according to reference keyframe
     KeyFrame* pRef = mLastFrame.mpReferenceKF;
+    // list::back() on an empty list is undefined behaviour, and the trajectory
+    // lists are empty until the first frame that actually produces a pose.
+    if(!pRef || mlRelativeFramePoses.empty())
+        return;
     Sophus::SE3f Tlr = mlRelativeFramePoses.back();
     mLastFrame.SetPose(Tlr * pRef->GetPose());
 
@@ -5040,6 +5050,9 @@ void Tracking::UpdateLastFrameWithLine()
 {
     // Update pose according to reference keyframe
     KeyFrame* pRef = mLastFrame.mpReferenceKF;
+    // See UpdateLastFrame(): back() on an empty list is undefined behaviour.
+    if(!pRef || mlRelativeFramePoses.empty())
+        return;
     Sophus::SE3f Tlr = mlRelativeFramePoses.back();
     mLastFrame.SetPose(Tlr * pRef->GetPose());
 

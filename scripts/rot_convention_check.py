@@ -202,6 +202,44 @@ def check(gt_path, est_path, label):
                     "per frame after the best constant correction")
     print(f"    -> {verdict}")
     print()
+
+    # ---------------------------------------------------------------------
+    # Presumption-free check: compare RELATIVE rotations between consecutive
+    # associated frames. A constant frame offset cancels in Re1^T Re2, so this
+    # compares the rotational CONTENT without assuming either side is wrong.
+    # Agreement here with disagreement above means a frame convention is missing
+    # from the tested set; disagreement here means the orientation content itself
+    # differs, so no convention can repair it.
+    # ---------------------------------------------------------------------
+    rel_e, rel_g, steps = [], [], []
+    for i in range(1, len(pairsLR)):
+        Re1, Rg1 = pairsLR[i - 1]
+        Re2, Rg2 = pairsLR[i]
+        rel_e.append(rot_angle(Re1.T @ Re2))
+        rel_g.append(rot_angle(Rg1.T @ Rg2))
+        steps.append(i)
+    if len(rel_e) > 2:
+        import statistics as st
+        d = [abs(a - b) for a, b in zip(rel_e, rel_g)]
+        m = float(np.corrcoef(rel_e, rel_g)[0, 1])
+        print("  RELATIVE rotations (any constant offset cancels):")
+        print(f"    est per step: median={st.median(rel_e):7.3f}  mean={st.mean(rel_e):7.3f}  "
+              f"p95={np.percentile(rel_e, 95):7.3f} deg")
+        print(f"    gt  per step: median={st.median(rel_g):7.3f}  mean={st.mean(rel_g):7.3f}  "
+              f"p95={np.percentile(rel_g, 95):7.3f} deg")
+        print(f"    |est-gt|    : median={st.median(d):7.3f}  p95={np.percentile(d, 95):7.3f} deg")
+        print(f"    correlation ={m:7.4f}   (near 1 => same rotational content)")
+        if m > 0.9 and st.median(d) < 5.0:
+            print("    -> rotational CONTENT agrees; the gap is a frame convention "
+                  "outside the tested set")
+        else:
+            print("    -> rotational content does NOT agree; the absolute mismatch is "
+                  "not merely a convention")
+        print()
+
+    # ---------------------------------------------------------------------
+    # Criterion for reading the tables above.
+    # ---------------------------------------------------------------------
     print("  NOTE: no row above is accepted as a fix unless it collapses BOTH the median")
     print("  and the spread. A large median with small spread means a constant convention")
     print("  offset; a small median with large spread would mean the orientation is simply")

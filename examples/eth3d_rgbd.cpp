@@ -248,6 +248,15 @@ if (!slam_only)
     pSLAM->SaveTrajectoryTUM((output_dir / "CameraTrajectory_TUM.txt").string());
     pSLAM->SaveKeyFrameTrajectoryTUM((output_dir / "KeyFrameTrajectory_TUM.txt").string());
 
+    // EuRoC and KITTI carry the SAME camera poses as TUM but in different
+    // formats (nanosecond timestamps; rotation matrix instead of quaternion).
+    // Saving all three makes the export cross-checkable: at common timestamps
+    // the three files must agree after format conversion, which is independent
+    // evidence that the written poses are what the estimator produced and not
+    // an artefact of one serialisation path.
+    pSLAM->SaveTrajectoryEuRoC((output_dir / "CameraTrajectory_EuRoC.txt").string());
+    pSLAM->SaveTrajectoryKITTI((output_dir / "CameraTrajectory_KITTI.txt").string());
+
     return 0;
 }
 
