@@ -2967,6 +2967,9 @@ void LoopClosing::MergeLocal()
             pKFi->mTwcBefMerge = pKFi->GetPoseInverse();
             // Audit (default off): the transform this local-window keyframe takes.
             Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge, pKFi->mTcwMerge);
+            // Carry culled keyframes that reconstruct through this one along with
+            // the very same transform (see KeyFrame::CarryCulledDependents).
+            pKFi->CarryCulledDependents(pKFi->mTcwBefMerge, pKFi->mTcwMerge);
             pKFi->SetPose(pKFi->mTcwMerge);
 
             // Make sure connections are updated
@@ -3127,6 +3130,9 @@ void LoopClosing::MergeLocal()
                 // Audit (default off): the non-critical-area transform of this keyframe.
                 Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge,
                                   Sophus::SE3f(correctedTiw.unit_quaternion().cast<float>(), correctedTiw.translation().cast<float>()));
+                // Carry culled keyframes that reconstruct through this one along
+                // with the very same transform (KeyFrame::CarryCulledDependents).
+                pKFi->CarryCulledDependents(pKFi->mTcwBefMerge, correctedTiw.cast<float>());
 
                 pKFi->SetPose(correctedTiw.cast<float>());
 
@@ -3544,6 +3550,9 @@ void LoopClosing::MergeLocalWithLine()
             pKFi->mTwcBefMerge = pKFi->GetPoseInverse();
             // Audit (default off): the transform this local-window keyframe takes.
             Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge, pKFi->mTcwMerge);
+            // Carry culled keyframes that reconstruct through this one along with
+            // the very same transform (see KeyFrame::CarryCulledDependents).
+            pKFi->CarryCulledDependents(pKFi->mTcwBefMerge, pKFi->mTcwMerge);
             pKFi->SetPose(pKFi->mTcwMerge);
 
             pKFi->UpdateMap(pMergeMap);
@@ -3671,6 +3680,9 @@ void LoopClosing::MergeLocalWithLine()
                 // Audit (default off): the non-critical-area transform of this keyframe.
                 Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge,
                                   Sophus::SE3f(correctedTiw.unit_quaternion().cast<float>(), correctedTiw.translation().cast<float>()));
+                // Carry culled keyframes that reconstruct through this one along
+                // with the very same transform (KeyFrame::CarryCulledDependents).
+                pKFi->CarryCulledDependents(pKFi->mTcwBefMerge, correctedTiw.cast<float>());
 
                 pKFi->SetPose(correctedTiw.cast<float>());
 

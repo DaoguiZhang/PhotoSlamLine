@@ -339,6 +339,18 @@ public:
     Map* GetMap();
     void UpdateMap(Map* pMap);
 
+    // Culled-keyframe bookkeeping (see KeyFrame::SetBadFlag): a culled keyframe
+    // freezes mTcp = its own pose x its parent's inverse, and the exporter later
+    // rebuilds its pose as mTcp x (parent's CURRENT pose). That reconstruction is
+    // only valid while the parent's pose lives in the same metric, so the culled
+    // keyframe is registered on the parent that its mTcp was written against and
+    // carried along whenever that parent's pose is replaced by a merge.
+    void AddCulledDependent(KeyFrame* pKF);
+    void EraseCulledDependent(KeyFrame* pKF);
+    std::set<KeyFrame*> GetCulledDependents();
+    void ConjugateCulledTcp(const Sophus::SE3f &G);
+    void CarryCulledDependents(const Sophus::SE3f &Tbefore, const Sophus::SE3f &Tafter);
+
     void SetNewBias(const IMU::Bias &b);
     Eigen::Vector3f GetGyroBias();
 
@@ -549,6 +561,9 @@ protected:
     bool mbFirstConnection;
     KeyFrame* mpParent;
     std::set<KeyFrame*> mspChildrens;
+    // Culled keyframes whose mTcp was frozen against THIS keyframe. Guarded by
+    // mMutexConnections. Normally empty; only culled keyframes appear here.
+    std::set<KeyFrame*> mspCulledDependents;
     std::set<KeyFrame*> mspLoopEdges;
     std::set<KeyFrame*> mspMergeEdges;
     // For save relation without pointer, this is necessary for save/load function

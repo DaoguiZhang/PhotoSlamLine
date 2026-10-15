@@ -20,6 +20,7 @@
 #include "Converter.h"
 #include "ImuTypes.h"
 #include "AuditTrail.h"
+#include <sstream>
 #include<mutex>
 
 namespace ORB_SLAM3
@@ -696,8 +697,100 @@ void KeyFrame::ChangeParent(KeyFrame *pKF)
                         (long)pKF->mnId, mbBad.load(),
                         mpParent ? mpParent->isBad() : false);
 
+    // A culled keyframe is registered on the parent its mTcp was written against,
+    // so that the registration keeps pointing at the pose the frozen link refers
+    // to. mTcp itself is deliberately NOT rewritten here: the chain this keyframe
+    // feeds was built against the old parent, and silently re-basing it would
+    // change the reconstruction without evidence. (Measured: no parent link of an
+    // already culled keyframe is rewritten in practice - 0 of 62 REPARENT events
+    // on the mono desk_3 runs - so this only keeps the registry truthful.)
+    if(mbBad.load())
+    {
+        KeyFrame* pOld = mpParent;
+        mpParent = pKF;
+        pKF->AddChild(this);
+        if(pOld)
+            pOld->EraseCulledDependent(this);
+        pKF->AddCulledDependent(this);
+        return;
+    }
+
     mpParent = pKF;
     pKF->AddChild(this);
+}
+
+void KeyFrame::AddCulledDependent(KeyFrame* pKF)
+{
+    if(!pKF)
+        return;
+    unique_lock<mutex> lockCon(mMutexConnections);
+    mspCulledDependents.insert(pKF);
+}
+
+void KeyFrame::EraseCulledDependent(KeyFrame* pKF)
+{
+    if(!pKF)
+        return;
+    unique_lock<mutex> lockCon(mMutexConnections);
+    mspCulledDependents.erase(pKF);
+}
+
+std::set<KeyFrame*> KeyFrame::GetCulledDependents()
+{
+    unique_lock<mutex> lockCon(mMutexConnections);
+    return mspCulledDependents;
+}
+
+// mTcp <- G * mTcp * G^-1
+//
+// G is the rigid transform that replaced this keyframe's parent's pose. A culled
+// keyframe must be carried by the SAME transform its parent received; keeping the
+// frozen relative link unchanged instead re-applies the old metric to the new
+// pose, which is off by the conjugation mismatch (measured: 1.605 m / 41.27 deg on
+// the hops 297/300/301 -> 296 of the map 6 -> map 1 merge, scale 0.234).
+void KeyFrame::ConjugateCulledTcp(const Sophus::SE3f &G)
+{
+    unique_lock<mutex> lockCon(mMutexConnections);
+    mTcp = G * mTcp * G.inverse();
+}
+
+void KeyFrame::CarryCulledDependents(const Sophus::SE3f &Tbefore, const Sophus::SE3f &Tafter)
+{
+    const Sophus::SE3f G = Tafter * Tbefore.inverse();
+    std::set<KeyFrame*> sSeen;
+    std::vector<KeyFrame*> vStack;
+    {
+        std::set<KeyFrame*> sDeps = GetCulledDependents();
+        vStack.assign(sDeps.begin(), sDeps.end());
+    }
+    while(!vStack.empty())
+    {
+        KeyFrame* pDep = vStack.back();
+        vStack.pop_back();
+        if(!pDep || !sSeen.insert(pDep).second)
+            continue;
+        pDep->ConjugateCulledTcp(G);
+        std::set<KeyFrame*> sNext = pDep->GetCulledDependents();
+        vStack.insert(vStack.end(), sNext.begin(), sNext.end());
+    }
+    // Audit (default off): record that the frozen links were really carried, with
+    // the transform that was applied. A round in which this never fires has not
+    // exercised the defect, so a pass in it says nothing about the fix.
+    if(!sSeen.empty())
+    {
+        std::ostringstream os;
+        os << "parent_kf=" << mnId << " n_culled=" << sSeen.size()
+           << " G_t=" << std::setprecision(6) << G.translation().norm()
+           << " G_r_deg=" << Audit::RelAngleDeg(Sophus::SE3f(), G)
+           << " culled_ids=";
+        bool bFirst = true;
+        for(KeyFrame* pDep : sSeen)
+        {
+            os << (bFirst ? "" : ",") << pDep->mnId;
+            bFirst = false;
+        }
+        Audit::Note("CARRY", os.str());
+    }
 }
 
 set<KeyFrame*> KeyFrame::GetChilds()
@@ -871,6 +964,10 @@ void KeyFrame::SetBadFlag()
         if(mpParent){
             mpParent->EraseChild(this);
             mTcp = mTcw * mpParent->GetPoseInverse();
+            // Register on the parent this frozen link refers to: its pose may be
+            // re-placed later by a merge, and this keyframe must be carried along
+            // with it (see CarryCulledDependents).
+            mpParent->AddCulledDependent(this);
         }
         // Audit (default off): the mTcp snapshot the exporter will later multiply
         // by the parent's CURRENT pose, together with both poses at this instant.
