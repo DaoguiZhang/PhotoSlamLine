@@ -25,6 +25,7 @@
 #include "GeometricTools.h"
 #include "MapExporter.h"
 #include "LineMode.h"
+#include "AuditTrail.h"
 
 #include<mutex>
 #include<chrono>
@@ -158,6 +159,8 @@ void LocalMapping::Run()
                     else
                     {
                         MappingOperation opr(MappingOperation::OprType::LocalMappingBA);
+                        // Audit (default off): tag the pose updates that follow.
+                        Audit::ScopedTag auditLbaTag("LBA");
                         Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
                         b_doneLBA = true;
                         mpAtlas->pushMappingOperation(opr);
@@ -489,6 +492,8 @@ void LocalMapping::RunWithLine()
                         }
                         else
                         {
+                            // Audit (default off): tag the pose updates that follow.
+                            Audit::ScopedTag auditLbaTag("LBA");
                             Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, opr);
                         }
 

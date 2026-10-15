@@ -25,6 +25,7 @@
 #include "Converter.h"
 #include "G2oTypes.h"
 #include "Optimizer.h"
+#include "AuditTrail.h"
 #include "Pinhole.h"
 #include "KannalaBrandt8.h"
 #include "MLPnPsolver.h"
@@ -4303,6 +4304,9 @@ void Tracking::CreateInitialMapMonocular()
 
     // Bundle Adjustment
     Verbose::PrintMess("New Map created with " + to_string(mpAtlas->MapPointsInMap()) + " points", Verbose::VERBOSITY_QUIET);
+    // Audit (default off): the initialization BA is what fixes the scale and the
+    // world frame of a newly created monocular map.
+    Audit::ScopedTag auditInitBaTag("GBA_INIT");
     Optimizer::GlobalBundleAdjustemnt(mpAtlas->GetCurrentMap(),20);
 
     float medianDepth = pKFini->ComputeSceneMedianDepth(2);
@@ -4585,6 +4589,8 @@ void Tracking::CreateInitialMapMonocularWithLine()
     Verbose::PrintMess("New Map created with " + to_string(mpAtlas->MapPointsInMap()) + " points and " + to_string(mpAtlas->MapLinesInMap()) + " lines.", Verbose::VERBOSITY_QUIET);
     
     // Note: Use your Line-supported GBA here if available
+    // Audit (default off): see CreateInitialMapMonocular().
+    Audit::ScopedTag auditInitBaTag("GBA_INIT");
     Optimizer::GlobalBundleAdjustemnt(mpAtlas->GetCurrentMap(), 20);
 
     // ==========================================
@@ -6332,6 +6338,8 @@ void Tracking::CreateNewKeyFrame()
         return;
 
     KeyFrame* pKF = new KeyFrame(mCurrentFrame,mpAtlas->GetCurrentMap(),mpKeyFrameDB);
+    // Audit (default off): which frame created which keyframe, and with what pose.
+    Audit::KFCreate(pKF->mnId, mCurrentFrame.mnId, pKF->GetPose());
 
     if(mpAtlas->isImuInitialized()) //  || mpLocalMapper->IsInitializing())
         pKF->bImu = true;
@@ -6459,6 +6467,8 @@ void Tracking::CreateNewKeyFrameWithLine()
         return;
 
     KeyFrame* pKF = new KeyFrame(mCurrentFrame,mpAtlas->GetCurrentMap(),mpKeyFrameDB);
+    // Audit (default off): which frame created which keyframe, and with what pose.
+    Audit::KFCreate(pKF->mnId, mCurrentFrame.mnId, pKF->GetPose());
 
     if(mpAtlas->isImuInitialized()) //  || mpLocalMapper->IsInitializing())
         pKF->bImu = true;

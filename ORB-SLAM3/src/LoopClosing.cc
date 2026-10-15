@@ -25,6 +25,7 @@
 #include "ORBmatcher.h"
 #include "G2oTypes.h"
 #include "LineMode.h"
+#include "AuditTrail.h"
 
 #include<mutex>
 #include<thread>
@@ -2052,6 +2053,10 @@ int LoopClosing::FindMatchesByProjectionWithLines(KeyFrame* pCurrentKF, KeyFrame
 
 void LoopClosing::CorrectLoop()
 {
+    // Audit (default off): tag every pose/parent change that happens inside the
+    // loop-closure path, so the trail can separate it from BA or merge effects.
+    Audit::ScopedTag auditStageTag("LOOP");
+
     //cout << "Loop detected!" << endl;
 
     // Send a stop signal to Local Mapping
@@ -2310,6 +2315,9 @@ void LoopClosing::CorrectLoop()
 
 void LoopClosing::CorrectLoopWithLine()
 {
+    // Audit (default off): see CorrectLoop().
+    Audit::ScopedTag auditStageTag("LOOP");
+
     //cout << "Loop detected!" << endl;
 
     int nLinesCorrected = 0; // coarse Sim(3) correction count (diagnostics)
@@ -2826,6 +2834,24 @@ void LoopClosing::MergeLocal()
     g2o::Sim3 g2oNonCorrectedScw = g2oNonCorrectedSwc.inverse();
     g2o::Sim3 g2oCorrectedScw = mg2oMergeScw; //TODO Check the transformation
 
+    // Audit (default off): the merge is a "s*T" applied to a SUBSET of the keyframes
+    // (the local window, and in monocular every keyframe of the current map), which
+    // also moves them into another map. Any keyframe that is left behind - in
+    // particular a culled one, whose mTcp is already frozen - keeps a relative
+    // transform that refers to the pre-merge world frame.
+    Audit::ScopedTag auditMergeTag("MERGE");
+    if(Audit::Enabled())
+    {
+        Audit::SetMergeContext(pCurrentMap ? (long)pCurrentMap->GetId() : -1L,
+                               pMergeMap ? (long)pMergeMap->GetId() : -1L);
+        std::ostringstream osAuditMerge;
+        osAuditMerge << "from_map=" << (pCurrentMap ? (long)pCurrentMap->GetId() : -1L)
+                     << " to_map=" << (pMergeMap ? (long)pMergeMap->GetId() : -1L)
+                     << " merge_scale=" << std::setprecision(6) << mg2oMergeScw.scale()
+                     << " local_window_kfs=" << spLocalWindowKFs.size();
+        Audit::MergeEvent(osAuditMerge.str());
+    }
+
     KeyFrameAndPose vCorrectedSim3, vNonCorrectedSim3;
     vCorrectedSim3[mpCurrentKF]=g2oCorrectedScw;
     vNonCorrectedSim3[mpCurrentKF]=g2oNonCorrectedScw;
@@ -2939,6 +2965,8 @@ void LoopClosing::MergeLocal()
 
             pKFi->mTcwBefMerge = pKFi->GetPose();
             pKFi->mTwcBefMerge = pKFi->GetPoseInverse();
+            // Audit (default off): the transform this local-window keyframe takes.
+            Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge, pKFi->mTcwMerge);
             pKFi->SetPose(pKFi->mTcwMerge);
 
             // Make sure connections are updated
@@ -3095,6 +3123,10 @@ void LoopClosing::MergeLocal()
 
                 pKFi->mTcwBefMerge = pKFi->GetPose();
                 pKFi->mTwcBefMerge = pKFi->GetPoseInverse();
+
+                // Audit (default off): the non-critical-area transform of this keyframe.
+                Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge,
+                                  Sophus::SE3f(correctedTiw.unit_quaternion().cast<float>(), correctedTiw.translation().cast<float>()));
 
                 pKFi->SetPose(correctedTiw.cast<float>());
 
@@ -3388,6 +3420,20 @@ void LoopClosing::MergeLocalWithLine()
     g2o::Sim3 g2oNonCorrectedScw = g2oNonCorrectedSwc.inverse();
     g2o::Sim3 g2oCorrectedScw = mg2oMergeScw; 
 
+    // Audit (default off): see the monocular/point-line sibling in CorrectLoop().
+    Audit::ScopedTag auditMergeTag("MERGE");
+    if(Audit::Enabled())
+    {
+        Audit::SetMergeContext(pCurrentMap ? (long)pCurrentMap->GetId() : -1L,
+                               pMergeMap ? (long)pMergeMap->GetId() : -1L);
+        std::ostringstream osAuditMerge;
+        osAuditMerge << "from_map=" << (pCurrentMap ? (long)pCurrentMap->GetId() : -1L)
+                     << " to_map=" << (pMergeMap ? (long)pMergeMap->GetId() : -1L)
+                     << " merge_scale=" << std::setprecision(6) << mg2oMergeScw.scale()
+                     << " local_window_kfs=" << spLocalWindowKFs.size();
+        Audit::MergeEvent(osAuditMerge.str());
+    }
+
     KeyFrameAndPose vCorrectedSim3, vNonCorrectedSim3;
     vCorrectedSim3[mpCurrentKF]=g2oCorrectedScw;
     vNonCorrectedSim3[mpCurrentKF]=g2oNonCorrectedScw;
@@ -3496,6 +3542,8 @@ void LoopClosing::MergeLocalWithLine()
             if(!pKFi || pKFi->isBad()) continue;
             pKFi->mTcwBefMerge = pKFi->GetPose();
             pKFi->mTwcBefMerge = pKFi->GetPoseInverse();
+            // Audit (default off): the transform this local-window keyframe takes.
+            Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge, pKFi->mTcwMerge);
             pKFi->SetPose(pKFi->mTcwMerge);
 
             pKFi->UpdateMap(pMergeMap);
@@ -3619,6 +3667,10 @@ void LoopClosing::MergeLocalWithLine()
 
                 pKFi->mTcwBefMerge = pKFi->GetPose();
                 pKFi->mTwcBefMerge = pKFi->GetPoseInverse();
+
+                // Audit (default off): the non-critical-area transform of this keyframe.
+                Audit::MergeApply(pKFi->mnId, pKFi->mfScale, pKFi->mTcwBefMerge,
+                                  Sophus::SE3f(correctedTiw.unit_quaternion().cast<float>(), correctedTiw.translation().cast<float>()));
 
                 pKFi->SetPose(correctedTiw.cast<float>());
 

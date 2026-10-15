@@ -35,6 +35,7 @@
 #include <boost/archive/xml_oarchive.hpp>
 #include "MapExporter.h"
 #include "LineMode.h"
+#include "AuditTrail.h"
 
 namespace ORB_SLAM3
 {
@@ -1027,6 +1028,10 @@ void System::SaveTrajectoryTUM(const string &filename)
     // reconstruction (relative pose x final keyframe pose, with re-parenting).
     std::ofstream fDiag;
     const char* strDiag = std::getenv("PHOTO_SLAM_EXPORT_DIAG");
+    // Second, independent switch: only when it is set does the diag also record
+    // the per-level culling chain (parent id + mTcp translation) on every row.
+    // Default OFF, so the diag file stays at its established width.
+    const bool bChainDiag = (std::getenv("PHOTO_SLAM_EXPORT_DIAG_CHAIN") != nullptr);
     if(strDiag)
     {
         fDiag.open(strDiag);
@@ -1040,7 +1045,9 @@ void System::SaveTrajectoryTUM(const string &filename)
               << " " << Two.unit_quaternion().x() << " " << Two.unit_quaternion().y()
               << " " << Two.unit_quaternion().z() << " " << Two.unit_quaternion().w() << endl;
         fDiag << "# ts refKF_id refKF_map liveKF_id cull_hops x y z"
-                 " liveKFpose(tx ty tz qx qy qz qw)" << endl;
+                 " liveKFpose(tx ty tz qx qy qz qw)"
+                 " liveKFpose_OWN(tx ty tz qx qy qz qw)"
+                 " [chain: childId>parentId>mTcp(tx,ty,tz)|implied(tx,ty,tz);dA_deg ...]" << endl;
     }
     // Frame entries per reference-keyframe map. Frames whose reference keyframe
     // lives in a map other than the exported one are excluded from the file, so
@@ -1062,6 +1069,8 @@ void System::SaveTrajectoryTUM(const string &filename)
         size_t nCullHops = 0;
 
         Sophus::SE3f Trw;
+        // Description of the culling walk, only built when the chain diag is on.
+        std::string strChain;
 
         // If the reference keyframe was culled, traverse the spanning tree to get a suitable keyframe.
         while(pKF && pKF->isBad())
@@ -1070,6 +1079,27 @@ void System::SaveTrajectoryTUM(const string &filename)
             KeyFrame* pParent = pKF->GetParent();
             if(!pParent)
                 break;
+            if(bChainDiag)
+            {
+                const Eigen::Vector3f mt = pKF->mTcp.translation();
+                // The stored mTcp is a snapshot taken when THIS keyframe was culled:
+                //     mTcp = P_child * P_parent^-1     (evaluated at cull time)
+                // Rebuilding the same quantity from the CURRENT poses tells whether
+                // the parent has moved since. If it has, the product this walk
+                // multiplies by no longer reconstructs the pose the estimator used
+                // for this (frozen) keyframe - which is exactly the failure mode
+                // under investigation, so it is recorded per hop.
+                const Sophus::SE3f TImpl = pKF->GetPose() * pParent->GetPoseInverse();
+                const Eigen::Vector3f mi = TImpl.translation();
+                std::ostringstream osHop;
+                osHop << std::fixed << std::setprecision(6)
+                      << (strChain.empty() ? "" : " ")
+                      << pKF->mnId << ">" << pParent->mnId << ">"
+                      << mt(0) << "," << mt(1) << "," << mt(2)
+                      << "|" << mi(0) << "," << mi(1) << "," << mi(2)
+                      << ";dA=" << Audit::RelAngleDeg(pKF->mTcp, TImpl);
+                strChain += osHop.str();
+            }
             pKF = pParent;
             nCullHops++;
         }
@@ -1110,6 +1140,12 @@ void System::SaveTrajectoryTUM(const string &filename)
         {
             const Eigen::Vector3f tkf = TrwKF.translation();
             const Eigen::Quaternionf qkf = TrwKF.unit_quaternion();
+            // The live keyframe's OWN final pose, i.e. without the mTcp product.
+            // Comparing it with TrwKF separates "the keyframe pose itself is off"
+            // from "the chain that reaches it is stale".
+            const Sophus::SE3f Town = pKF->GetPose();
+            const Eigen::Vector3f town = Town.translation();
+            const Eigen::Quaternionf qown = Town.unit_quaternion();
             fDiag << setprecision(6) << *lT
                   << " " << pKF0->mnId
                   << " " << (long)(itMapId == kfMapId.end() ? -1L : (long)itMapId->second)
@@ -1117,7 +1153,11 @@ void System::SaveTrajectoryTUM(const string &filename)
                   << setprecision(9) << " " << twc(0) << " " << twc(1) << " " << twc(2)
                   << " " << tkf(0) << " " << tkf(1) << " " << tkf(2)
                   << " " << qkf.x() << " " << qkf.y() << " " << qkf.z() << " " << qkf.w()
-                  << endl;
+                  << " " << town(0) << " " << town(1) << " " << town(2)
+                  << " " << qown.x() << " " << qown.y() << " " << qown.z() << " " << qown.w();
+            if(bChainDiag)
+                fDiag << " [" << strChain << "]";
+            fDiag << endl;
         }
 
         nWritten++;

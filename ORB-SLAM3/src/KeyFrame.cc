@@ -19,6 +19,7 @@
 #include "KeyFrame.h"
 #include "Converter.h"
 #include "ImuTypes.h"
+#include "AuditTrail.h"
 #include<mutex>
 
 namespace ORB_SLAM3
@@ -122,6 +123,13 @@ void KeyFrame::SetPose(const Sophus::SE3f &Tcw)
 {
     unique_lock<mutex> lock(mMutexPose);
 
+    // Audit (default off, see AuditTrail.h): who changed this pose, and by how
+    // much. The exporter reconstructs culled frames from the CURRENT pose of
+    // their surviving ancestor, so the order and the size of these updates is
+    // exactly what decides whether the mTcp chain is still valid.
+    const bool bAudit = Audit::Enabled();
+    const Sophus::SE3f TAuditBefore = bAudit ? mTcw : Sophus::SE3f();
+
     mTcw = Tcw;
     mRcw = mTcw.rotationMatrix();
     mTwc = mTcw.inverse();
@@ -131,6 +139,9 @@ void KeyFrame::SetPose(const Sophus::SE3f &Tcw)
     {
         mOwb = mRwc * mImuCalib.mTcb.translation() + mTwc.translation();
     }
+
+    if(bAudit)
+        Audit::SetPos(mnId, TAuditBefore, mTcw);
 }
 
 void KeyFrame::SetVelocity(const Eigen::Vector3f &Vw)
@@ -675,6 +686,16 @@ void KeyFrame::ChangeParent(KeyFrame *pKF)
         throw std::invalid_argument("The parent and child can not be the same");
     }
 
+    // Audit (default off): this is the ONLY way a parent link is rewritten, and it
+    // does NOT refresh mTcp. Recording old/new parent plus whether the child was
+    // already culled is what separates "re-parented before SetBadFlag" (where the
+    // snapshot is still consistent) from "re-parented after" (where it is not).
+    // isBad() is deliberately lock-free, so it is safe to call under this lock.
+    if(Audit::Enabled())
+        Audit::Reparent(mnId, mpParent ? (long)mpParent->mnId : -1L,
+                        (long)pKF->mnId, mbBad.load(),
+                        mpParent ? mpParent->isBad() : false);
+
     mpParent = pKF;
     pKF->AddChild(this);
 }
@@ -851,6 +872,13 @@ void KeyFrame::SetBadFlag()
             mpParent->EraseChild(this);
             mTcp = mTcw * mpParent->GetPoseInverse();
         }
+        // Audit (default off): the mTcp snapshot the exporter will later multiply
+        // by the parent's CURRENT pose, together with both poses at this instant.
+        // If the parent's pose changes afterwards, the reconstruction of this
+        // (now frozen) keyframe silently stops matching this pose.
+        if(Audit::Enabled())
+            Audit::SetBad(mnId, mpParent ? (long)mpParent->mnId : -1L, mTcw,
+                          mpParent ? mpParent->GetPose() : Sophus::SE3f(), mTcp);
         mbBad = true;
     }
 

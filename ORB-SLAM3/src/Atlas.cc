@@ -18,6 +18,7 @@
 
 #include "Atlas.h"
 #include "Viewer.h"
+#include "AuditTrail.h"
 
 #include "GeometricCamera.h"
 #include "Pinhole.h"
@@ -67,6 +68,11 @@ void Atlas::CreateNewMap()
         cout << "Stored map with ID: " << mpCurrentMap->GetId() << endl;
     }
     std::cout << "Creation of new map with last KF id: " << mnLastInitKFidMap << endl;
+
+    // Audit (default off): a new map starts a new world frame at this keyframe
+    // id, which is what the exporter's per-map origin Two is anchored to.
+    if(Audit::Enabled())
+        Audit::MapCreate((long)Map::nNextId, mnLastInitKFidMap);
 
     mpCurrentMap = new Map(mnLastInitKFidMap);
     mpCurrentMap->SetCurrentMap();

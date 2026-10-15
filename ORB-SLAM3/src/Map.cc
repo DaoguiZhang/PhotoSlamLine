@@ -18,6 +18,7 @@
 
 
 #include "Map.h"
+#include "AuditTrail.h"
 
 #include<mutex>
 
@@ -113,6 +114,10 @@ void Map::EraseMapPoint(MapPoint *pMP)
 void Map::EraseKeyFrame(KeyFrame *pKF)
 {
     unique_lock<mutex> lock(mMutexMap);
+    // Audit (default off): map membership changes are what decides which map's
+    // world frame an exported frame is expressed in.
+    if(Audit::Enabled() && pKF)
+        Audit::EraseKF(pKF->mnId, mnId, pKF->isBad());
     mspKeyFrames.erase(pKF);
     if(mspKeyFrames.size()>0)
     {
@@ -262,6 +267,8 @@ void Map::SetStoredMap()
 
 void Map::clear()
 {
+    if(Audit::Enabled())
+        Audit::MapClear(mnId, mspKeyFrames.size(), mspMapPoints.size());
 //    for(set<MapPoint*>::iterator sit=mspMapPoints.begin(), send=mspMapPoints.end(); sit!=send; sit++)
 //        delete *sit;
 
