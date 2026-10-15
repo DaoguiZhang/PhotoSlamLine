@@ -122,27 +122,46 @@ void KeyFrame::ComputeBoW()
 
 void KeyFrame::SetPose(const Sophus::SE3f &Tcw)
 {
-    unique_lock<mutex> lock(mMutexPose);
-
     // Audit (default off, see AuditTrail.h): who changed this pose, and by how
     // much. The exporter reconstructs culled frames from the CURRENT pose of
     // their surviving ancestor, so the order and the size of these updates is
     // exactly what decides whether the mTcp chain is still valid.
-    const bool bAudit = Audit::Enabled();
-    const Sophus::SE3f TAuditBefore = bAudit ? mTcw : Sophus::SE3f();
-
-    mTcw = Tcw;
-    mRcw = mTcw.rotationMatrix();
-    mTwc = mTcw.inverse();
-    mRwc = mTwc.rotationMatrix();
-
-    if (mImuCalib.mbIsSet) // TODO Use a flag instead of the OpenCV matrix
+    Sophus::SE3f TBefore;
+    bool bAudit = false;
     {
-        mOwb = mRwc * mImuCalib.mTcb.translation() + mTwc.translation();
+        unique_lock<mutex> lock(mMutexPose);
+
+        bAudit = Audit::Enabled();
+        TBefore = mTcw;
+
+        mTcw = Tcw;
+        mRcw = mTcw.rotationMatrix();
+        mTwc = mTcw.inverse();
+        mRwc = mTwc.rotationMatrix();
+
+        if (mImuCalib.mbIsSet) // TODO Use a flag instead of the OpenCV matrix
+        {
+            mOwb = mRwc * mImuCalib.mTcb.translation() + mTwc.translation();
+        }
     }
 
+    // Culled keyframes rebuild their pose from THIS keyframe's current pose, so a
+    // keyframe that moves must carry them along with the very transform it moved
+    // by: G = TAfter * TBefore^-1. Doing it here - the single place where a pose
+    // is replaced - covers every cause (local BA, pose graph, global BA, merge,
+    // initialization). A first version handled only the merge and was left with a
+    // 1.42 m / 68.2 deg stale hop caused by a later, untagged re-placement of the
+    // same parent.
+    //
+    // The pose lock is released BEFORE this: SetBadFlag() takes
+    // mMutexConnections and then reads a peer's pose via GetPoseInverse(), so
+    // taking connections locks while holding mMutexPose would be an ABBA cycle.
+    // CarryCulledDependents() is a no-op (one lock, empty set) when nothing was
+    // ever culled against this keyframe, which is the normal case.
+    CarryCulledDependents(TBefore, Tcw);
+
     if(bAudit)
-        Audit::SetPos(mnId, TAuditBefore, mTcw);
+        Audit::SetPos(mnId, TBefore, Tcw);
 }
 
 void KeyFrame::SetVelocity(const Eigen::Vector3f &Vw)
