@@ -343,7 +343,15 @@ void Map::ApplyScaledRotation(const Sophus::SE3f &T, const float s, const bool b
         Twc.translation() *= s;
         Sophus::SE3f Tyc = Tyw*Twc;
         Sophus::SE3f Tcy = Tyc.inverse();
+        // This rule is NOT one common rigid factor: it rescales the translation of
+        // every keyframe's inverse pose, so the generic carry (conjugation by the
+        // per-keyframe delta) would be wrong here - measured 1.09 m error against
+        // the live-sibling reference in tests/cull_chain_invariant.cc case 9.
+        // Suppress it and apply the SAME rule to the culled keyframes instead.
+        KeyFrame::SetCarrySuppressed(true);
         pKF->SetPose(Tcy);
+        KeyFrame::SetCarrySuppressed(false);
+        pKF->CarryCulledDependentsScaled(Tcy, Tyw, s);
         Eigen::Vector3f Vw = pKF->GetVelocity();
         if(!bScaledVel)
             pKF->SetVelocity(Ryw*Vw);

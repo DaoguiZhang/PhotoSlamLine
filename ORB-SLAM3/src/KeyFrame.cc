@@ -28,6 +28,23 @@ namespace ORB_SLAM3
 
 long unsigned int KeyFrame::nNextId=0;
 
+namespace
+{
+// Thread-local: suppresses the generic carry inside SetPose() when the caller
+// applies a pose rule that is not a common rigid factor and does its own carry
+// with the matching rule (Map::ApplyScaledRotation).
+bool& CarrySuppressRef()
+{
+    static thread_local bool bSuppress = false;
+    return bSuppress;
+}
+}   // namespace
+
+void KeyFrame::SetCarrySuppressed(bool bSuppress)
+{
+    CarrySuppressRef() = bSuppress;
+}
+
 KeyFrame::KeyFrame():
         mnFrameId(0),  mTimeStamp(0), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
         mfGridElementWidthInv(0), mfGridElementHeightInv(0),
@@ -158,7 +175,11 @@ void KeyFrame::SetPose(const Sophus::SE3f &Tcw)
     // taking connections locks while holding mMutexPose would be an ABBA cycle.
     // CarryCulledDependents() is a no-op (one lock, empty set) when nothing was
     // ever culled against this keyframe, which is the normal case.
-    CarryCulledDependents(TBefore, Tcw);
+    //
+    // Callers whose pose rule is not a common rigid factor suppress this and do
+    // their own carry with the matching rule (Map::ApplyScaledRotation).
+    if(!CarrySuppressRef())
+        CarryCulledDependents(TBefore, Tcw);
 
     if(bAudit)
         Audit::SetPos(mnId, TBefore, Tcw);
@@ -771,6 +792,51 @@ void KeyFrame::ConjugateCulledTcp(const Sophus::SE3f &G)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mTcp = G * mTcp * G.inverse();
+}
+
+void KeyFrame::SetCulledTcp(const Sophus::SE3f &mTcpNew)
+{
+    unique_lock<mutex> lockCon(mMutexConnections);
+    mTcp = mTcpNew;
+}
+
+void KeyFrame::CarryCulledDependentsScaled(const Sophus::SE3f &TParentNew, const Sophus::SE3f &Tyw, float s)
+{
+    // Mirrors Map::ApplyScaledRotation exactly, for each culled keyframe that
+    // reconstructs through the keyframe that was just re-placed:
+    //     Twc = P^-1 ;  Twc.translation() *= s ;  P' = (Tyw * Twc)^-1
+    std::set<KeyFrame*> sSeen;
+    std::vector<std::pair<KeyFrame*, Sophus::SE3f> > vStack;
+    {
+        std::set<KeyFrame*> sDeps = GetCulledDependents();
+        for(KeyFrame* pDep : sDeps)
+            vStack.push_back(std::make_pair(pDep, TParentNew));
+    }
+    size_t nCarried = 0;
+    while(!vStack.empty())
+    {
+        const std::pair<KeyFrame*, Sophus::SE3f> pr = vStack.back();
+        vStack.pop_back();
+        KeyFrame* pDep = pr.first;
+        if(!pDep || !sSeen.insert(pDep).second)
+            continue;
+        const Sophus::SE3f Pc = pDep->GetPose();
+        Sophus::SE3f Twc = Pc.inverse();
+        Twc.translation() *= s;
+        const Sophus::SE3f PcNew = (Tyw * Twc).inverse();
+        pDep->SetCulledTcp(PcNew * pr.second.inverse());
+        nCarried++;
+        std::set<KeyFrame*> sNext = pDep->GetCulledDependents();
+        for(KeyFrame* pNext : sNext)
+            vStack.push_back(std::make_pair(pNext, PcNew));
+    }
+    if(nCarried > 0)
+    {
+        std::ostringstream os;
+        os << "parent_kf=" << mnId << " n_culled=" << nCarried
+           << " mode=scaled s=" << std::setprecision(6) << s;
+        Audit::Note("CARRY", os.str());
+    }
 }
 
 void KeyFrame::CarryCulledDependents(const Sophus::SE3f &Tbefore, const Sophus::SE3f &Tafter)

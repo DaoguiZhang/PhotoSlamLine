@@ -349,7 +349,16 @@ public:
     void EraseCulledDependent(KeyFrame* pKF);
     std::set<KeyFrame*> GetCulledDependents();
     void ConjugateCulledTcp(const Sophus::SE3f &G);
+    void SetCulledTcp(const Sophus::SE3f &mTcpNew);
     void CarryCulledDependents(const Sophus::SE3f &Tbefore, const Sophus::SE3f &Tafter);
+    // Same job, for the one site whose pose rule is NOT a common rigid factor:
+    // Map::ApplyScaledRotation() rebuilds every pose as (T * (P^-1 with its
+    // translation scaled by s))^-1. Conjugating by that per-keyframe delta is
+    // wrong there (measured 1.09 m in tests/cull_chain_invariant.cc case 9), so
+    // the same rule is applied to the culled keyframes instead.
+    void CarryCulledDependentsScaled(const Sophus::SE3f &TParentNew, const Sophus::SE3f &Tyw, float s);
+    // Suppress the generic carry around a SetPose() whose caller does its own.
+    static void SetCarrySuppressed(bool bSuppress);
 
     void SetNewBias(const IMU::Bias &b);
     Eigen::Vector3f GetGyroBias();
