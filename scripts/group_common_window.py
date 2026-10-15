@@ -189,26 +189,78 @@ def main():
         if not ok:
             print("  no usable rounds")
             continue
-        common = set(ok[0]["localized_ts"])
-        for r in ok[1:]:
-            common &= r["localized_ts"]
-        # timestamps are printed with 6 decimals; match with tolerance
+        # Intersection must be verified, not assumed, and the tolerance must be
+        # well BELOW the frame spacing (~33 ms at 30 Hz): with a 20 ms tolerance a
+        # neighbouring frame is pulled in, which silently makes the "common" set
+        # run-dependent. 5 ms cannot reach a neighbour.
+        TOL = 0.005
+        cand = set(ok[0]["localized_ts"])
+        for _ in range(8):
+            inter = set(cand)
+            for r in ok:
+                ts_sorted = sorted(r["localized_ts"])
+                inter = {c for c in inter if near(ts_sorted, c, TOL) is not None}
+            if len(inter) == len(cand):
+                break
+            cand = inter
+        common = cand
+        hits = []
+        for r in ok:
+            ts_sorted = sorted(r["localized_ts"])
+            hits.append(sum(1 for c in common if near(ts_sorted, c, TOL) is not None))
         cts = sorted(common)
         only_ts_path = os.path.join(outdir, f"common_level{lvl}.txt")
-        with open(only_ts_path, "w") as f:
-            for t in cts:
-                f.write(f"{t:.9f}\n")
-        print(f"  common timestamp set across the {len(ok)} usable rounds: "
-              f"{len(cts)} frames -> {only_ts_path}")
+        print(f"  nominal common timestamp set: {len(cts)} frames -> {only_ts_path}")
+        print(f"  containment check: every run holds the common set = "
+              f"{'YES' if min(hits) == len(cts) else 'NO'} "
+              f"(per-run hit min={min(hits)} max={max(hits)}, need {len(cts)})")
         gt = os.path.join(ok[0]["seq"], "groundtruth.txt")
+        # Iterate to a frame set that every run ACTUALLY contains, using the
+        # restricted files as the evidence: an in-memory containment check can
+        # disagree with what the evaluator ends up seeing, and the files are what
+        # the evaluator reads. Repeat until the per-run written sets are equal.
+        passes = 0
+        for it in range(5):
+            passes = it + 1
+            written_sets = []
+            for r in ok:
+                # level-specific name: rN_desk_3_rgbd_X exists in EVERY dropNN
+                # directory, so a name without the level collides and one level
+                # silently overwrites the other's evaluation input.
+                path = os.path.join(outdir,
+                                    f"L{lvl}_{os.path.basename(r['dir'])}_common.txt")
+                got = []
+                with open(r["traj_path"]) as fin, open(path, "w") as fout:
+                    for line in fin:
+                        pp = line.split()
+                        if len(pp) < 8:
+                            continue
+                        if near(sorted(common), float(pp[0]), TOL) is not None:
+                            fout.write(line if line.endswith("\n") else line + "\n")
+                            got.append(float(pp[0]))
+                r["restrict_path"] = path
+                written_sets.append(got)
+            newc = set(written_sets[0])
+            for ws in written_sets[1:]:
+                ss = sorted(ws)
+                newc = {c for c in newc if near(ss, c, TOL) is not None}
+            if len(newc) == len(common):
+                break
+            common = newc
+        print(f"  restriction passes={passes}  final common={len(common)} frames  "
+              f"per-run written={sorted(len(w) for w in written_sets)}")
+        # Write the CONVERGED set, so the file matches what was evaluated.
+        with open(only_ts_path, "w") as f:
+            for t in sorted(common):
+                f.write(f"{t:.9f}\n")
+
         for r in grp:
             if r not in ok or not os.path.exists(gt):
                 r["ate"] = r["rpe1"] = None
                 continue
             prefix = os.path.join(outdir, f"{os.path.basename(r['dir'])}_ate")
-            subprocess.run([sys.executable, EVAL, gt, r["traj_path"], prefix,
-                            "--mode", "se3", "--only-ts", only_ts_path,
-                            "--rpe-deltas", "1,30"], check=False,
+            subprocess.run([sys.executable, EVAL, gt, r["restrict_path"], prefix,
+                            "--mode", "se3", "--rpe-deltas", "1,30"], check=False,
                            capture_output=True)
             r["ate"] = r["rpe1"] = None
             if os.path.exists(prefix + ".json"):
@@ -219,6 +271,10 @@ def main():
                     v = j["rpe"].get("1")
                     r["rpe1"] = v["trans_rms_m"] if v else None
                     r["n_pairs_common"] = j.get("n_pairs")
+        np_vals = sorted(set(r.get("n_pairs_common") for r in ok
+                             if r.get("n_pairs_common") is not None))
+        print(f"  evaluated pair counts: {np_vals} "
+              f"({'IDENTICAL' if len(np_vals) == 1 else 'DIFFERENT - not a common set'})")
         for cond in ("P", "B", "C"):
             rows = [r for r in grp if r["cond"] == cond]
             vals = [r["ate"] for r in rows if r["ate"] is not None]
@@ -248,6 +304,25 @@ def main():
                       f"signs={[('+' if d > 0 else '-') for d in diffs]}")
 
     # ---------- rescue events across all rounds ----------------------------
+    print()
+    print("=" * 132)
+    print("FULL PER-ROUND TABLE WITH METRICS (printed after evaluation, so the")
+    print("ATE/RPE columns refer to the common frame set of that level)")
+    print("=" * 132)
+    print(f"{'level':<7}{'rep':<5}{'cond':<6}{'lm':<4}{'rs':<4}{'exit':<6}{'cmp':<5}"
+          f"{'init':<6}{'cov':<8}{'longest':<9}{'resAtt':<8}{'events':<8}"
+          f"{'evtFrames':<11}{'ATE':<10}{'RPE1':<9}{'nPairs':<8}")
+    for r in sorted(runs, key=lambda x: (x["level"], x["rep"], x["cond"])):
+        print(f"{str(r['level'])+'%':<7}{r['rep']:<5}{r['cond']:<6}"
+              f"{r['meta'].get('line_mode','?'):<4}{r['meta'].get('rescue','?'):<4}"
+              f"{r['meta'].get('exit','?'):<6}{('1' if r['complete'] else '0'):<5}"
+              f"{('Y' if r['init_ok'] else 'N'):<6}{r['coverage']:<8.4f}"
+              f"{r['longest']:<9}{len(r['attempt_frames']):<8}{len(r['events']):<8}"
+              f"{sum(len(e) for e in r['events']):<11}"
+              f"{(('%.4f' % r['ate']) if r.get('ate') is not None else '-'):<10}"
+              f"{(('%.4f' % r['rpe1']) if r.get('rpe1') is not None else '-'):<9}"
+              f"{r.get('n_pairs_common', '-'):<8}")
+
     print()
     print("=" * 132)
     print("RESCUE EVENTS (consecutive rescued frames = ONE event)")
