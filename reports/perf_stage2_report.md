@@ -66,8 +66,44 @@ Structural loss **off** in every condition; identical public constraints.
 
 Subset construction (`GaussianMapperLine::makeLineSubsetMask`): all ordinary Gaussians are
 always kept; the line rows are subsampled with a **stride** so the kept sets are **nested**
-(55 ⊂ 99 ⊂ 166 line Gaussians), and stratified by the sign-canonicalised, quantised world
-direction (43 groups) so a stride cannot drop a whole line.
+(Q0 ⊂ Q25 ⊂ Q50 ⊂ Q100), and stratified by the sign-canonicalised, quantised world
+direction (46–47 groups) so a stride cannot drop a whole line.
+
+> **Correction (perf-stage3, section 一).** An earlier revision of this report quoted
+> `55 ⊂ 99 ⊂ 166 line Gaussians` and `43 groups`. Those figures come from an **earlier
+> acceptance run of the same experiment whose frozen snapshot had 166 line Gaussians and
+> 43 direction groups**; that run's output directory no longer exists (it was deleted and
+> re-run). They are *not* the numbers of either run reported here, and no result in this
+> report depends on them. The correct figures, taken from the raw records of the two runs
+> that are actually reported, are:
+>
+> | run | role | checkpoint (total / line) | Q25 kept | Q50 kept | groups | stride |
+> |---|---|---|---|---|---|---|
+> | `q_acc100` | acceptance, 100 steps | 2071 / **174** | 57 | 105 | 47 | 4 / 2 |
+> | `q_formal_r0` | formal, 5000 steps | 2022 / **173** | 59 | 103 | 46 | 4 / 2 |
+>
+> The arithmetic confirms the same algorithm, different snapshot: the kept count is
+> `Σ_groups ceil(size_g / stride)`, so it depends directly on how many line samples the
+> frozen snapshot happens to contain. On `q_acc100`'s own group sizes that formula gives
+> exactly 57 and 105; rescaling the same 47 groups to 166 lines gives 54 and 101, and a
+> snapshot with a different set of line directions additionally yields a different group
+> count (43), which is what the deleted run showed. A single collapsed direction group —
+> the failure mode of the pre-fix build — would have given 44 / 87, so it does **not**
+> explain these numbers.
+>
+> `q_acc100` and `q_formal_r0` are **separate processes with separate frozen snapshots**
+> of `office0` (`map_points` 1897 vs 1849, `line_samples` 174 vs 173,
+> `cameras_extent` 0.279 vs 0.238), so their counts are not expected to agree. Within
+> each run all four conditions share one snapshot — verified by a single `nonline_fp`
+> per run (`d785db2ad0efbcef_nonlin1897` and `5bdc457a932642ce_nonlin1849`). See
+> `reports/perf_stage3_subset_audit.txt` for the reconstructed kept-index sets, their
+> SHA-256 hashes, and the empirical nesting check: `Q0 ⊂ Q25 ⊂ Q50 ⊂ Q100` holds in both
+> runs, and every reconstructed `(line, total)` count matches the recorded
+> `summary_*.csv` exactly. **Neither the discrepancy nor the deleted run affects the
+> reported conditions**: every condition inside a run shares one snapshot and one
+> checkpoint, and the ordinary Gaussians are byte-identical across the four density
+> conditions of a run.
+
 
 **Limitation, stated:** no explicit `MapLine -> sample` association exists at freeze time
 (`computeGroupedLineLoss`'s `line_to_sample_ids` path is unused), so line membership is

@@ -293,7 +293,34 @@ public:
     // Used to prove that the line-density conditions share identical ordinary
     // Gaussians (they differ only in how many line Gaussians they carry).
     std::string paramFingerprintNonLine();
+    // ===== Online creation-source audit (perf-stage3) =====================
+    // Counts every Gaussian created / removed at the CPU entry points using
+    // ONLY host-side metadata (tensor .size(0)), so it adds NO per-step device
+    // synchronisation. Enabled by env PHOTO_SLAM_CREATION_AUDIT=<prefix>:
+    //   <prefix>_events.csv   one row per creation event
+    //   <prefix>_summary.txt  running totals (rewritten per event so the
+    //                         summary survives an interrupted run)
+    // Disabled by default -> zero overhead, online behaviour unchanged.
+    void auditInitIfNeeded();
+    void auditSetReason(const char* reason) { audit_reason_ = reason ? reason : "unknown"; }
+    void auditEvent(const char* entry, long long delta_in, long long delta_out);
+    long long auditTotal() const { return xyz_.defined() ? xyz_.size(0) : 0; }
+    bool auditEnabled() const { return audit_enabled_; }
+
     void rebuildParamVectors() { GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE }
+    // --- creation-audit state (only touched when the env switch is on) ---
+    bool audit_enabled_ = false;
+    bool audit_initialised_ = false;
+    std::string audit_prefix_;
+    std::string audit_reason_ = "map_point_seed";
+    // Current training iteration, refreshed once per step by updateLearningRate
+    // (a plain host-side store). Used to timestamp audit events without any
+    // extra device synchronisation.
+    long long audit_iter_ = -1;
+    std::ofstream audit_events_;
+    long long audit_add_ordinary_ = 0, audit_add_line_ = 0, audit_clone_ = 0,
+              audit_split_ = 0, audit_prune_ = 0, audit_reset_ = 0,
+              audit_peak_ = 0, audit_events_n_ = 0;
     torch::Tensor point_ids_; // [N] 类型为 kLong，存储每个点的唯一 ID （用于后续处理）
     torch::Tensor features_dc_;
     torch::Tensor features_rest_;

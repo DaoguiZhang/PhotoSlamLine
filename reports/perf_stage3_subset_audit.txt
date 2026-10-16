@@ -1,0 +1,16 @@
+===== q_acc100: N=2071 is_line=174 ordinary=1897 =====
+  Q0: kept=   0 total= 1897 idx_sha256=e3b0c44298fc1c14   MATCH
+  Q25: kept=  57 total= 1954 idx_sha256=c771a4df01a1bffa stride=4 direction_groups=47  MATCH
+  Q50: kept= 105 total= 2002 idx_sha256=bfcdecae0b15d085 stride=2 direction_groups=47  MATCH
+  Q100: kept= 174 total= 2071 idx_sha256=ef00dcaf62745339   MATCH
+  NESTED: Q0<=Q25 True | Q25<=Q50 True | Q50<=Q100 True
+  ordinary-Gaussian rows identical across conditions by construction: True (n_ord=1897)
+
+===== q_formal_r0: N=2022 is_line=173 ordinary=1849 =====
+  Q0: kept=   0 total= 1849 idx_sha256=e3b0c44298fc1c14   MATCH
+  Q25: kept=  59 total= 1908 idx_sha256=406aac99d44f3acb stride=4 direction_groups=46  MATCH
+  Q50: kept= 103 total= 1952 idx_sha256=df87423ea8695a9a stride=2 direction_groups=46  MATCH
+  Q100: kept= 173 total= 2022 idx_sha256=2cddc7badfd4094e   MATCH
+  NESTED: Q0<=Q25 True | Q25<=Q50 True | Q50<=Q100 True
+  ordinary-Gaussian rows identical across conditions by construction: True (n_ord=1849)
+

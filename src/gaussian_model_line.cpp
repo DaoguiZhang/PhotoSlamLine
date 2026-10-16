@@ -20,6 +20,30 @@
 #include "include/rasterize_points.h"
 #include "LineMode.h"
 
+// ---------------------------------------------------------------------------
+// perf-stage3: online Gaussian creation-source audit.
+// A host-only (no device sync) guard that turns a creation call into one audit
+// event. See GaussianModelLine::auditEvent for the accounting basis.
+// ---------------------------------------------------------------------------
+struct CreationAuditGuard
+{
+    GaussianModelLine* m_;
+    const char* entry_;
+    long long before_;
+    bool on_;
+    CreationAuditGuard(GaussianModelLine* m, const char* entry)
+        : m_(m), entry_(entry), before_(0), on_(false)
+    {
+        m_->auditInitIfNeeded();
+        on_ = m_->auditEnabled();
+        if (on_) before_ = m_->auditTotal();
+    }
+    ~CreationAuditGuard()
+    {
+        if (on_) m_->auditEvent(entry_, m_->auditTotal() - before_, 0);
+    }
+};
+
 // Line-Gaussian retention ablation knobs (env-configurable, default = baseline).
 //   PHOTO_SLAM_LINE_INIT_OPACITY : initial opacity of line-sampled Gaussians (B)
 //   PHOTO_SLAM_LINE_MIN_OPACITY  : opacity-prune threshold for line Gaussians (D)
@@ -776,6 +800,7 @@ void GaussianModelLine::increasePcd(
 {
     const int N = static_cast<int>(new_points.size());
     if (N == 0) return;
+    CreationAuditGuard audit_guard(this, "add");   // perf-stage3: host-only
 
     // 1. 准备 CPU 缓冲
     torch::Tensor xyz_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
@@ -1028,6 +1053,7 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
     auto num_new_points = static_cast<int>(points.size() / 3);
     if (num_new_points == 0)
         return;
+    CreationAuditGuard audit_guard(this, "add");   // perf-stage3: host-only
 
     // 1. 基础数据转换 (保持不变)
     torch::Tensor new_point_cloud = torch::from_blob(
@@ -1163,6 +1189,7 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
     auto num_new_points = new_point_cloud.size(0);
     if (num_new_points == 0)
         return;
+    CreationAuditGuard audit_guard(this, "add");   // perf-stage3: host-only
 
     // 1. 更新稀疏点云缓存 (保持不变)
     if (sparse_points_xyz_.size(0) == 0) {
@@ -1467,6 +1494,7 @@ void GaussianModelLine::trainingSetup(const GaussianOptimizationParamsLine& trai
 
 float GaussianModelLine::updateLearningRate(int step)
 {
+    audit_iter_ = step;   // perf-stage3 audit: host-only iteration stamp
     // def update_learning_rate(self, iteration):
     //     ''' Learning rate scheduling per step '''
     //     for param_group in self.optimizer.param_groups:
@@ -3742,9 +3770,24 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // =========================================================
     // 3. 执行物理剪裁 (先清减，再增补)
     // =========================================================
+    // perf-stage3 audit: measure the three sub-step deltas from HOST metadata
+    // (xyz_.size(0)) only -- at this point all pending device work for the
+    // masks has already completed, so no extra synchronisation is introduced.
+    auditInitIfNeeded();
+    const bool audit_on = auditEnabled();
+    const long long audit_before_prune = audit_on ? auditTotal() : 0;
+    // perf-stage3 audit: label the clone/split/prune events emitted below.
+    const std::string audit_reason_prev = audit_reason_;
+    if (audit_on) audit_reason_ = "densify_prune";
+
     auto t_prune_start = std::chrono::steady_clock::now();
     this->prunePointsWithLineAwareness(prune_mask);
     auto t_prune_end = std::chrono::steady_clock::now();
+    if (audit_on) {
+        const long long after = auditTotal();
+        auditEvent("prune", 0, audit_before_prune - after);
+    }
+    const long long audit_after_prune = audit_on ? auditTotal() : 0;
 
     if (linePruneDiag()) {
         auto lazy_count = lazy_line_mask.sum().item<int>();
@@ -3773,7 +3816,14 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
     // bodies. Calling the point-only routines here would grow xyz_ without
     // extending that metadata and break the next forward pass.
     this->densifyAndCloneWithLineAwareness(grads_after_prune, max_grad, extent);
+    const long long audit_after_clone = audit_on ? auditTotal() : 0;
     this->densifyAndSplitWithLineAwareness(grads_after_prune, max_grad, extent, 2);
+    if (audit_on) {
+        const long long after_split = auditTotal();
+        auditEvent("clone", audit_after_clone - audit_after_prune, 0);
+        auditEvent("split", after_split - audit_after_clone, 0);
+        audit_reason_ = audit_reason_prev;   // restore caller's label
+    }
     auto t_dens_end = std::chrono::steady_clock::now();
 
     // 5. 显存清理
@@ -4800,8 +4850,75 @@ void GaussianModelLine::keepSubset(const torch::Tensor& keep_mask)
     rebuildParamVectors();
 }
 
-std::string GaussianModelLine::paramFingerprintNonLine()
+// ---------------------------------------------------------------------------
+// perf-stage3: online creation-source audit (host-only, no device sync).
+// Accounting basis (so the total is fully explained):
+//   current_total = initial_total + add_ordinary + add_line + clone + split
+//                   - prune_removed
+// Note: "clone"/"split" count INSERTED rows only; the parent row of a split is
+// counted once in prune_removed iff the densify path actually removed it.
+// reset_opacity is recorded for traceability but creates/removes nothing.
+// ---------------------------------------------------------------------------
+void GaussianModelLine::auditInitIfNeeded()
 {
+    if (audit_initialised_) return;
+    audit_initialised_ = true;
+    const char* p = std::getenv("PHOTO_SLAM_CREATION_AUDIT");
+    if (p == nullptr || p[0] == '\0') { audit_enabled_ = false; return; }
+    audit_enabled_ = true;
+    audit_prefix_ = p;
+    audit_events_.open(audit_prefix_ + "_events.csv", std::ios::out | std::ios::trunc);
+    audit_events_ << "iteration,reason,entry,delta_in,delta_out,total_after,peak_total\n";
+    audit_peak_ = auditTotal();
+    std::cerr << "[CreationAudit] enabled prefix=" << audit_prefix_ << std::endl;
+}
+
+void GaussianModelLine::auditEvent(const char* entry, long long delta_in, long long delta_out)
+{
+    if (!audit_enabled_) return;
+    const long long total = auditTotal();
+    if (total > audit_peak_) audit_peak_ = total;
+    const std::string e(entry);
+    if (e == "add_line") {
+        audit_add_line_ += delta_in;
+    } else if (e == "add_ordinary") {
+        audit_add_ordinary_ += delta_in;
+    } else if (e == "add") {
+        // Classification for the float/tensor overloads, which carry no
+        // per-point source: the mapper tags the call site.
+        if (audit_reason_.find("line") != std::string::npos) audit_add_line_ += delta_in;
+        else audit_add_ordinary_ += delta_in;
+    } else if (e == "clone") {
+        audit_clone_ += delta_in;
+    } else if (e == "split") {
+        audit_split_ += delta_in;
+    } else if (e == "prune") {
+        audit_prune_ += delta_out;
+    } else if (e == "reset_opacity") {
+        audit_reset_ += delta_in;
+    }
+    ++audit_events_n_;
+    audit_events_ << audit_iter_ << ',' << audit_reason_ << ',' << entry << ','
+                  << delta_in << ',' << delta_out << ',' << total << ',' << audit_peak_ << '\n';
+    audit_events_.flush();
+    // Running summary: rewritten on every event so it survives an interrupted
+    // run. Host-only file I/O; no device synchronisation anywhere in this path.
+    std::ofstream s(audit_prefix_ + "_summary.txt", std::ios::out | std::ios::trunc);
+    const long long net = audit_add_ordinary_ + audit_add_line_ + audit_clone_ + audit_split_ - audit_prune_;
+    s << "events " << audit_events_n_ << '\n'
+      << "add_ordinary " << audit_add_ordinary_ << '\n'
+      << "add_line " << audit_add_line_ << '\n'
+      << "clone " << audit_clone_ << '\n'
+      << "split " << audit_split_ << '\n'
+      << "prune_removed " << audit_prune_ << '\n'
+      << "reset_opacity " << audit_reset_ << '\n'
+      << "net_from_audit " << net << '\n'
+      << "peak_total " << audit_peak_ << '\n'
+      << "current_total " << total << '\n';
+    s.flush();
+}
+
+std::string GaussianModelLine::paramFingerprintNonLine(){
     std::uint64_t h = 1469598103934665603ULL;
     torch::Tensor keep;
     {

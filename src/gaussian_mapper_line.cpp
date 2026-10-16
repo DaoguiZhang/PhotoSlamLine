@@ -1402,6 +1402,324 @@ void GaussianMapperLine::diagAtFrozenStep(long long opt_steps, const std::string
 // A sync brackets every loop so pending asynchronous work is never billed to
 // the wrong section.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// perf-stage3 / 三: backward decomposition (PHOTO_SLAM_FGM_BWD_DECOMP=1).
+//
+// Splits one training iteration into stages measured INDEPENDENTLY on the same
+// parameter snapshot, view, resolution, SH degree and mask:
+//   A  image loss      forward (weighted L1+SSIM) evaluated on a diagnostic
+//                      LEAF image, plus the gradient of that loss w.r.t. the
+//                      image (the incoming gradient the renderer must consume)
+//   B  renderer        backward, fed A's image gradient, WITHOUT recomputing
+//                      the image loss (the render graph is rebuilt from the
+//                      same state so the saved activations are identical)
+//   C  public constraints (anisotropy + position/coherence + ecc + orientation)
+//                      forward and backward, measured independently
+//   D  full training step on the ORIGINAL full graph (reference) + optimizer
+//
+// Every stage reports host wall clock AND device (CUDA event) time; the gap is
+// the CPU dispatch / synchronisation share. Stages are measured as separate,
+// non-nested blocks, so nothing is double counted.
+//
+// The split is additionally VERIFIED: the parameter gradients of (A -> B) + C
+// must match those of the original full path. Pre-stated tolerance:
+//   global relative L2 <= 1e-3  AND  per-tensor max relative L2 <= 1e-3
+// (float32 accumulation over ~2e5 parameters; the two paths reduce in a
+// different order, so bitwise equality is NOT expected here - unlike the
+// algebraic-identity checks in runEquivCheck, whose expectation is 0).
+//
+// detach() appears ONLY in this benchmark; it never runs during real training.
+// ---------------------------------------------------------------------------
+void GaussianMapperLine::runBackwardDecomposition(const std::string& tag, long long step)
+{
+    if (!gaussians_ || frozen_eval_kf_seq_.empty() || !gaussians_->xyz_.defined())
+        return;
+    std::vector<std::shared_ptr<GaussianKeyframeLine>> views;
+    for (auto& kv : scene_->keyframes())
+        views.push_back(kv.second);
+    const std::size_t idx0 = frozen_eval_kf_seq_[0];
+    if (idx0 >= views.size() || !views[idx0])
+        return;
+    auto pkf = views[idx0];
+    const int H = static_cast<int>(pkf->image_height_);
+    const int Wd = static_cast<int>(pkf->image_width_);
+    auto mask = undistort_mask_[pkf->camera_id_];
+    auto gt = pkf->original_image_;
+
+    const float lam = lambdaDssim();
+    const float w_pos = frozen_line_w_coherence_;
+    const float w_ecc = frozen_line_w_ecc_;
+    const float w_ori = frozen_line_w_ori_;
+    const float lam_aniso = opt_params_.lambda_anisotropy_;
+    const float aniso_th = opt_params_.max_anisotropy_threshold_;
+
+    const bool is_cuda = (device_type_ == torch::kCUDA);
+    auto sync = [&]() { if (is_cuda) torch::cuda::synchronize(); };
+    auto now = []() { return std::chrono::steady_clock::now(); };
+    auto msb = [](std::chrono::steady_clock::time_point a,
+                  std::chrono::steady_clock::time_point b) {
+        return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(b - a).count();
+    };
+
+    // Preserve the render-time buffers so the benchmark cannot perturb state.
+    torch::Tensor saved_radii, saved_hits, saved_alpha;
+    const bool had_radii = gaussians_->max_radii2D_.defined();
+    if (had_radii) saved_radii = gaussians_->max_radii2D_.clone();
+    const bool had_hits = gaussians_->debug_hit_count_.defined();
+    if (had_hits) saved_hits = gaussians_->debug_hit_count_.clone();
+    const bool had_alpha = gaussians_->debug_alpha_accum_.defined();
+    if (had_alpha) saved_alpha = gaussians_->debug_alpha_accum_.clone();
+
+    auto render_now = [&]() {
+        auto rp = GaussianRendererWithLine::renderWithLine(
+            pkf, H, Wd, gaussians_, pipe_params_, background_, override_color_);
+        return std::get<0>(rp);
+    };
+    // Weighted L1 + SSIM on the masked image (identical formula to training).
+    auto photo_on = [&](const torch::Tensor& img) {
+        auto mi = img * mask;
+        auto l1 = loss_utils::l1_loss(mi, gt);
+        return (1.0f - lam) * l1 + lam * (1.0f - loss_utils::ssim(mi, gt, device_type_));
+    };
+    auto aniso_term = [&]() {
+        auto sa = gaussians_->getScaling();
+        auto mx = std::get<0>(torch::max(sa, 1));
+        auto mn = std::get<0>(torch::min(sa, 1));
+        auto ratio = mx / (mn + 1e-6);
+        return lam_aniso * torch::pow(torch::clamp(ratio - aniso_th, 0), 2).mean();
+    };
+    auto struct_terms = [&]() {
+        auto sa = gaussians_->getScaling();
+        return gaussians_->computeVectorizedLineLoss(w_pos) +
+               gaussians_->computeLineShapeConstraint(w_ecc, w_ori, sa);
+    };
+    auto zero_grads = [&]() {
+        auto z = [](const torch::Tensor& t) {
+            if (t.defined() && t.grad().defined()) t.grad().zero_(); };
+        z(gaussians_->xyz_); z(gaussians_->opacity_); z(gaussians_->scaling_);
+        z(gaussians_->rotation_); z(gaussians_->features_dc_);
+        if (gaussians_->features_rest_.defined()) z(gaussians_->features_rest_);
+    };
+
+    const int WARM = 20, REPS = 50, NBLOCK = 3;
+    auto time_it = [&](auto&& fn, double& host_ms, double& dev_ms) {
+        for (int i = 0; i < WARM; ++i) fn();
+        sync();
+        double bh = 1e30, bd = 1e30;
+        for (int b = 0; b < NBLOCK; ++b) {
+            at::cuda::CUDAEvent e0(0u), e1(0u);
+            if (is_cuda) e0.record();
+            auto t0 = now();
+            for (int i = 0; i < REPS; ++i) fn();
+            sync();
+            auto t1 = now();
+            if (is_cuda) { e1.record(); e1.synchronize(); }
+            const double h = msb(t0, t1) / REPS;
+            const double d = is_cuda ? static_cast<double>(e0.elapsed_time(e1)) / REPS : h;
+            if (h < bh) bh = h;
+            if (d < bd) bd = d;
+        }
+        host_ms = bh;
+        dev_ms = bd;
+    };
+
+    std::ofstream out(frozen_ablation_dir_ /
+                      (tag + "_bwd_decomp_step" + std::to_string(step) + ".csv"));
+    out << "tag,step,stage,host_ms_per_iter,dev_ms_per_iter,cpu_share_ms\n";
+    auto emit = [&](const char* stage, double h, double d) {
+        out << tag << ',' << step << ',' << stage << ',' << h << ',' << d << ','
+            << (h - d) << '\n';
+        std::cerr << "[BwdDecomp][" << tag << "] step=" << step << " " << stage
+                  << "  host=" << h << " ms  dev=" << d << " ms  (cpu-dispatch "
+                  << (h - d) << " ms)" << std::endl;
+    };
+
+    // ---- A: image loss forward, and forward+backward on a diagnostic leaf ----
+    double a_f = 0, a_fb = 0, a_df = 0, a_dfb = 0;
+    torch::Tensor last_leaf;
+    {
+        auto img0 = render_now().detach();   // benchmark-only detach
+        auto fwd_fn = [&]() {
+            auto leaf = img0.clone().requires_grad_(true);
+            auto l = photo_on(leaf);
+            last_leaf = leaf;
+            (void)l;
+        };
+        time_it(fwd_fn, a_f, a_df);
+        auto fb_fn = [&]() {
+            auto leaf = img0.clone().requires_grad_(true);
+            auto l = photo_on(leaf);
+            l.backward();
+            last_leaf = leaf;
+        };
+        time_it(fb_fn, a_fb, a_dfb);
+    }
+    // Reference incoming gradient for the renderer backward (from a clean run).
+    torch::Tensor grad_image;
+    {
+        auto leaf = render_now().detach().clone().requires_grad_(true);
+        auto l = photo_on(leaf);
+        l.backward();
+        grad_image = leaf.grad().detach().clone();
+        auto gnorm = grad_image.norm().item().toFloat();
+        std::cerr << "[BwdDecomp][" << tag << "] step=" << step
+                  << " |dL/dimage|_2 = " << gnorm
+                  << "  |image|_mean = " << leaf.detach().abs().mean().item().toFloat()
+                  << std::endl;
+        out << tag << ',' << step << ",image_grad_norm_L2,," << gnorm << ",\n";
+    }
+    emit("A_image_loss_fwd", a_f, a_df);
+    emit("A_image_loss_fwd_bwd", a_fb, a_dfb);
+    emit("A_image_loss_bwd", a_fb - a_f, a_dfb - a_df);
+
+    // ---- B: renderer forward (reference) and renderer backward only ----
+    double b_f = 0, b_df = 0, b_fb = 0, b_dfb = 0;
+    {
+        auto fwd_fn = [&]() { auto r = render_now(); (void)r; };
+        time_it(fwd_fn, b_f, b_df);
+        auto bwd_fn = [&]() {
+            auto r = render_now();
+            r.backward(grad_image);   // only the renderer backward
+        };
+        time_it(bwd_fn, b_fb, b_dfb);
+    }
+    emit("B_render_fwd", b_f, b_df);
+    emit("B_render_fwd_bwd", b_fb, b_dfb);
+    emit("B_render_backward_only", b_fb - b_f, b_dfb - b_df);
+
+    // ---- C: public constraints, forward and forward+backward ----
+    double c_f = 0, c_df = 0, c_fb = 0, c_dfb = 0;
+    {
+        auto fwd_fn = [&]() { auto l = aniso_term() + struct_terms(); (void)l; };
+        time_it(fwd_fn, c_f, c_df);
+        auto fb_fn = [&]() {
+            auto l = aniso_term() + struct_terms();
+            l.backward();
+        };
+        time_it(fb_fn, c_fb, c_dfb);
+    }
+    emit("C_constraints_fwd", c_f, c_df);
+    emit("C_constraints_fwd_bwd", c_fb, c_dfb);
+    emit("C_constraints_bwd", c_fb - c_f, c_dfb - c_df);
+
+    // ---- D: original full training step (reference graph) ----
+    double d_f = 0, d_df = 0, d_fb = 0, d_dfb = 0;
+    {
+        auto fwd_fn = [&]() {
+            auto r = render_now();
+            auto l = photo_on(r) + aniso_term() + struct_terms();
+            (void)l;
+        };
+        time_it(fwd_fn, d_f, d_df);
+        auto fb_fn = [&]() {
+            auto r = render_now();
+            auto l = photo_on(r) + aniso_term() + struct_terms();
+            l.backward();
+        };
+        time_it(fb_fn, d_fb, d_dfb);
+    }
+    emit("D_full_fwd", d_f, d_df);
+    emit("D_full_fwd_bwd", d_fb, d_dfb);
+    emit("D_full_graph_backward", d_fb - d_f, d_dfb - d_df);
+    // CPU share of one full forward+backward (host minus device). This is the
+    // dispatch/synchronisation cost that a device-only profiler cannot see.
+    emit("D_cpu_dispatch_share", d_fb - d_f - (d_dfb - d_df), 0.0);
+
+    // optimizer.step on CLONED leaves (the training optimizer is never touched)
+    {
+        std::vector<torch::Tensor> v;
+        v.push_back(gaussians_->xyz_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->features_dc_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->opacity_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->scaling_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->rotation_.detach().clone().requires_grad_());
+        torch::optim::AdamOptions ao;
+        ao.set_lr(1e-4);
+        ao.eps() = 1e-15;
+        auto opt = std::make_shared<torch::optim::Adam>(
+            std::vector<torch::Tensor>{v[0]}, ao);
+        for (std::size_t i = 1; i < v.size(); ++i)
+            opt->add_param_group(std::vector<torch::Tensor>{v[i]});
+        for (auto& t : v) t.mutable_grad() = torch::ones_like(t);
+        for (int i = 0; i < WARM; ++i) opt->step();
+        sync();
+        auto t0 = now();
+        for (int i = 0; i < REPS; ++i) opt->step();
+        sync();
+        emit("E_optimizer_step", msb(t0, now()) / REPS, msb(t0, now()) / REPS);
+    }
+
+    // ---- gradient-equivalence verification: split (A -> B) + C vs full ----
+    auto snapshot = [&]() {
+        std::vector<torch::Tensor> g;
+        auto add = [&](const torch::Tensor& t) {
+            torch::Tensor gg;
+            if (t.defined() && t.grad().defined())
+                gg = t.grad().detach().to(torch::kFloat32).flatten().clone();
+            g.push_back(gg);
+        };
+        add(gaussians_->xyz_); add(gaussians_->opacity_); add(gaussians_->scaling_);
+        add(gaussians_->rotation_); add(gaussians_->features_dc_);
+        if (gaussians_->features_rest_.defined() && gaussians_->features_rest_.numel() > 0)
+            add(gaussians_->features_rest_);
+        return g;
+    };
+    auto rel_l2 = [](const torch::Tensor& a, const torch::Tensor& b) {
+        const double num = (a - b).norm().item().toDouble();
+        const double den = b.norm().item().toDouble() + 1e-12;
+        return num / den;
+    };
+
+    std::vector<torch::Tensor> g_full, g_split;
+    {   // reference: original full graph
+        zero_grads();
+        auto r = render_now();
+        auto l = photo_on(r) + aniso_term() + struct_terms();
+        l.backward();
+        g_full = snapshot();
+    }
+    {   // split: image-loss grad -> renderer backward, then constraints
+        zero_grads();
+        auto r = render_now();
+        auto leaf = r.detach().clone().requires_grad_(true);
+        auto l_img = photo_on(leaf);
+        l_img.backward();
+        r.backward(leaf.grad());          // same value, detached path
+        auto l_c = aniso_term() + struct_terms();
+        l_c.backward();
+        g_split = snapshot();
+    }
+    double worst = 0.0, num_sq = 0.0, den_sq = 0.0;
+    for (std::size_t i = 0; i < g_full.size() && i < g_split.size(); ++i) {
+        const bool ok_full = g_full[i].defined(), ok_split = g_split[i].defined();
+        const double rl = (ok_full && ok_split) ? rel_l2(g_split[i], g_full[i])
+                                                : (ok_full == ok_split ? 0.0 : 1e9);
+        if (rl > worst) worst = rl;
+        if (ok_full && ok_split) {
+            num_sq += std::pow((g_split[i] - g_full[i]).norm().item().toDouble(), 2);
+            den_sq += std::pow(g_full[i].norm().item().toDouble(), 2);
+        }
+        out << tag << ',' << step << ",grad_rel_l2_tensor" << i << ",," << rl << ",\n";
+    }
+    const double global_rel = std::sqrt(num_sq) / (std::sqrt(den_sq) + 1e-12);
+    const int pass = (global_rel <= 1e-3 && worst <= 1e-3) ? 1 : 0;
+    out << tag << ',' << step << ",GRAD_EQUIV_global_rel_l2,," << global_rel << ",\n";
+    out << tag << ',' << step << ",GRAD_EQUIV_worst_tensor_rel_l2,," << worst << ",\n";
+    out << tag << ',' << step << ",GRAD_EQUIV_tolerance_pass,," << pass << ",\n";
+    std::cerr << "[BwdDecomp][" << tag << "] step=" << step
+              << " GRAD EQUIV: global_rel_l2=" << global_rel << " worst_tensor="
+              << worst << " (tolerance 1e-3) -> " << (pass ? "PASS" : "FAIL")
+              << std::endl;
+    out.close();
+
+    // restore exactly the state the eval point was in
+    if (had_radii && saved_radii.defined()) gaussians_->max_radii2D_.copy_(saved_radii);
+    if (had_hits && saved_hits.defined()) gaussians_->debug_hit_count_.copy_(saved_hits);
+    if (had_alpha && saved_alpha.defined()) gaussians_->debug_alpha_accum_.copy_(saved_alpha);
+    gaussians_->optimizer_->zero_grad(true);
+    sync();
+}
+
 void GaussianMapperLine::runMicroBench(const std::string& tag, long long step)
 {
     if (!gaussians_ || frozen_eval_kf_seq_.empty() || !gaussians_->xyz_.defined())
@@ -2351,6 +2669,8 @@ void GaussianMapperLine::runFrozenAblation()
                     diagAtFrozenStep(frozen_opt_steps_, c.tag);
                     if (std::getenv("PHOTO_SLAM_FGM_MICROBENCH"))
                         runMicroBench(c.tag, frozen_opt_steps_);
+                    if (std::getenv("PHOTO_SLAM_FGM_BWD_DECOMP"))
+                        runBackwardDecomposition(c.tag, frozen_opt_steps_);
                     if (std::getenv("PHOTO_SLAM_FGM_EQCHECK"))
                         runEquivCheck(c.tag, frozen_opt_steps_);
                     const int fp_stable = (fp_before == gaussians_->paramFingerprint()) ? 1 : 0;
@@ -3691,7 +4011,9 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         std::unique_lock<std::mutex> lock_render(mutex_render_);
                         
                         // 调用重载版本的 increasePcd，它会处理 line_dir 和 anisotropic scale
+                        gaussians_->auditSetReason("line_seed");
                         gaussians_->increasePcd(new_line_sample_points, getIteration());
+                        gaussians_->auditSetReason("map_point_seed");
                         
                         std::cerr << "[GaussianMapper] Added " << new_line_sample_points.size() 
                                    << " line-sampled gaussians." << std::endl;
@@ -4041,7 +4363,9 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     
                     // 调用针对 vector<Point3D> 的重载版本
                     // 这个版本会正确读取 line_dir_ 并初始化各向异性属性
+                    gaussians_->auditSetReason("line_seed");
                     gaussians_->increasePcd(new_line_sample_points, getIteration());
+                    gaussians_->auditSetReason("map_point_seed");
                     
                     // std::cerr << "[Gaussian Mapper] Added " << new_line_sample_points.size() 
                     //           << " new line-sampled gaussians." << std::endl;
@@ -4597,6 +4921,10 @@ void GaussianMapperLine::cullKeyframes()
 void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
     std::shared_ptr<GaussianKeyframeLine> pkf)
 {
+    // perf-stage3 audit: this is its own creation source; label the events it
+    // produces so ordinary MapPoint seeding can be told apart from it.
+    gaussians_->auditSetReason("inactive_geo_densify");
+    gaussians_->auditInitIfNeeded();
     // Frozen-count experiment: adding Gaussians here would break the invariant.
     if (frozen_fixed_count_ && frozen_kf_replay_)
         return;
@@ -4847,6 +5175,7 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
 //             << completion_time
 //             << " ms"
 //             << std::endl;
+    gaussians_->auditSetReason("map_point_seed");   // perf-stage3 audit: restore
 }
 
 // bool GaussianMapper::needInterruptTraining()

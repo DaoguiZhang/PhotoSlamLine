@@ -364,6 +364,12 @@ public:
     // calling optimizer.step(). Used only to locate cost, never as a speed
     // result.
     void runMicroBench(const std::string& tag, long long step);
+    // perf-stage3 / 三: backward decomposition (PHOTO_SLAM_FGM_BWD_DECOMP=1).
+    // Measures the image loss, the renderer backward, the public constraints and
+    // the full original training step as separate non-nested blocks, reports
+    // host vs device time per stage, and verifies that the split parameter
+    // gradients match the original full path (tolerance stated in the source).
+    void runBackwardDecomposition(const std::string& tag, long long step);
     // Numerical equivalence check (PHOTO_SLAM_FGM_EQCHECK=1): evaluates the
     // optimised and the reference structural-loss implementations on ONE
     // parameter snapshot and reports max|d loss| and max|d grad| per target
