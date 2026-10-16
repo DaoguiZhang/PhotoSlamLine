@@ -30,6 +30,34 @@ step) plus one plain `long long` store in `updateLearningRate`; no device read, 
 
 ---
 
+## 结论修正 (mapper-budget-v1 复核)
+
+Following the mapper-budget-v1 review, four conclusions in this document are corrected or bounded:
+
+1. **The backward split measured on ~1 954 Gaussians cannot be extrapolated to the ~197 000-Gaussian
+   online scale.** The frozen pair is 100× smaller than a real online map, so the *stage shares*
+   (renderer backward dominant, image loss ~8 %) are valid **only at that size**; absolute times and
+   the ranking of stages may change with the primitive count (`split`/`clone` growth shown in
+   section 二 increases it ~100×). A real-scale profile (section 三 of the budget round) is required
+   before any conclusion is carried over.
+2. **The `line_seed` increment of 3 does not represent the online line-Gaussian total.** Line
+   Gaussians are also created/kept through `clone`, `split` and inheritance, so §二's `add_line = 3`
+   is the *seeding entry's* contribution only, not the population. The population must be counted on
+   `is_line_` at initialisation, after each incremental insertion, after clone/split, after prune,
+   and in the final store.
+3. **Split-parent removal and true pruning must be separated.** `prune_removed = 177 205` is a single
+   bucket that mixes (a) rows a densification step removed as a by-product of replacing a parent
+   representation, and (b) rows ordinary opacity/lazy/size pruning removed. The sentence "roughly
+   47 % of all inserted Gaussians are later pruned" therefore **over-reads the number**: only bucket
+   (b) is waste in any meaningful sense. The two must be reported separately.
+4. **Cross-process non-reproducibility of the front end does not imply that independent replay is
+   infeasible.** The finding in §五 is that a *separately re-run SLAM front end* produces a different
+   snapshot. It says nothing against **persisting the mapper input once and replaying it
+   independently** — which is exactly what the frozen harness already does within a process, and what
+   the budget round extends to a stored, re-loadable capture.
+
+---
+
 ## 一 Density-subset reconciliation
 
 The Stage-2 report quoted `55 ⊂ 99 ⊂ 166` line Gaussians over `43 groups`. **That row is stale.**
