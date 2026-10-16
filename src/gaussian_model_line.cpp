@@ -4288,6 +4288,109 @@ void GaussianModelLine::loadPly(std::filesystem::path ply_path)
     this->active_sh_degree_ = this->max_sh_degree_;
 }
 
+// ============================================================================
+// Fixed-geometry convergence experiment: initialisation checkpoint.
+// ============================================================================
+namespace {
+// FNV-1a over the raw bytes of a tensor (CPU, contiguous).
+void fgmHashTensor(const torch::Tensor& t, std::uint64_t& h)
+{
+    if (!t.defined())
+        return;
+    auto c = t.detach().to(torch::kCPU).contiguous();
+    if (c.dtype() == torch::kBool)
+        c = c.to(torch::kUInt8);
+    if (!c.is_floating_point())
+        c = c.to(torch::kFloat64);
+    const auto* p = reinterpret_cast<const unsigned char*>(c.data_ptr());
+    const std::size_t n = static_cast<std::size_t>(c.numel()) * c.element_size();
+    for (std::size_t i = 0; i < n; ++i) {
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+}
+} // namespace
+
+void GaussianModelLine::saveInitCheckpoint(const std::filesystem::path& path)
+{
+    // Order is part of the format: do not reorder without bumping the reader.
+    std::vector<torch::Tensor> ts = {
+        xyz_.detach().to(torch::kCPU).contiguous(),
+        features_dc_.detach().to(torch::kCPU).contiguous(),
+        features_rest_.detach().to(torch::kCPU).contiguous(),
+        scaling_.detach().to(torch::kCPU).contiguous(),
+        opacity_.detach().to(torch::kCPU).contiguous(),
+        rotation_.detach().to(torch::kCPU).contiguous(),
+        is_line_.detach().to(torch::kCPU).contiguous(),
+        line_dir_w_.detach().to(torch::kCPU).contiguous(),
+        xyz_init_.detach().to(torch::kCPU).contiguous(),
+    };
+    std::filesystem::create_directories(path.parent_path());
+    torch::save(ts, path.string());
+}
+
+std::size_t GaussianModelLine::restoreInitCheckpoint(const std::filesystem::path& path)
+{
+    std::vector<torch::Tensor> ts;
+    try {
+        torch::load(ts, path.string());
+    } catch (const std::exception& e) {
+        std::cerr << "[FGM] restoreInitCheckpoint failed to read " << path
+                  << " : " << e.what() << std::endl;
+        return 0;
+    }
+    if (ts.size() != 9) {
+        std::cerr << "[FGM] restoreInitCheckpoint: expected 9 groups, got "
+                  << ts.size() << std::endl;
+        return 0;
+    }
+    torch::NoGradGuard g;
+    auto put = [&](torch::Tensor& dst, const torch::Tensor& src,
+                   const char* name) {
+        if (!dst.defined() || dst.numel() != src.numel()) {
+            throw std::runtime_error(std::string("[FGM] checkpoint/param shape "
+                "mismatch for ") + name + ": dst=" +
+                std::to_string(dst.defined() ? dst.numel() : -1) +
+                " src=" + std::to_string(src.numel()));
+        }
+        dst.copy_(src.to(dst.device()).to(dst.dtype()).view(dst.sizes()));
+    };
+    put(xyz_, ts[0], "xyz");
+    put(features_dc_, ts[1], "features_dc");
+    put(features_rest_, ts[2], "features_rest");
+    put(scaling_, ts[3], "scaling");
+    put(opacity_, ts[4], "opacity");
+    put(rotation_, ts[5], "rotation");
+    put(is_line_, ts[6], "is_line");
+    put(line_dir_w_, ts[7], "line_dir_w");
+    put(xyz_init_, ts[8], "xyz_init");
+    return ts.size();
+}
+
+std::string GaussianModelLine::paramFingerprint()
+{
+    std::uint64_t h = 1469598103934665603ULL;
+    fgmHashTensor(xyz_, h);
+    fgmHashTensor(opacity_, h);
+    fgmHashTensor(scaling_, h);
+    fgmHashTensor(rotation_, h);
+    fgmHashTensor(features_dc_, h);
+    fgmHashTensor(is_line_, h);
+    fgmHashTensor(line_dir_w_, h);
+    fgmHashTensor(xyz_init_, h);
+    // Counts are part of the identity: same tensor hash but a different
+    // Gaussian total or line-Gaussian total is NOT the same start state.
+    const auto n_all = xyz_.defined() ? xyz_.size(0) : 0;
+    long long n_line = -1;
+    if (is_line_.defined() && is_line_.numel() > 0)
+        n_line = is_line_.to(torch::kCPU).sum().item().toLong();
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "%016llx_n%lld_nline%lld",
+                  static_cast<unsigned long long>(h),
+                  static_cast<long long>(n_all), n_line);
+    return std::string(buf);
+}
+
 void GaussianModelLine::savePly(std::filesystem::path result_path)
 {
     // Empty/uninitialized model guard: if SLAM never created any Gaussians

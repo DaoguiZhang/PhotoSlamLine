@@ -305,6 +305,12 @@ public:
         bool use_line_gaussians = true;   // seed line-sampled Gaussians
         bool line_loss = true;            // structural (line) regularisation
         bool directional_densify = true;  // line-aware vs ordinary densify
+        // Effective structural weights; < 0 means "use the configuration value".
+        // Used to ablate one structural term at a time without touching the
+        // formulas (each term is already scaled by its own weight).
+        float w_position = -1.0f;   // weight_line_coherence_  -> perpendicular offset term
+        float w_ecc = -1.0f;        // weight_line_shape_ecc_  -> eccentricity term
+        float w_orient = -1.0f;     // weight_line_shape_ori_  -> local-X vs fixed line-dir term
     };
     std::vector<FrozenAblationCondition> frozen_conditions_;
     std::filesystem::path frozen_ablation_dir_;
@@ -322,6 +328,39 @@ public:
     bool frozen_kf_replay_ = false;
     std::size_t frozen_kf_step_ = 0;
     void preGenerateFrozenKfSequence(int n_steps);
+
+    // ---- fixed-geometry convergence experiment (see runFrozenAblation) ----
+    // Freeze the Gaussian COUNT: when true, every entry point that can change
+    // the number of Gaussians (densify/clone/split/prune, opacity reset,
+    // inactive-geo densify, repeated line sampling, increasePcd) is skipped.
+    bool frozen_fixed_count_ = false;
+    // Common evaluation views + the ordered list of completed-optimizer-step
+    // values at which both variants are evaluated. Eval never mutates state.
+    std::vector<std::size_t> frozen_eval_kf_seq_;
+    std::vector<long long> frozen_eval_steps_;
+    std::filesystem::path frozen_checkpoint_path_;
+    // Renders every eval view (no grad, no optimizer/stat updates) and returns
+    // mean PSNR / mean SSIM over those fixed views.
+    void evalAtFrozenStep(long long opt_steps, const std::string& tag,
+                          double& psnr_out, double& ssim_out, double& l1_out,
+                          double& struct_ori_out, double& struct_shape_out,
+                          double& eval_seconds_out);
+    void assertFrozenCounts(const char* where);
+    // Per-eval-point mechanism diagnostics (reads only, plus an env-gated
+    // separated-gradient probe that restores the gradient buffers afterwards).
+    void diagAtFrozenStep(long long opt_steps, const std::string& tag);
+    long long frozen_count_ref_all_ = -1;
+    long long frozen_count_ref_line_ = -1;
+    int frozen_count_violation_ = 0;
+    double frozen_eval_seconds_total_ = 0.0;
+    // Reference init fingerprint captured from the canonical checkpoint; every
+    // variant must reproduce it after restoring + before the first step.
+    std::string frozen_ref_fingerprint_;
+    long long frozen_raw_iter_ref_ = -1;
+    // Actually-visited training views, recorded from the live training function
+    // (not from the pre-generated sequence): 4 ints per step =
+    // {completed_optimizer_steps, keyframe fid, gaussian pyramid level, default_sh_}.
+    std::vector<int> frozen_train_views_flat_;
 
     std::map<camera_id_t, torch::Tensor> undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_main_undistort_mask_;

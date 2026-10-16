@@ -216,6 +216,19 @@ public:
 
     void loadPly(std::filesystem::path ply_path);
     void savePly(std::filesystem::path result_path);
+
+    // ---- fixed-geometry convergence experiment: initialisation checkpoint ----
+    // Serialises the initial Gaussian parameters AND the line structural
+    // metadata the normal PLY does not carry (is_line_ mask, world line
+    // directions, the anchor copy xyz_init_). A plain PLY cannot restore these,
+    // which is exactly why the experiment must not rely on one.
+    void saveInitCheckpoint(const std::filesystem::path& path);
+    // Restores in place (copy_) so the optimiser keeps its references. Returns
+    // the number of tensor groups restored (0 on failure).
+    std::size_t restoreInitCheckpoint(const std::filesystem::path& path);
+    // FNV-1a fingerprint over the live parameter tensors + structural counts.
+    // Used to prove that two variants really start from the same state.
+    std::string paramFingerprint();
     void saveSparsePointsPly(std::filesystem::path result_path);
 
     float percentDense();

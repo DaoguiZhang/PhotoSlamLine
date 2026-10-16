@@ -22,6 +22,10 @@
 
 #include <cstdlib>
 #include <string>
+#include <cmath>
+#include <algorithm>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include "LineMode.h"
 
@@ -78,6 +82,7 @@ struct GpuSectionProfiler {
         ev_opt   = new at::cuda::CUDAEvent(0u);
     }
     void markStart()        { ensureInit(); if (enabled) ev_start->record(); }
+    void resetAcc(bool refine) { (refine ? this->refine : this->online) = Acc{}; }
     void markForwardEnd()   { if (enabled) ev_fwd->record(); }
     void markLineLossEnd()  { if (enabled) ev_line->record(); }
     void markBackwardEnd()  { if (enabled) ev_bwd->record(); }
@@ -1132,15 +1137,32 @@ void GaussianMapperLine::preGenerateFrozenKfSequence(int n_steps)
     resetUsage();
     std::srand(static_cast<unsigned>(seq_seed));
     frozen_kf_seq_.reserve(static_cast<std::size_t>(n_steps));
+    // Evaluation views must never be sampled for training, otherwise the
+    // reported quality would be partly training quality.
+    auto isEvalView = [&](std::size_t idx) {
+        return std::find(frozen_eval_kf_seq_.begin(), frozen_eval_kf_seq_.end(), idx)
+               != frozen_eval_kf_seq_.end();
+    };
     for (int i = 0; i < n_steps; ++i) {
-        auto sel = useOneTrainingErrorSlidingWindowKeyframe();
-        if (!sel)
-            break;
+        std::shared_ptr<GaussianKeyframeLine> sel;
         std::size_t idx = 0;
-        for (auto it = scene_->keyframes().begin(); it != scene_->keyframes().end(); ++it, ++idx) {
-            if (it->second == sel)
+        bool found = false;
+        for (int attempt = 0; attempt < 64; ++attempt) {
+            sel = useOneTrainingErrorSlidingWindowKeyframe();
+            if (!sel)
                 break;
+            idx = 0;
+            for (auto it = scene_->keyframes().begin(); it != scene_->keyframes().end(); ++it, ++idx) {
+                if (it->second == sel)
+                    break;
+            }
+            if (!isEvalView(idx)) {
+                found = true;
+                break;
+            }
         }
+        if (!sel || !found)
+            break;
         frozen_kf_seq_.push_back(idx);
     }
     resetUsage();
@@ -1148,6 +1170,331 @@ void GaussianMapperLine::preGenerateFrozenKfSequence(int n_steps)
     frozen_kf_replay_ = false;
     std::cerr << "[FrozenABL] pre-generated kf sampling sequence: "
               << frozen_kf_seq_.size() << " steps (seed " << seq_seed << ")" << std::endl;
+}
+
+// ---------------------------------------------------------------------------
+// Fixed-geometry convergence experiment helpers.
+// ---------------------------------------------------------------------------
+namespace {
+// Persist a [3,H,W] float image in [0,1] as a PNG so metrics (LPIPS in
+// particular) can be recomputed offline on exactly the same views.
+void fgmSaveImage(const torch::Tensor& img, const std::filesystem::path& path)
+{
+    auto t = img.detach().to(torch::kCPU).clamp(0.0, 1.0).mul(255.0)
+                 .to(torch::kUInt8).contiguous();
+    if (t.dim() != 3 || t.size(0) != 3)
+        return;
+    const int H = static_cast<int>(t.size(1));
+    const int W = static_cast<int>(t.size(2));
+    std::vector<cv::Mat> ch(3);
+    for (int c = 0; c < 3; ++c)
+        ch[c] = cv::Mat(H, W, CV_8UC1, t[c].data_ptr<uint8_t>());
+    cv::Mat merged;
+    cv::merge(ch, merged);
+    cv::cvtColor(merged, merged, cv::COLOR_RGB2BGR);
+    cv::imwrite(path.string(), merged);
+}
+} // namespace
+
+// Hard guard: with the count frozen, ANY change to the Gaussian total or to the
+// number of line Gaussians is a bug and must be reported, not silently averaged
+// into the metrics.
+void GaussianMapperLine::assertFrozenCounts(const char* where)
+{
+    if (!frozen_fixed_count_ || !gaussians_ || !gaussians_->xyz_.defined())
+        return;
+    const long long n_all = static_cast<long long>(gaussians_->xyz_.size(0));
+    const long long n_line = (gaussians_->is_line_.defined() &&
+                              gaussians_->is_line_.numel() > 0)
+                                 ? gaussians_->is_line_.to(torch::kCPU).sum().item().toLong()
+                                 : 0LL;
+    if ((frozen_count_ref_all_ >= 0 && n_all != frozen_count_ref_all_) ||
+        (frozen_count_ref_line_ >= 0 && n_line != frozen_count_ref_line_)) {
+        std::cerr << "[FGM][COUNT-VIOLATION] " << where
+                  << ": total=" << n_all << " (ref " << frozen_count_ref_all_ << ")"
+                  << " line=" << n_line << " (ref " << frozen_count_ref_line_ << ")"
+                  << std::endl;
+        frozen_count_violation_ = 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mechanism diagnostics (see §六 of the task). All reads; the gradient probe is
+// env-gated and restores the gradient buffers so training is unaffected.
+// ---------------------------------------------------------------------------
+void GaussianMapperLine::diagAtFrozenStep(long long opt_steps, const std::string& tag)
+{
+    if (!gaussians_ || frozen_eval_kf_seq_.empty() || !gaussians_->xyz_.defined())
+        return;
+    if (!gaussians_->is_line_.defined() || gaussians_->is_line_.numel() == 0)
+        return;
+
+    const bool want_grad = (std::getenv("PHOTO_SLAM_FGM_GRAD_DIAG") != nullptr);
+    const auto mask = gaussians_->is_line_;
+
+    auto quant5 = [](const torch::Tensor& t, std::vector<double>& out) {
+        auto x = t.detach().to(torch::kCPU).flatten();
+        if (x.numel() == 0) {
+            for (int i = 0; i < 7; ++i) out.push_back(std::nan(""));
+            return;
+        }
+        auto q = torch::quantile(x, torch::tensor({0.0, 0.1, 0.5, 0.9, 1.0}));
+        for (int i = 0; i < 5; ++i) out.push_back(q[i].item<double>());
+        out.push_back(x.mean().item<double>());
+        out.push_back(x.std().item<double>());
+    };
+
+    std::vector<double> v;
+    {
+        torch::NoGradGuard ng;
+        // --- actual 3-axis scales and aspect ratio of the line Gaussians ---
+        auto s = torch::exp(gaussians_->scaling_).index({mask});   // [Nl,3]
+        auto s_par = s.index({torch::indexing::Slice(), 0});
+        auto s_perp = s.index({torch::indexing::Slice(),
+                               torch::indexing::Slice(1, 3)}).mean(1);
+        quant5(s_par, v);                                   // 7
+        quant5(s_perp, v);                                  // 7
+        quant5(s_par / (s_perp + 1e-12), v);                // 7
+        quant5(s.index({torch::indexing::Slice(), 1}), v);  // 7
+        quant5(s.index({torch::indexing::Slice(), 2}), v);  // 7
+        // --- line-Gaussian opacity (sigmoid) and contribution proxy ---
+        auto a_line = torch::sigmoid(gaussians_->opacity_).index({mask}).flatten();
+        auto a_all = torch::sigmoid(gaussians_->opacity_).flatten();
+        quant5(a_line, v);                                  // 7
+        v.push_back(a_line.sum().item<double>());
+        v.push_back(a_all.sum().item<double>());
+        v.push_back((a_line < 0.01f).sum().item<double>() / a_line.numel());
+        v.push_back((a_line < 0.05f).sum().item<double>() / a_line.numel());
+        v.push_back((s_par / (s_perp + 1e-12) < 2.0f).sum().item<double>() / s_par.numel());
+        // --- accumulated xyz gradient norm (combined loss, from the last step) ---
+        if (gaussians_->xyz_gradient_accum_.defined() &&
+            gaussians_->xyz_gradient_accum_.size(0) == mask.size(0))
+            quant5(gaussians_->xyz_gradient_accum_.index({mask}), v);
+        else
+            for (int i = 0; i < 7; ++i) v.push_back(std::nan(""));
+    }
+
+    // --- separated gradient magnitudes and their cosine angle (env-gated) ---
+    std::vector<double> g;
+    if (want_grad) {
+        try {
+            std::vector<std::shared_ptr<GaussianKeyframeLine>> views;
+            for (auto& kv : scene_->keyframes()) views.push_back(kv.second);
+            const std::size_t idx0 = frozen_eval_kf_seq_[0];
+            if (idx0 < views.size() && views[idx0]) {
+                auto pkf = views[idx0];
+                // photometric
+                gaussians_->optimizer_->zero_grad(true);
+                auto rp = GaussianRendererWithLine::renderWithLine(
+                    pkf, pkf->image_height_, pkf->image_width_, gaussians_,
+                    pipe_params_, background_, override_color_);
+                auto mi = std::get<0>(rp) * undistort_mask_[pkf->camera_id_];
+                loss_utils::l1_loss(mi, pkf->original_image_).backward();
+                torch::Tensor gp;
+                if (gaussians_->xyz_.grad().defined())
+                    gp = gaussians_->xyz_.grad().index({mask}).detach().clone();
+                gaussians_->optimizer_->zero_grad(true);
+                // structural (reference weights)
+                auto ls = gaussians_->computeVectorizedLineLoss(frozen_line_w_coherence_) +
+                          gaussians_->computeLineShapeConstraint(frozen_line_w_ecc_,
+                                                                 frozen_line_w_ori_);
+                ls.backward();
+                torch::Tensor gs;
+                if (gaussians_->xyz_.grad().defined())
+                    gs = gaussians_->xyz_.grad().index({mask}).detach().clone();
+                torch::Tensor gr, gsc;
+                if (gaussians_->rotation_.grad().defined())
+                    gr = gaussians_->rotation_.grad().index({mask}).detach().clone();
+                if (gaussians_->scaling_.grad().defined())
+                    gsc = gaussians_->scaling_.grad().index({mask}).detach().clone();
+                gaussians_->optimizer_->zero_grad(true);   // restore: grads were 0 here
+
+                auto qn = [](const torch::Tensor& t, std::vector<double>& out) {
+                    if (!t.defined() || t.numel() == 0) { out.push_back(std::nan("")); return; }
+                    out.push_back(torch::norm(t, 2).item<double>());
+                };
+                qn(gp, g);
+                qn(gs, g);
+                qn(gr, g);
+                qn(gsc, g);
+                if (gp.defined() && gs.defined() && gp.numel() > 0) {
+                    auto dot = (gp * gs).sum();
+                    auto den = torch::norm(gp, 2) * torch::norm(gs, 2) + 1e-30;
+                    g.push_back((dot / den).item<double>());   // cos angle
+                    g.push_back((gs.norm() / (gp.norm() + 1e-30)).item<double>());
+                } else {
+                    g.push_back(std::nan(""));
+                    g.push_back(std::nan(""));
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[FGM] grad diag failed: " << e.what() << std::endl;
+            g.clear();
+            for (int i = 0; i < 6; ++i) g.push_back(std::nan(""));
+        }
+    }
+
+    {
+        std::ofstream df(frozen_ablation_dir_ /
+                         (tag + "_diag_step" + std::to_string(opt_steps) + ".csv"));
+        df << "quantity,min,p10,p50,p90,max,mean,std\n";
+        const char* nm[] = {"scale_parallel", "scale_perp_mean", "aspect_ratio",
+                            "scale_axis1", "scale_axis2", "opacity_line"};
+        for (int i = 0; i < 6; ++i) {
+            df << nm[i];
+            for (int j = 0; j < 7; ++j)
+                df << ',' << std::setprecision(10) << v[i * 7 + j];
+            df << '\n';
+        }
+        // Scalars, written into the p50 column so the header still parses.
+        auto scalar = [&](const char* name, double val) {
+            df << name << ",," << std::setprecision(10) << val << ",,,\n";
+        };
+        scalar("opacity_line_sum", v[42]);
+        scalar("opacity_all_sum", v[43]);
+        scalar("frac_line_opacity_lt_0.01", v[44]);
+        scalar("frac_line_opacity_lt_0.05", v[45]);
+        scalar("frac_line_aspect_lt_2", v[46]);
+        if (v.size() >= 54) {
+            df << "xyz_grad_accum_line";
+            for (int j = 0; j < 7; ++j)
+                df << ',' << std::setprecision(10) << v[47 + j];
+            df << '\n';
+        }
+        if (!g.empty()) {
+            const char* gn[] = {"grad_xyz_photometric", "grad_xyz_structural",
+                                "grad_rotation_structural", "grad_scaling_structural",
+                                "cos_angle_photo_struct", "struct_over_photo_ratio"};
+            for (int i = 0; i < 6; ++i)
+                scalar(gn[i], (i < static_cast<int>(g.size())) ? g[i] : std::nan(""));
+        }
+    }
+    std::cerr << "[FGM][" << tag << "] diag step=" << opt_steps
+              << " aspect p50=" << v[2 * 7 + 2] << " opacity_line mean=" << v[5 * 7 + 5]
+              << " opacity_line_sum=" << v[42] << " frac_opacity_lt0.05=" << v[45]
+              << " frac_aspect_lt2=" << v[46]
+              << (g.size() > 4 ? (" cos=" + std::to_string(g[4])) : std::string())
+              << std::endl;
+}
+
+// Render a FIXED set of views and report mean PSNR/SSIM plus the eval wall time.
+// Guarantees:
+//   * NoGradGuard -> no gradient accumulation, no optimizer interaction.
+//   * The raw iteration_ counter is asserted unchanged by the caller.
+//   * Run-time render buffers are snapshotted and restored.
+//   * Caller re-checks paramFingerprint() to prove the parameters are untouched.
+void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string& tag,
+                                         double& psnr_out, double& ssim_out,
+                                         double& l1_out, double& struct_ori_out,
+                                         double& struct_shape_out,
+                                         double& eval_seconds_out)
+{
+    psnr_out = -1.0;
+    ssim_out = -1.0;
+    l1_out = -1.0;
+    struct_ori_out = -1.0;
+    struct_shape_out = -1.0;
+    eval_seconds_out = 0.0;
+    if (frozen_eval_kf_seq_.empty() || !gaussians_)
+        return;
+
+    std::vector<std::shared_ptr<GaussianKeyframeLine>> views;
+    std::vector<std::size_t> ids;
+    views.reserve(scene_->keyframes().size());
+    for (auto& kv : scene_->keyframes()) {
+        views.push_back(kv.second);
+        ids.push_back(kv.first);
+    }
+
+    const auto pdir = result_dir_ / ("eval_step" + std::to_string(opt_steps));
+    std::filesystem::create_directories(pdir);
+    const auto img_dir = pdir / "image";
+    const auto gt_dir = pdir / "image_gt";
+    std::filesystem::create_directories(img_dir);
+    std::filesystem::create_directories(gt_dir);
+    std::ofstream pf(pdir / "per_frame.csv");
+    pf << "step,variant,kf_index,kf_id,fid,psnr,ssim,l1\n";
+
+    torch::NoGradGuard ng;
+
+    torch::Tensor saved_radii, saved_hits, saved_alpha;
+    const bool had_radii = gaussians_->max_radii2D_.defined();
+    if (had_radii) saved_radii = gaussians_->max_radii2D_.clone();
+    const bool had_hits = gaussians_->debug_hit_count_.defined();
+    if (had_hits) saved_hits = gaussians_->debug_hit_count_.clone();
+    const bool had_alpha = gaussians_->debug_alpha_accum_.defined();
+    if (had_alpha) saved_alpha = gaussians_->debug_alpha_accum_.clone();
+
+    auto syncDev = [&]() {
+        if (device_type_ == torch::kCUDA && gaussians_->xyz_.defined() &&
+            gaussians_->xyz_.numel() > 0)
+            (void)gaussians_->xyz_.select(0, 0).sum().item<double>();
+    };
+
+    double sum_psnr = 0.0, sum_ssim = 0.0, sum_l1 = 0.0;
+    std::size_t n = 0;
+    syncDev();
+    const auto t0 = std::chrono::steady_clock::now();
+    for (std::size_t i = 0; i < frozen_eval_kf_seq_.size(); ++i) {
+        const std::size_t idx = frozen_eval_kf_seq_[i];
+        if (idx >= views.size() || !views[idx])
+            continue;
+        auto pkf = views[idx];
+        auto render_pkg = GaussianRendererWithLine::renderWithLine(
+            pkf, pkf->image_height_, pkf->image_width_, gaussians_,
+            pipe_params_, background_, override_color_);
+        torch::Tensor masked_image =
+            std::get<0>(render_pkg) * undistort_mask_[pkf->camera_id_];
+        auto gt_image = pkf->original_image_;
+        const float s = loss_utils::ssim(masked_image, gt_image, device_type_).item().toFloat();
+        const float p = loss_utils::psnr(masked_image, gt_image).item().toFloat();
+        const float l1 = loss_utils::l1_loss(masked_image, gt_image).item().toFloat();
+        sum_psnr += static_cast<double>(p);
+        sum_ssim += static_cast<double>(s);
+        sum_l1 += static_cast<double>(l1);
+        ++n;
+        // Persist render + GT for offline metrics (LPIPS).
+        {
+            char name[32];
+            std::snprintf(name, sizeof(name), "%06zu.png", static_cast<std::size_t>(pkf->fid_));
+            fgmSaveImage(masked_image, img_dir / name);
+            fgmSaveImage(gt_image, gt_dir / name);
+        }
+        pf << opt_steps << ',' << tag << ',' << idx << ',' << ids[idx] << ','
+           << pkf->fid_ << ',' << std::fixed << std::setprecision(8) << p << ','
+           << s << ',' << l1 << '\n';
+    }
+    syncDev();
+    eval_seconds_out = std::chrono::duration_cast<std::chrono::microseconds>(
+                           std::chrono::steady_clock::now() - t0).count() / 1e6;
+
+    if (n > 0) {
+        psnr_out = sum_psnr / static_cast<double>(n);
+        ssim_out = sum_ssim / static_cast<double>(n);
+        l1_out = sum_l1 / static_cast<double>(n);
+    }
+
+    // Structural diagnostics measured on the CURRENT state with FIXED reference
+    // weights, so variant B (structural loss disabled) and C (enabled) report
+    // exactly the same quantity. This is a state measurement, not the training
+    // loss of the variant.
+    try {
+        if (gaussians_->is_line_.defined() && gaussians_->is_line_.numel() > 0) {
+            struct_ori_out =
+                gaussians_->computeVectorizedLineLoss(1.0f).item().toFloat();
+            if (frozen_line_w_ecc_ > 0.0f || frozen_line_w_ori_ > 0.0f)
+                struct_shape_out = gaussians_->computeLineShapeConstraint(
+                                       frozen_line_w_ecc_, frozen_line_w_ori_)
+                                       .item().toFloat();
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[FGM] structural diagnostic failed: " << e.what() << std::endl;
+    }
+
+    if (had_radii && saved_radii.defined()) gaussians_->max_radii2D_.copy_(saved_radii);
+    if (had_hits && saved_hits.defined()) gaussians_->debug_hit_count_.copy_(saved_hits);
+    if (had_alpha && saved_alpha.defined()) gaussians_->debug_alpha_accum_.copy_(saved_alpha);
+    pf.close();
 }
 
 // Replay several mapper configurations on one frozen SLAM geometry.
@@ -1194,14 +1541,33 @@ void GaussianMapperLine::runFrozenAblation()
             if (!item.empty()) {
                 FrozenAblationCondition c;
                 c.tag = item;
-                if (item == "A") {
+                // The switch letter is the FIRST character, so the same
+                // configuration can be repeated in one process with distinct
+                // tags ("B0,B1") for a same-scene repeat control.
+                const char base = item[0];
+                if (base == 'A') {
                     c.use_line_gaussians = false; c.line_loss = false; c.directional_densify = false;
-                } else if (item == "B") {
+                } else if (base == 'B') {
                     c.use_line_gaussians = true;  c.line_loss = false; c.directional_densify = false;
-                } else if (item == "C") {
+                } else if (base == 'C') {
                     c.use_line_gaussians = true;  c.line_loss = true;  c.directional_densify = false;
-                } else if (item == "D") {
+                } else if (base == 'D') {
                     c.use_line_gaussians = true;  c.line_loss = true;  c.directional_densify = true;
+                } else if (base == 'E') {
+                    // orientation term only
+                    c.use_line_gaussians = true;  c.line_loss = true;
+                    c.directional_densify = false;
+                    c.w_position = 0.0f; c.w_ecc = 0.0f; c.w_orient = -1.0f;
+                } else if (base == 'F') {
+                    // eccentricity (elongation) term only
+                    c.use_line_gaussians = true;  c.line_loss = true;
+                    c.directional_densify = false;
+                    c.w_position = 0.0f; c.w_ecc = -1.0f; c.w_orient = 0.0f;
+                } else if (base == 'G') {
+                    // perpendicular offset (position) term only
+                    c.use_line_gaussians = true;  c.line_loss = true;
+                    c.directional_densify = false;
+                    c.w_position = -1.0f; c.w_ecc = 0.0f; c.w_orient = 0.0f;
                 } else {
                     std::cerr << "[FrozenABL] unknown condition '" << item << "' - skipped." << std::endl;
                     item.clear();
@@ -1257,6 +1623,77 @@ void GaussianMapperLine::runFrozenAblation()
     std::cerr << "[FrozenABL] input_hash=" << input_hash
               << " image_hash=" << image_hash << std::endl;
 
+    // ---- Fixed-geometry convergence experiment configuration ----
+    // Count freeze: densify/clone/split/prune, opacity reset, inactive-geo
+    // densify and repeated line sampling are all disabled, so the number of
+    // Gaussians (total and line) is constant for the whole run.
+    frozen_fixed_count_ = true;
+    if (const char* fc = std::getenv("PHOTO_SLAM_FROZEN_FIXED_COUNT"))
+        frozen_fixed_count_ = (std::atoi(fc) != 0);
+
+    // Evaluation points expressed in COMPLETED OPTIMIZER STEPS.
+    frozen_eval_steps_.clear();
+    {
+        std::string spec = "0,100,250,500,1000,2000,3000,5000";
+        if (const char* es = std::getenv("PHOTO_SLAM_FROZEN_EVAL_STEPS"))
+            spec = es;
+        std::string item;
+        auto flush = [&]() {
+            if (item.find_first_not_of(" \t") != std::string::npos) {
+                const long long v = std::atoll(item.c_str());
+                if (v >= 0 && v <= frozen_ablation_steps_)
+                    frozen_eval_steps_.push_back(v);
+            }
+            item.clear();
+        };
+        for (std::size_t i = 0; i <= spec.size(); ++i) {
+            if (i < spec.size() && spec[i] != ',') {
+                item += spec[i];
+                continue;
+            }
+            flush();
+        }
+        std::sort(frozen_eval_steps_.begin(), frozen_eval_steps_.end());
+        frozen_eval_steps_.erase(
+            std::unique(frozen_eval_steps_.begin(), frozen_eval_steps_.end()),
+            frozen_eval_steps_.end());
+        if (frozen_eval_steps_.empty() ||
+            frozen_eval_steps_.back() != static_cast<long long>(frozen_ablation_steps_))
+            frozen_eval_steps_.push_back(
+                static_cast<long long>(frozen_ablation_steps_));
+    }
+
+    // Fixed, shared evaluation views: deterministic, evenly spaced keyframes,
+    // identical for every variant and every repeat.
+    frozen_eval_kf_seq_.clear();
+    {
+        const std::size_t nkf = scene_->keyframes().size();
+        int want = 24;
+        if (const char* ne = std::getenv("PHOTO_SLAM_FROZEN_EVAL_VIEWS"))
+            want = std::atoi(ne);
+        if (want > 0 && nkf > 0) {
+            const std::size_t k =
+                std::min<std::size_t>(static_cast<std::size_t>(want), nkf);
+            for (std::size_t i = 0; i < k; ++i)
+                frozen_eval_kf_seq_.push_back((i * nkf) / k);
+        }
+    }
+    {
+        std::ofstream ef(frozen_ablation_dir_ / "eval_views.txt");
+        ef << "# fixed evaluation keyframes (index into keyframe map order)\n";
+        for (auto v : frozen_eval_kf_seq_)
+            ef << v << '\n';
+        std::ofstream sf(frozen_ablation_dir_ / "eval_steps.txt");
+        sf << "# completed_optimizer_steps\n";
+        for (auto v : frozen_eval_steps_)
+            sf << v << '\n';
+    }
+    std::cerr << "[FrozenABL] fixed_count=" << (frozen_fixed_count_ ? 1 : 0)
+              << " eval_views=" << frozen_eval_kf_seq_.size() << " eval_points=";
+    for (auto v : frozen_eval_steps_)
+        std::cerr << v << ' ';
+    std::cerr << std::endl;
+
     // ---- Pre-generate the shared keyframe sampling sequence ----
     preGenerateFrozenKfSequence(frozen_ablation_steps_);
     const std::string seq_hash = frozenAblHashHex(frozenAblJoinSeq(frozen_kf_seq_));
@@ -1268,6 +1705,68 @@ void GaussianMapperLine::runFrozenAblation()
     }
     std::cerr << "[FrozenABL] kf_sequence steps=" << frozen_kf_seq_.size()
               << " hash=" << seq_hash << std::endl;
+
+    // ---- Canonical initialisation checkpoint, shared by every variant ----
+    // Taken AFTER createFromPcd + trainingSetup and BEFORE any photometric
+    // optimizer step, so it is the untrained initialisation. A plain PLY is not
+    // enough: it cannot carry is_line_, line_dir_w_ or xyz_init_.
+    //
+    // If a checkpoint for THIS input already exists it is reused instead of being
+    // rebuilt, so the two conditions can be run in SEPARATE processes and still
+    // share one byte-identical initialisation. Identity of the input is checked
+    // via input_hash before reuse.
+    frozen_checkpoint_path_ = frozen_ablation_dir_ / "init_checkpoint.pt";
+    const std::filesystem::path fp_path = frozen_ablation_dir_ / "init_fingerprint.txt";
+    bool reused_checkpoint = false;
+    {
+        std::string rec_input_hash, rec_fp;
+        long long rec_all = -1, rec_line = -1;
+        if (std::filesystem::exists(frozen_checkpoint_path_) && std::filesystem::exists(fp_path)) {
+            std::ifstream cf(fp_path);
+            std::string k, v;
+            while (cf >> k >> v) {
+                if (k == "fingerprint") rec_fp = v;
+                else if (k == "gaussians") rec_all = std::atoll(v.c_str());
+                else if (k == "line_gaussians") rec_line = std::atoll(v.c_str());
+                else if (k == "input_hash") rec_input_hash = v;
+            }
+            if (!rec_fp.empty() && rec_input_hash == input_hash) {
+                frozen_ref_fingerprint_ = rec_fp;
+                frozen_count_ref_all_ = rec_all;
+                frozen_count_ref_line_ = rec_line;
+                reused_checkpoint = true;
+            } else {
+                std::cerr << "[FrozenABL] existing checkpoint rejected "
+                          << "(input_hash " << rec_input_hash << " vs " << input_hash
+                          << ") - rebuilding." << std::endl;
+            }
+        }
+    }
+    if (!reused_checkpoint) {
+        auto ref = std::make_shared<GaussianModelLine>(model_params_);
+        ref->createFromPcd(frozen_pcd, frozen_extent);
+        ref->trainingSetup(opt_params_);
+        frozen_ref_fingerprint_ = ref->paramFingerprint();
+        frozen_count_ref_all_ = static_cast<long long>(ref->getXYZ().size(0));
+        frozen_count_ref_line_ =
+            (ref->is_line_.defined() && ref->is_line_.numel() > 0)
+                ? ref->is_line_.to(torch::kCPU).sum().item().toLong()
+                : 0LL;
+        ref->saveInitCheckpoint(frozen_checkpoint_path_);
+        std::ofstream cf(fp_path);
+        cf << "fingerprint " << frozen_ref_fingerprint_ << "\n"
+           << "gaussians " << frozen_count_ref_all_ << "\n"
+           << "line_gaussians " << frozen_count_ref_line_ << "\n"
+           << "checkpoint " << frozen_checkpoint_path_.string() << "\n"
+           << "input_hash " << input_hash << "\n"
+           << "image_hash " << image_hash << "\n"
+           << "kf_seq_hash " << seq_hash << "\n";
+    }
+    std::cerr << "[FrozenABL] init checkpoint=" << frozen_checkpoint_path_.string()
+              << (reused_checkpoint ? " (REUSED)" : " (freshly built)")
+              << " fingerprint=" << frozen_ref_fingerprint_
+              << " gaussians=" << frozen_count_ref_all_
+              << " line_gaussians=" << frozen_count_ref_line_ << std::endl;
 
     // ---- Condition order: rotated per repeat so no condition always goes first ----
     std::vector<FrozenAblationCondition> order;
@@ -1285,10 +1784,18 @@ void GaussianMapperLine::runFrozenAblation()
         std::cerr << "[FrozenABL] condition order=" << os << std::endl;
     }
 
-    std::ofstream csv(frozen_ablation_dir_ / "summary.csv");
+    std::string cond_tags;
+    for (const auto& c : frozen_conditions_)
+        cond_tags += c.tag;
+    const std::filesystem::path summary_path =
+        frozen_ablation_dir_ / ("summary_" + cond_tags + ".csv");
+    std::ofstream csv(summary_path);
     csv << "condition,use_line_gaussians,line_loss,directional_densify,psnr,ssim,"
            "gaussians_init,gaussians_final,gaussians_point,gaussians_line,"
            "opt_steps,refine_seconds,nan,grad_finite,exit,"
+           "fixed_count,init_fingerprint,init_restore,init_fp_match,"
+           "count_violation,eval_count,eval_params_stable,mapping_seconds,"
+           "w_position_eff,w_ecc_eff,w_orient_eff,"
            "input_hash,image_hash,kf_seq_hash\n";
 
     for (const auto& c : order) {
@@ -1301,6 +1808,15 @@ void GaussianMapperLine::runFrozenAblation()
         int has_nan = -1;
         int grad_finite = -1;
         int exit_code = 0;
+        // --- fixed-geometry convergence experiment, per-condition state ---
+        double mapping_seconds = 0.0;
+        int init_restore = 0;
+        int init_fp_match = -1;
+        std::string init_fingerprint;
+        long long eval_count = 0;
+        int eval_params_stable = 1;
+        std::vector<std::vector<double>> eval_rows;
+        float w_position_eff = -1.0f, w_ecc_eff = -1.0f, w_orient_eff = -1.0f;
 
         try {
             // Identical input, minus the line-sampled seeds for the point baseline.
@@ -1318,18 +1834,68 @@ void GaussianMapperLine::runFrozenAblation()
             gaussians_->trainingSetup(opt_params_);
             n_gauss_init = gaussians_->getXYZ().size(0);
 
-            // Mapper-side switches.
-            opt_params_.weight_line_coherence_ = c.line_loss ? frozen_line_w_coherence_ : 0.0f;
-            opt_params_.weight_line_shape_ecc_ = c.line_loss ? frozen_line_w_ecc_ : 0.0f;
-            opt_params_.weight_line_shape_ori_ = c.line_loss ? frozen_line_w_ori_ : 0.0f;
+            // Restore the SAME initialisation checkpoint. The fingerprint covers
+            // xyz/opacity/scaling/rotation/SH AND is_line_/line_dir_w_/xyz_init_
+            // plus the Gaussian counts, which a plain PLY cannot express.
+            if (n_gauss_init == frozen_count_ref_all_) {
+                init_restore = static_cast<int>(
+                    gaussians_->restoreInitCheckpoint(frozen_checkpoint_path_));
+            } else {
+                std::cerr << "[FrozenABL][" << c.tag
+                          << "] cloud differs from the checkpoint reference ("
+                          << n_gauss_init << " vs " << frozen_count_ref_all_
+                          << ") - checkpoint NOT applied." << std::endl;
+            }
+            frozen_count_violation_ = 0;
+            frozen_eval_seconds_total_ = 0.0;
+            init_fingerprint = gaussians_->paramFingerprint();
+            init_fp_match = (init_fingerprint == frozen_ref_fingerprint_) ? 1 : 0;
+            if (!init_fp_match)
+                std::cerr << "[FrozenABL][" << c.tag
+                          << "] INIT FINGERPRINT MISMATCH: " << init_fingerprint
+                          << " != " << frozen_ref_fingerprint_ << std::endl;
+            assertFrozenCounts("after-restore");
+
+            // Mapper-side switches. `w_*` < 0 means "configuration value", which
+            // keeps the reported weights byte-identical to the config.
+            auto effW = [](float override_v, float cfg_v) {
+                return override_v >= 0.0f ? override_v : cfg_v;
+            };
+            opt_params_.weight_line_coherence_ =
+                c.line_loss ? effW(c.w_position, frozen_line_w_coherence_) : 0.0f;
+            opt_params_.weight_line_shape_ecc_ =
+                c.line_loss ? effW(c.w_ecc, frozen_line_w_ecc_) : 0.0f;
+            opt_params_.weight_line_shape_ori_ =
+                c.line_loss ? effW(c.w_orient, frozen_line_w_ori_) : 0.0f;
+            w_position_eff = opt_params_.weight_line_coherence_;
+            w_ecc_eff = opt_params_.weight_line_shape_ecc_;
+            w_orient_eff = opt_params_.weight_line_shape_ori_;
             ::setenv("PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY", c.directional_densify ? "1" : "0", 1);
 
             // Identical iteration counter, keyframe sampling budget and
             // sampling sequence for every condition and every repeat.
+            // Mapper-level per-run schedule state MUST be reset too, otherwise
+            // the second condition in a process starts from the first one's
+            // schedule: default_sh_ ramps 0->3 over 5000 steps and is not a
+            // member of the model, so it survived gaussians_.reset().
             iteration_ = 0;
             frozen_opt_steps_ = 0;
+            default_sh_ = 0;
+            ema_loss_for_log_ = 0.0f;
+            total_training_time_ms_ = 0.0;
+            frozen_train_views_flat_.clear();
             frozen_kf_replay_ = true;
             frozen_kf_step_ = 0;
+            // Per-keyframe training state also lives on the keyframes, which are
+            // shared by all conditions. getCurrentGausPyramidLevel() CONSUMES
+            // gaus_pyramid_times_of_use_ (15 uses per sub-level per keyframe), so
+            // without this reset the second condition would already have every
+            // pyramid budget exhausted and would train at full resolution while
+            // the first one trained on downsampled images.
+            for (auto& kfit : scene_->keyframes()) {
+                kfit.second->gaus_pyramid_times_of_use_ = kf_gaus_pyramid_times_of_use_;
+                kfit.second->tracking_error_ = 1.0f;
+            }
             for (auto& kfit : scene_->keyframes())
                 kfit.second->remaining_times_of_use_ = 1000;
             kfs_used_times_.clear();
@@ -1351,9 +1917,74 @@ void GaussianMapperLine::runFrozenAblation()
                     (void)gaussians_->xyz_.select(0, 0).sum().item<double>();
             };
             syncDevice();
+
+            // Evaluations sit at fixed COMPLETED-OPTIMIZER-STEP boundaries. Eval
+            // is a pure measurement: parameters and the raw iteration counter are
+            // re-checked around every eval point.
+            std::size_t next_eval = 0;
+            auto runDueEvals = [&]() {
+                while (next_eval < frozen_eval_steps_.size() &&
+                       frozen_eval_steps_[next_eval] == frozen_opt_steps_) {
+                    const long long it_before = getIteration();
+                    const std::string fp_before = gaussians_->paramFingerprint();
+                    double ep = -1.0, es = -1.0, el1 = -1.0, eori = -1.0, eshape = -1.0, et = 0.0;
+                    evalAtFrozenStep(frozen_opt_steps_, c.tag, ep, es, el1, eori, eshape, et);
+                    diagAtFrozenStep(frozen_opt_steps_, c.tag);
+                    const int fp_stable = (fp_before == gaussians_->paramFingerprint()) ? 1 : 0;
+                    const int it_stable = (getIteration() == it_before) ? 1 : 0;
+                    frozen_eval_seconds_total_ += et;
+                    const long long n_all = static_cast<long long>(gaussians_->getXYZ().size(0));
+                    const long long n_line = (gaussians_->is_line_.defined() &&
+                                              gaussians_->is_line_.numel() > 0)
+                                                 ? gaussians_->is_line_.to(torch::kCPU).sum().item().toLong()
+                                                 : 0LL;
+                    const int nan_free =
+                        torch::isfinite(gaussians_->getXYZ()).all().item<bool>() ? 1 : 0;
+                    // Schedule-identity witness: remaining pyramid budget over all
+                    // keyframes must match between conditions at every eval point.
+                    long long pyr_remaining = 0;
+                    for (const auto& kfit : scene_->keyframes())
+                        for (int v : kfit.second->gaus_pyramid_times_of_use_)
+                            pyr_remaining += v;
+                    eval_rows.push_back({static_cast<double>(frozen_opt_steps_),
+                                         static_cast<double>(getIteration()),
+                                         mapping_seconds, frozen_eval_seconds_total_, et,
+                                         ep, es, el1, eori, eshape,
+                                         static_cast<double>(fp_stable),
+                                         static_cast<double>(it_stable),
+                                         static_cast<double>(nan_free),
+                                         static_cast<double>(n_all),
+                                         static_cast<double>(n_line),
+                                         static_cast<double>(default_sh_),
+                                         static_cast<double>(pyr_remaining)});
+                    if (!fp_stable || !it_stable)
+                        eval_params_stable = 0;
+                    ++eval_count;
+                    std::cerr << "[FrozenABL][" << c.tag << "] eval step=" << frozen_opt_steps_
+                              << " psnr=" << ep << " ssim=" << es << " l1=" << el1
+                              << " struct_ori=" << eori << " struct_shape=" << eshape
+                              << " map_s=" << mapping_seconds << " eval_s=" << et
+                              << " params_unchanged=" << fp_stable
+                              << " iteration_unchanged=" << it_stable << std::endl;
+                    ++next_eval;
+                }
+            };
+            // Step-0 eval BEFORE any optimizer update: identical numbers here are
+            // the direct proof that both variants start from the same state.
+            runDueEvals();
+
             const auto t0 = std::chrono::steady_clock::now();
+            g_gpu_prof.resetAcc(prof_refine_phase_);
             while (frozen_opt_steps_ < frozen_ablation_steps_ && !isStopped()) {
+                syncDevice();
+                const auto t_step0 = std::chrono::steady_clock::now();
                 trainForOneIterationErrorGuided();
+                syncDevice();
+                mapping_seconds +=
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - t_step0).count() / 1e6;
+                assertFrozenCounts("training-step");
+                runDueEvals();
                 if (frozen_opt_steps_ % 2000 == 0 && frozen_opt_steps_ > 0)
                     std::cerr << "[FrozenABL][" << c.tag << "] opt_steps "
                               << frozen_opt_steps_ << " / " << frozen_ablation_steps_ << std::endl;
@@ -1362,6 +1993,39 @@ void GaussianMapperLine::runFrozenAblation()
             seconds = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count() / 1000.0;
             opt_steps = frozen_opt_steps_;
+
+            // Per-condition GPU section breakdown (needs PHOTO_SLAM_GPU_PROF=1).
+            if (std::getenv("PHOTO_SLAM_GPU_PROF")) {
+                std::cerr << "[FGM][" << c.tag << "] per-section profile:" << std::endl;
+                g_gpu_prof.print();
+            }
+
+            // Per-eval-point metrics: supports both the equal-step and the
+            // equal-mapping-time comparison.
+            {
+                std::ofstream mf(frozen_ablation_dir_ / (c.tag + "_metrics.csv"));
+                mf << "condition,completed_optimizer_steps,raw_iteration,"
+                      "cum_mapping_seconds,cum_eval_seconds,eval_seconds,"
+                      "eval_psnr,eval_ssim,eval_l1,struct_ori,struct_shape,"
+                      "params_unchanged,iteration_unchanged,params_finite,"
+                      "total_gaussians,line_gaussians,default_sh,pyr_remaining_uses\n";
+                for (const auto& r : eval_rows) {
+                    mf << c.tag;
+                    for (double v : r)
+                        mf << ',' << std::setprecision(10) << v;
+                    mf << '\n';
+                }
+            }
+
+            // The views ACTUALLY trained on, from the live selection path.
+            {
+                std::ofstream tv(frozen_ablation_dir_ / (c.tag + "_train_views.csv"));
+                tv << "condition,completed_optimizer_steps,kf_index,kf_fid\n";
+                for (std::size_t i = 0; i + 2 < frozen_train_views_flat_.size(); i += 3)
+                    tv << c.tag << ',' << frozen_train_views_flat_[i] << ','
+                       << frozen_train_views_flat_[i + 1] << ','
+                       << frozen_train_views_flat_[i + 2] << '\n';
+            }
 
             renderAndRecordAllKeyframes("_shutdown");
             savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
@@ -1409,6 +2073,11 @@ void GaussianMapperLine::runFrozenAblation()
             << n_pt_gauss << ',' << n_line_gauss << ','
             << opt_steps << ',' << seconds << ','
             << has_nan << ',' << grad_finite << ',' << exit_code << ','
+            << (frozen_fixed_count_ ? 1 : 0) << ',' << init_fingerprint << ','
+            << init_restore << ',' << init_fp_match << ','
+            << frozen_count_violation_ << ',' << eval_count << ','
+            << eval_params_stable << ',' << mapping_seconds << ','
+            << w_position_eff << ',' << w_ecc_eff << ',' << w_orient_eff << ','
             << input_hash << ',' << image_hash << ',' << seq_hash << '\n';
         csv.flush();
     }
@@ -1417,7 +2086,7 @@ void GaussianMapperLine::runFrozenAblation()
     frozen_kf_replay_ = false;
     result_dir_ = base_result_dir;
     std::cerr << "[FrozenABL] all conditions finished; summary: "
-              << (frozen_ablation_dir_ / "summary.csv").string() << std::endl;
+              << summary_path.string() << std::endl;
 }
 
 // gaussian_mapper_line.cpp
@@ -1641,7 +2310,12 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
     float w_shape_ecc = opt_params_.weight_line_shape_ecc_;     // 论文中的 omega_2   ///lambda_ecc
     float w_shape_ori = opt_params_.weight_line_shape_ori_;   // 论文中的 omega_3   ///lambda_shape
 
-    if (lineLossEvery() > 0 && (w_ori > 0.0f || w_shape_ecc > 0.0f)
+    // Formula-preserving: all three terms are individually weighted inside the
+    // callees, so the block must also be entered when ONLY the orientation weight
+    // is non-zero (otherwise an orientation-only ablation would silently be a
+    // no-op and would be misread as "the term has no effect").
+    if (lineLossEvery() > 0 &&
+        (w_ori > 0.0f || w_shape_ecc > 0.0f || w_shape_ori > 0.0f)
         && (getIteration() < 100 || getIteration() % lineLossEvery() == 0)) {
         torch::Tensor loss_str = torch::zeros({1}, torch::dtype(torch::kFloat32).device(device_type_));
         
@@ -1652,7 +2326,12 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
             loss_str = loss_str +  gaussians_->computeVectorizedLineLoss(w_ori);
         }
         // 形状各向异性约束 L_ecc
-        if (w_shape_ecc > 0.0f && w_shape_ori > 0.0f) {
+        // Formula-preserving decoupling: each term is already multiplied by its
+        // own weight inside computeLineShapeConstraint(), so calling it with only
+        // one weight non-zero changes no expression - it only allows the
+        // eccentricity and orientation terms to be ablated independently. The
+        // previous `&&` gate made them inseparable.
+        if (w_shape_ecc > 0.0f || w_shape_ori > 0.0f) {
             loss_str = loss_str + gaussians_->computeLineShapeConstraint(w_shape_ecc, w_shape_ori);
         }
         
@@ -1710,8 +2389,8 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
             getIteration() % keyframe_record_interval_ == 0)
             recordKeyframeRendered(masked_image, gt_image, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
 
-        // Densification
-        if (getIteration() < opt_params_.densify_until_iter_) {
+        // Densification (frozen-count experiment: count must not change)
+        if (!frozen_fixed_count_ && getIteration() < opt_params_.densify_until_iter_) {
             // Keep track of max radii in image-space for pruning
             gaussians_->max_radii2D_.index_put_(
                 {visibility_filter},
@@ -1954,7 +2633,12 @@ void GaussianMapperLine::trainForOneIteration()
     float w_shape_ecc = opt_params_.weight_line_shape_ecc_;     // 论文中的 omega_2   ///lambda_ecc
     float w_shape_ori = opt_params_.weight_line_shape_ori_;   // 论文中的 omega_3   ///lambda_shape
 
-    if (lineLossEvery() > 0 && (w_ori > 0.0f || w_shape_ecc > 0.0f)
+    // Formula-preserving: all three terms are individually weighted inside the
+    // callees, so the block must also be entered when ONLY the orientation weight
+    // is non-zero (otherwise an orientation-only ablation would silently be a
+    // no-op and would be misread as "the term has no effect").
+    if (lineLossEvery() > 0 &&
+        (w_ori > 0.0f || w_shape_ecc > 0.0f || w_shape_ori > 0.0f)
         && (getIteration() < 100 || getIteration() % lineLossEvery() == 0)) {
         torch::Tensor loss_str = torch::zeros({1}, torch::dtype(torch::kFloat32).device(device_type_));
         
@@ -1965,7 +2649,12 @@ void GaussianMapperLine::trainForOneIteration()
             loss_str = loss_str +  gaussians_->computeVectorizedLineLoss(w_ori);
         }
         // 形状各向异性约束 L_ecc
-        if (w_shape_ecc > 0.0f && w_shape_ori > 0.0f) {
+        // Formula-preserving decoupling: each term is already multiplied by its
+        // own weight inside computeLineShapeConstraint(), so calling it with only
+        // one weight non-zero changes no expression - it only allows the
+        // eccentricity and orientation terms to be ablated independently. The
+        // previous `&&` gate made them inseparable.
+        if (w_shape_ecc > 0.0f || w_shape_ori > 0.0f) {
             loss_str = loss_str + gaussians_->computeLineShapeConstraint(w_shape_ecc, w_shape_ori);
         }
         
@@ -2019,8 +2708,8 @@ void GaussianMapperLine::trainForOneIteration()
             getIteration() % keyframe_record_interval_ == 0)
             recordKeyframeRendered(masked_image, gt_image, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
 
-        // Densification
-        if (getIteration() < opt_params_.densify_until_iter_) {
+        // Densification (frozen-count experiment: count must not change)
+        if (!frozen_fixed_count_ && getIteration() < opt_params_.densify_until_iter_) {
             // Keep track of max radii in image-space for pruning
             gaussians_->max_radii2D_.index_put_(
                 {visibility_filter},
@@ -2158,6 +2847,9 @@ bool GaussianMapperLine::hasMetIncrementalMappingConditions()
 pointsLocal 确实几乎起不到什么作用;但是，在 Photo-SLAM 这个特定系统中，它有一个特定的用途，主要与 “几何加密策略 (Geometry Densification)” 有关，特别是在单目（Monocular）模式下。
 void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(std::shared_ptr<GaussianKeyframeLine> pkf)
 {
+    // Frozen-count experiment: adding Gaussians here would break the invariant.
+    if (frozen_fixed_count_ && frozen_kf_replay_)
+        return;
     // ...
     // 1. 将 pointsLocal 转为 Tensor
     torch::Tensor kps_point_local_tensor = torch::from_blob(pkf->kps_point_local_.data(), ...);
@@ -3333,6 +4025,12 @@ GaussianMapperLine::useOneTrainingErrorSlidingWindowKeyframe()
             kfs_used_times_[fid] = 1;
         else
             ++found->second;
+        // Record the view ACTUALLY handed to the trainer, from the live path
+        // (not from the pre-generated sequence): 3 ints per step =
+        // {completed_optimizer_steps, keyframe map-order index, keyframe fid}.
+        frozen_train_views_flat_.push_back(static_cast<int>(frozen_opt_steps_));
+        frozen_train_views_flat_.push_back(static_cast<int>(target));
+        frozen_train_views_flat_.push_back(static_cast<int>(fid));
         return sel;
     }
 
@@ -3438,6 +4136,9 @@ void GaussianMapperLine::cullKeyframes()
 void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
     std::shared_ptr<GaussianKeyframeLine> pkf)
 {
+    // Frozen-count experiment: adding Gaussians here would break the invariant.
+    if (frozen_fixed_count_ && frozen_kf_replay_)
+        return;
 // auto start_timing = std::chrono::steady_clock::now();
     torch::NoGradGuard no_grad;
 
