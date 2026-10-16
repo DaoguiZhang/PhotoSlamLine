@@ -24,6 +24,10 @@ New switches (all **default off**, normal online behaviour unchanged):
 | `PHOTO_SLAM_CREATION_AUDIT=<prefix>` | host-only creation audit → `<prefix>_events.csv`, `<prefix>_summary.txt` |
 | `PHOTO_SLAM_FGM_BWD_DECOMP=1` | backward decomposition at the frozen eval points |
 
+With the switch off the cost is one early-return branch per **creation** call (not per training
+step) plus one plain `long long` store in `updateLearningRate`; no device read, no file I/O, and
+`auditEvent` is never entered. Online behaviour and timing are unchanged.
+
 ---
 
 ## 一 Density-subset reconciliation
