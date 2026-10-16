@@ -75,6 +75,11 @@ From the same self-check (single kernel timings on identical inputs):
 | 2 003 | 0.430 ms | 0.225 ms | 2.119 ms |
 | 2 754 | 0.331 ms | 0.294 ms | 3.185 ms |
 | 143 515 | 8.387 ms | 10.954 ms | **62.419 ms** |
+| 153 428 | 4.911 ms | 4.958 ms | **32.180 ms** |
+
+The same two scales also reproduce the correctness failure (P = 153 428: noise floor max_abs
+≤ 1.7e-06, candidate max_abs 2.7e-03 on `mean2D` and 9.3e-01 on `conic2D`), so the failure is not a
+one-off at a single size.
 
 At real scale the candidate is **≈7× slower than the reference**. This is consistent with the cost
 model of the reduction I chose: the enumeration performs `__popc(act)` shuffles **per site**, i.e. up
