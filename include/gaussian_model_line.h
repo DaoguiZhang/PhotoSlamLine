@@ -306,6 +306,32 @@ public:
     void auditEvent(const char* entry, long long delta_in, long long delta_out);
     long long auditTotal() const { return xyz_.defined() ? xyz_.size(0) : 0; }
     bool auditEnabled() const { return audit_enabled_; }
+    long long auditIteration() const { return audit_iter_; }
+    const std::string& auditReasonLabel() const { return audit_reason_; }
+
+    // ===== mapper-budget-v1: creation-batch log + full snapshot ==============
+    // The creation log records every accepted creation batch (kind, iteration,
+    // xyz, rgb, world direction) in the exact order the model received it, so a
+    // later run can replay the SAME geometry input stream instead of
+    // re-deriving it from SLAM. Switch: PHOTO_SLAM_CREATION_LOG=<path>.
+    void creationLogInitIfNeeded();
+    void creationLogAppend(const std::string& kind, const torch::Tensor& xyz,
+                           const torch::Tensor& rgb, const torch::Tensor& dir);
+    bool creationLogEnabled() const { return clog_enabled_; }
+    // Full resumable snapshot (every tensor, not just a PLY).
+    void saveFullSnapshot(const std::string& path);
+    std::size_t loadFullSnapshot(const std::string& path);
+
+    // ===== mapper-budget-v1: line-population + metadata inheritance ==========
+    // Switch PHOTO_SLAM_LINE_POP_AUDIT=<prefix>. Each record costs one device
+    // read of is_line_, so this is CAPTURE-ONLY and must stay off in any run
+    // whose wall clock is used as a result. Writes two files:
+    //   <prefix>_linepop.csv     iteration, stage, total, line, ordinary
+    //   <prefix>_lineinherit.csv alignment of is_line_/xyz_init_/line_dir_w_
+    //                            against xyz_, and line rows with a zero
+    //                            direction (i.e. broken inheritance)
+    void linePopInitIfNeeded();
+    void linePopRecord(const char* stage);
 
     void rebuildParamVectors() { GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE }
     // --- creation-audit state (only touched when the env switch is on) ---
@@ -321,6 +347,12 @@ public:
     long long audit_add_ordinary_ = 0, audit_add_line_ = 0, audit_clone_ = 0,
               audit_split_ = 0, audit_prune_ = 0, audit_reset_ = 0,
               audit_peak_ = 0, audit_events_n_ = 0;
+    // creation-batch log state
+    bool clog_enabled_ = false, clog_initialised_ = false;
+    std::ofstream clog_out_;
+    // line-population audit state
+    bool lpop_enabled_ = false, lpop_initialised_ = false;
+    std::ofstream lpop_out_, lpop_struct_out_;
     torch::Tensor point_ids_; // [N] 类型为 kLong，存储每个点的唯一 ID （用于后续处理）
     torch::Tensor features_dc_;
     torch::Tensor features_rest_;

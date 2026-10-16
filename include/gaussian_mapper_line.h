@@ -370,6 +370,16 @@ public:
     // host vs device time per stage, and verifies that the split parameter
     // gradients match the original full path (tolerance stated in the source).
     void runBackwardDecomposition(const std::string& tag, long long step);
+    // mapper-budget-v1 capture support (all default off).
+    //   PHOTO_SLAM_SNAPSHOT_AT=<a,b,...> + PHOTO_SLAM_SNAPSHOT_DIR=<dir>
+    //     -> full resumable model snapshots (all tensors, not a PLY).
+    //   PHOTO_SLAM_LINE_SAMPLE_AUDIT=<prefix>
+    //     -> <prefix>_linesample.csv: candidate counts and per-reason rejections
+    //        at the line-sampling entry, so "only 3 line seeds" is explained by
+    //        data rather than by relaxing a threshold.
+    void maybeSnapshotAndAudit();
+    void lineSampleAuditLog(long long raw_points, long long candidates,
+                            long long rejected_voxel, long long accepted);
     // Numerical equivalence check (PHOTO_SLAM_FGM_EQCHECK=1): evaluates the
     // optimised and the reference structural-loss implementations on ONE
     // parameter snapshot and reports max|d loss| and max|d grad| per target
@@ -392,6 +402,10 @@ public:
     // Reference init fingerprint captured from the canonical checkpoint; every
     // variant must reproduce it after restoring + before the first step.
     std::string frozen_ref_fingerprint_;
+    // mapper-budget-v1 capture state
+    bool lsample_initialised_ = false;
+    std::ofstream lsample_out_;
+    long long lsample_calls_ = 0;
     long long frozen_raw_iter_ref_ = -1;
     // Actually-visited training views, recorded from the live training function
     // (not from the pre-generated sequence): 4 ints per step =

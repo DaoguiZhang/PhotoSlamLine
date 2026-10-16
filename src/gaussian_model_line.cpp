@@ -801,6 +801,25 @@ void GaussianModelLine::increasePcd(
     const int N = static_cast<int>(new_points.size());
     if (N == 0) return;
     CreationAuditGuard audit_guard(this, "add");   // perf-stage3: host-only
+    creationLogInitIfNeeded();                      // mapper-budget-v1
+    if (clog_enabled_) {
+        // Line seeds carry a world direction; log it so the replay can rebuild
+        // the same anisotropic initialisation without relaxing any threshold.
+        auto lx = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32));
+        auto lc = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32));
+        auto ld = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32));
+        auto ax = lx.accessor<float, 2>();
+        auto ac = lc.accessor<float, 2>();
+        auto ad = ld.accessor<float, 2>();
+        for (int i = 0; i < N; ++i) {
+            for (int k = 0; k < 3; ++k) {
+                ax[i][k] = static_cast<float>(new_points[i].xyz_(k));
+                ac[i][k] = static_cast<float>(new_points[i].color_(k));
+                ad[i][k] = static_cast<float>(new_points[i].line_dir_(k));
+            }
+        }
+        creationLogAppend(audit_reason_, lx, lc, ld);
+    }
 
     // 1. 准备 CPU 缓冲
     torch::Tensor xyz_cpu = torch::empty({N, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
@@ -1054,6 +1073,14 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
     if (num_new_points == 0)
         return;
     CreationAuditGuard audit_guard(this, "add");   // perf-stage3: host-only
+    creationLogInitIfNeeded();                      // mapper-budget-v1
+    if (clog_enabled_) {
+        auto lx = torch::from_blob(points.data(), {num_new_points, 3},
+                     torch::TensorOptions().dtype(torch::kFloat32)).clone();
+        auto lc = torch::from_blob(colors.data(), {num_new_points, 3},
+                     torch::TensorOptions().dtype(torch::kFloat32)).clone();
+        creationLogAppend(audit_reason_, lx, lc, torch::Tensor());
+    }
 
     // 1. 基础数据转换 (保持不变)
     torch::Tensor new_point_cloud = torch::from_blob(
@@ -1190,6 +1217,9 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
     if (num_new_points == 0)
         return;
     CreationAuditGuard audit_guard(this, "add");   // perf-stage3: host-only
+    creationLogInitIfNeeded();                      // mapper-budget-v1
+    if (clog_enabled_)
+        creationLogAppend(audit_reason_, new_point_cloud, new_colors, torch::Tensor());
 
     // 1. 更新稀疏点云缓存 (保持不变)
     if (sparse_points_xyz_.size(0) == 0) {
@@ -4859,6 +4889,165 @@ void GaussianModelLine::keepSubset(const torch::Tensor& keep_mask)
 // counted once in prune_removed iff the densify path actually removed it.
 // reset_opacity is recorded for traceability but creates/removes nothing.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// mapper-budget-v1: creation-batch log.
+// Records every ACCEPTED creation batch in the order the model received it, so
+// that a later run can replay the same geometry input stream. The record is a
+// flat binary stream of little-endian records:
+//     <iteration:int64> <kind_len:int32> <kind bytes> <n:int64>
+//     <xyz float32[n][3]> <rgb float32[n][3]> <dir float32[n][3]>
+// `dir` is zero for point batches. Only writes when the switch is set.
+// ---------------------------------------------------------------------------
+void GaussianModelLine::creationLogInitIfNeeded()
+{
+    if (clog_initialised_) return;
+    clog_initialised_ = true;
+    const char* p = std::getenv("PHOTO_SLAM_CREATION_LOG");
+    if (p == nullptr || p[0] == '\0') { clog_enabled_ = false; return; }
+    clog_out_.open(p, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!clog_out_.good()) { clog_enabled_ = false; return; }
+    clog_enabled_ = true;
+    std::cerr << "[CreationLog] enabled -> " << p << std::endl;
+}
+
+void GaussianModelLine::creationLogAppend(const std::string& kind,
+                                          const torch::Tensor& xyz,
+                                          const torch::Tensor& rgb,
+                                          const torch::Tensor& dir)
+{
+    if (!clog_enabled_ || !xyz.defined()) return;
+    const long long n = xyz.size(0);
+    if (n <= 0) return;
+    auto x = xyz.detach().to(torch::kCPU).to(torch::kFloat32).contiguous();
+    auto c = rgb.defined() ? rgb.detach().to(torch::kCPU).to(torch::kFloat32).contiguous()
+                           : torch::zeros_like(x);
+    auto d = dir.defined() ? dir.detach().to(torch::kCPU).to(torch::kFloat32).contiguous()
+                           : torch::zeros_like(x);
+    const std::int64_t it = static_cast<std::int64_t>(audit_iter_);
+    const std::int32_t kl = static_cast<std::int32_t>(kind.size());
+    clog_out_.write(reinterpret_cast<const char*>(&it), sizeof(it));
+    clog_out_.write(reinterpret_cast<const char*>(&kl), sizeof(kl));
+    clog_out_.write(kind.data(), kl);
+    const std::int64_t nn = n;
+    clog_out_.write(reinterpret_cast<const char*>(&nn), sizeof(nn));
+    clog_out_.write(reinterpret_cast<const char*>(x.data_ptr<float>()),
+                    n * 3 * sizeof(float));
+    clog_out_.write(reinterpret_cast<const char*>(c.data_ptr<float>()),
+                    n * 3 * sizeof(float));
+    clog_out_.write(reinterpret_cast<const char*>(d.data_ptr<float>()),
+                    n * 3 * sizeof(float));
+}
+
+// Full resumable snapshot: every tensor the mapper needs to continue, not just
+// the point cloud. Written with torch::save so the format is a normal tensor
+// archive (loadable from Python as well).
+void GaussianModelLine::saveFullSnapshot(const std::string& path)
+{
+    const auto cpu = [](const torch::Tensor& t) {
+        return t.defined() ? t.detach().to(torch::kCPU).contiguous() : torch::Tensor();
+    };
+    std::vector<torch::Tensor> ts = {
+        cpu(xyz_), cpu(features_dc_), cpu(features_rest_), cpu(scaling_),
+        cpu(opacity_), cpu(rotation_), cpu(is_line_), cpu(line_dir_w_),
+        cpu(xyz_init_), cpu(max_radii2D_), cpu(xyz_gradient_accum_),
+        cpu(denom_), cpu(exist_since_iter_), cpu(point_ids_),
+    };
+    std::filesystem::path p(path);
+    if (p.has_parent_path()) std::filesystem::create_directories(p.parent_path());
+    torch::save(ts, path);
+    linePopRecord("snapshot");     // mapper-budget-v1: population at snapshot time
+}
+
+std::size_t GaussianModelLine::loadFullSnapshot(const std::string& path)
+{
+    std::vector<torch::Tensor> ts;
+    try {
+        torch::load(ts, path);
+    } catch (const std::exception& e) {
+        std::cerr << "[Snapshot] load failed " << path << " : " << e.what() << std::endl;
+        return 0;
+    }
+    if (ts.size() < 9) {
+        std::cerr << "[Snapshot] " << path << ": expected >=9 groups, got "
+                  << ts.size() << std::endl;
+        return 0;
+    }
+    torch::NoGradGuard ng;
+    auto put = [&](torch::Tensor& dst, const torch::Tensor& src) {
+        if (src.defined()) { dst = src.to(device_type_).detach().requires_grad_(); }
+    };
+    put(xyz_, ts[0]);
+    put(features_dc_, ts[1]);
+    put(features_rest_, ts[2]);
+    put(scaling_, ts[3]);
+    put(opacity_, ts[4]);
+    put(rotation_, ts[5]);
+    put(is_line_, ts[6]);
+    put(line_dir_w_, ts[7]);
+    put(xyz_init_, ts[8]);
+    if (ts.size() > 9)  { max_radii2D_ = ts[9].to(device_type_); }
+    if (ts.size() > 10) { xyz_gradient_accum_ = ts[10].to(device_type_); }
+    if (ts.size() > 11) { denom_ = ts[11].to(device_type_); }
+    if (ts.size() > 12) { exist_since_iter_ = ts[12].to(device_type_); }
+    if (ts.size() > 13) { point_ids_ = ts[13].to(device_type_); }
+    invalidateLineCache();
+    rebuildParamVectors();
+    return static_cast<std::size_t>(xyz_.size(0));
+}
+
+// ---------------------------------------------------------------------------
+// mapper-budget-v1: line-population + metadata-inheritance audit.
+// Answers "how many line Gaussians exist at each stage" and "did the topology
+// operations inherit is_line_ / anchor (xyz_init_) / direction (line_dir_w_)
+// correctly". Each record reads a device tensor, so it is capture-only.
+// ---------------------------------------------------------------------------
+void GaussianModelLine::linePopInitIfNeeded()
+{
+    if (lpop_initialised_) return;
+    lpop_initialised_ = true;
+    const char* p = std::getenv("PHOTO_SLAM_LINE_POP_AUDIT");
+    if (p == nullptr || p[0] == '\0') { lpop_enabled_ = false; return; }
+    const std::string pre(p);
+    lpop_out_.open(pre + "_linepop.csv", std::ios::out | std::ios::trunc);
+    lpop_struct_out_.open(pre + "_lineinherit.csv", std::ios::out | std::ios::trunc);
+    if (!lpop_out_.good()) { lpop_enabled_ = false; return; }
+    lpop_out_ << "iteration,stage,total,line,ordinary\n";
+    lpop_struct_out_
+        << "iteration,stage,aligned_line,aligned_anchor,aligned_dir,line_zero_dir_rows\n";
+    lpop_enabled_ = true;
+    std::cerr << "[LinePopAudit] enabled -> " << pre << "_linepop.csv" << std::endl;
+}
+
+void GaussianModelLine::linePopRecord(const char* stage)
+{
+    linePopInitIfNeeded();
+    if (!lpop_enabled_) return;
+    torch::NoGradGuard ng;
+    const long long tot = auditTotal();
+    long long nl = -1;
+    if (is_line_.defined() && is_line_.numel() == tot)
+        nl = is_line_.to(torch::kCPU).to(torch::kBool).flatten().sum().item<std::int64_t>();
+    lpop_out_ << audit_iter_ << ',' << stage << ',' << tot << ',' << nl << ','
+              << (tot - (nl < 0 ? 0 : nl)) << '\n';
+    lpop_out_.flush();
+
+    const long long al_line = (is_line_.defined() && is_line_.numel() == tot) ? 1 : 0;
+    const long long al_anchor =
+        (xyz_init_.defined() && xyz_init_.size(0) == tot) ? 1 : 0;
+    const long long al_dir =
+        (line_dir_w_.defined() && line_dir_w_.size(0) == tot) ? 1 : 0;
+    long long zero_dir = -1;
+    if (al_line && al_dir && nl > 0) {
+        auto lm = is_line_.to(torch::kCPU).to(torch::kBool).flatten();
+        auto dd = line_dir_w_.to(torch::kCPU).to(torch::kFloat);
+        auto nrm = dd.norm(2, 1);
+        zero_dir = ((nrm < 1e-6f) & lm).sum().item<std::int64_t>();
+    }
+    lpop_struct_out_ << audit_iter_ << ',' << stage << ',' << al_line << ','
+                     << al_anchor << ',' << al_dir << ',' << zero_dir << '\n';
+    lpop_struct_out_.flush();
+}
+
 void GaussianModelLine::auditInitIfNeeded()
 {
     if (audit_initialised_) return;
@@ -4916,6 +5105,7 @@ void GaussianModelLine::auditEvent(const char* entry, long long delta_in, long l
       << "peak_total " << audit_peak_ << '\n'
       << "current_total " << total << '\n';
     s.flush();
+    linePopRecord(entry);          // mapper-budget-v1: population after this event
 }
 
 std::string GaussianModelLine::paramFingerprintNonLine(){

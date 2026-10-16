@@ -26,6 +26,7 @@
 #include <functional>
 #include <limits>
 #include <algorithm>
+#include <sstream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -1720,6 +1721,76 @@ void GaussianMapperLine::runBackwardDecomposition(const std::string& tag, long l
     sync();
 }
 
+// ---------------------------------------------------------------------------
+// mapper-budget-v1: capture support.
+//
+// maybeSnapshotAndAudit() persists a FULL resumable model snapshot (all tensors,
+// not a PLY) at the iterations listed in PHOTO_SLAM_SNAPSHOT_AT, plus the
+// mapper-side schedule state needed to interpret it. The later rounds load these
+// snapshots instead of restarting SLAM.
+//
+// lineSampleAuditLog() records, at the line-sampling entry, how many candidates
+// existed and why they were rejected. Its purpose is to explain - by data, not
+// by assumption - why the online run seeds almost no line Gaussians; nothing
+// here relaxes a threshold.
+// ---------------------------------------------------------------------------
+void GaussianMapperLine::maybeSnapshotAndAudit()
+{
+    static const std::vector<long long> at = []() {
+        std::vector<long long> v;
+        const char* e = std::getenv("PHOTO_SLAM_SNAPSHOT_AT");
+        if (e) {
+            std::stringstream ss(e);
+            std::string t;
+            while (std::getline(ss, t, ','))
+                if (!t.empty()) v.push_back(std::atoll(t.c_str()));
+        }
+        return v;
+    }();
+    static const std::string dir = []() {
+        const char* e = std::getenv("PHOTO_SLAM_SNAPSHOT_DIR");
+        return std::string(e ? e : "");
+    }();
+    if (dir.empty() || !gaussians_ || at.empty()) return;
+    const long long it = getIteration();
+    bool hit = false;
+    for (long long a : at) if (a == it) hit = true;
+    if (!hit) return;
+    const std::string sp = dir + "/model_step" + std::to_string(it) + ".pt";
+    gaussians_->saveFullSnapshot(sp);      // also records the line population
+    std::ofstream m(dir + "/state_step" + std::to_string(it) + ".txt");
+    m << "iteration " << it << '\n'
+      << "default_sh " << default_sh_ << '\n'
+      << "total_training_time_ms " << total_training_time_ms_ << '\n'
+      << "n_gaussians " << gaussians_->auditTotal() << '\n'
+      << "device " << (device_type_ == torch::kCUDA ? "cuda" : "cpu") << '\n';
+    m.flush();
+    std::cerr << "[Snapshot] step " << it << " -> " << sp << " (n="
+              << gaussians_->auditTotal() << ", sh=" << default_sh_ << ")"
+              << std::endl;
+}
+
+void GaussianMapperLine::lineSampleAuditLog(long long raw_points, long long candidates,
+                                            long long rejected_voxel, long long accepted)
+{
+    static const std::string prefix = []() {
+        const char* e = std::getenv("PHOTO_SLAM_LINE_SAMPLE_AUDIT");
+        return std::string(e ? e : "");
+    }();
+    if (prefix.empty()) return;
+    if (!lsample_initialised_) {
+        lsample_initialised_ = true;
+        lsample_out_.open(prefix + "_linesample.csv", std::ios::out | std::ios::trunc);
+        if (!lsample_out_.good()) return;
+        lsample_out_ << "iteration,raw_points,candidates,"
+                        "rejected_voxel_occupied,accepted\n";
+    }
+    ++lsample_calls_;
+    lsample_out_ << getIteration() << ',' << raw_points << ',' << candidates << ','
+                 << rejected_voxel << ',' << accepted << '\n';
+    lsample_out_.flush();
+}
+
 void GaussianMapperLine::runMicroBench(const std::string& tag, long long step)
 {
     if (!gaussians_ || frozen_eval_kf_seq_.empty() || !gaussians_->xyz_.defined())
@@ -2922,6 +2993,7 @@ void GaussianMapperLine::trainColmap()
 void GaussianMapperLine::trainForOneIterationErrorGuided()
 {
     increaseIteration(1);
+    maybeSnapshotAndAudit();   // mapper-budget-v1: full snapshots at fixed steps
     auto iter_start_timing = std::chrono::steady_clock::now();
 
     // Pick a random Camera
@@ -4007,6 +4079,9 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
                     // Push to GPU
                     if (!new_line_sample_points.empty()) {
+                        lineSampleAuditLog(raw_points, num_l_points,
+                                           filtered_points,
+                                           static_cast<long long>(new_line_sample_points.size()));
                         torch::NoGradGuard no_grad;
                         std::unique_lock<std::mutex> lock_render(mutex_render_);
                         
