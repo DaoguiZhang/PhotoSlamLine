@@ -320,6 +320,10 @@ public:
         // line rows are affected; ordinary Gaussians always keep their exact
         // initial parameters. Sets are deterministic and NESTED across fractions.
         float keep_line_frac = 1.0f;
+        // mapper-budget-v2-hash: fraction of the inactive-geo candidate pool the
+        // arm accepts. 1.0 = R100 (accept all), 0.5 = R50 (deterministic hash
+        // half of the SAME pool). This is the ONLY difference between the arms.
+        float inactive_keep = 1.0f;
     };
     std::vector<FrozenAblationCondition> frozen_conditions_;
     std::filesystem::path frozen_ablation_dir_;
@@ -380,6 +384,25 @@ public:
     void maybeSnapshotAndAudit();
     void lineSampleAuditLog(long long raw_points, long long candidates,
                             long long rejected_voxel, long long accepted);
+    // ===== mapper-budget-v2-hash =============================================
+    // Deterministic acceptance budget for the inactive-geo补点 pool.
+    //   PHOTO_SLAM_INACTIVE_KEEP   : 1.0 = R100 (accept all), 0.5 = R50
+    //   PHOTO_SLAM_INACTIVE_SEED   : fixed seed for the hash ranking
+    //   PHOTO_SLAM_BUDGET_DIR      : where the kept-index CSV + hashes go
+    // The ranking key is splitmix64(batch_kf_id, candidate_index, seed): a STABLE
+    // hash sample, NOT image-space stratification, and it makes no claim about
+    // surface coverage. Original candidate order is preserved for insertion.
+    void budgetInit();
+    void budgetSetCondition(float keep_frac, const std::string& dir);
+    bool applyInactiveBudget(torch::Tensor& pts, torch::Tensor& cols);
+    void budgetSummary();
+    // Replay driver: feeds the inactive-geo entry one frozen keyframe at a time,
+    // in ascending id order, at a fixed optimizer-step period, so the SAME
+    // external geometry stream is produced in every arm without the SLAM
+    // keyframe thread. Switch: PHOTO_SLAM_REPLAY_INACTIVE=1.
+    void replayInitInactiveDriver();
+    void replayDriveInactiveGeo();
+    void recordTrainStep();
     // Numerical equivalence check (PHOTO_SLAM_FGM_EQCHECK=1): evaluates the
     // optimised and the reference structural-loss implementations on ONE
     // parameter snapshot and reports max|d loss| and max|d grad| per target
@@ -406,6 +429,19 @@ public:
     bool lsample_initialised_ = false;
     std::ofstream lsample_out_;
     long long lsample_calls_ = 0;
+    // mapper-budget-v2-hash state
+    bool budget_initialised_ = false;
+    float budget_keep_frac_ = 1.0f;
+    std::uint64_t budget_seed_ = 20260101ULL;
+    std::string budget_dir_;
+    std::ofstream budget_kept_out_, budget_evt_out_, budget_step_out_;
+    long long budget_cur_kf_fid_ = -1;
+    long long budget_batches_ = 0, budget_cand_ = 0, budget_kept_ = 0;
+    bool replay_inactive_enabled_ = false;
+    std::size_t replay_kf_cursor_ = 0;
+    long long replay_inactive_period_ = 200;
+    std::vector<std::shared_ptr<GaussianKeyframeLine>> replay_kf_order_;
+    long long budget_flush_seconds_us_ = 0;
     long long frozen_raw_iter_ref_ = -1;
     // Actually-visited training views, recorded from the live training function
     // (not from the pre-generated sequence): 4 ints per step =

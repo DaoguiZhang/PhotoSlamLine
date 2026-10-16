@@ -1791,6 +1791,198 @@ void GaussianMapperLine::lineSampleAuditLog(long long raw_points, long long cand
     lsample_out_.flush();
 }
 
+// ---------------------------------------------------------------------------
+// mapper-budget-v2-hash: the ONE algorithmic variable of this round.
+//
+// R100 accepts every valid inactive-geo candidate; R50 accepts a deterministic
+// hash-selected half of the SAME candidate batch. The ranking key is
+// splitmix64(batch_keyframe_id, candidate_index, seed) - stable, consumes no
+// training random numbers, and keeps the original candidate order on insertion.
+// It is explicitly NOT image-space stratification and makes no coverage claim.
+// The selection (kept indices + their hashes) is written to disk for audit.
+// ---------------------------------------------------------------------------
+namespace {
+inline std::uint64_t splitmix64(std::uint64_t x)
+{
+    x += 0x9E3779B97F4A7C15ULL;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+    return x ^ (x >> 31);
+}
+}  // namespace
+
+void GaussianMapperLine::budgetInit()
+{
+    if (budget_initialised_) return;
+    budget_initialised_ = true;
+    if (const char* e = std::getenv("PHOTO_SLAM_INACTIVE_KEEP"))
+        budget_keep_frac_ = static_cast<float>(std::atof(e));
+    if (const char* e = std::getenv("PHOTO_SLAM_INACTIVE_SEED"))
+        budget_seed_ = static_cast<std::uint64_t>(std::strtoull(e, nullptr, 10));
+    if (const char* e = std::getenv("PHOTO_SLAM_BUDGET_DIR")) budget_dir_ = e;
+    if (!budget_dir_.empty()) {
+        std::filesystem::create_directories(budget_dir_);
+        budget_kept_out_.open(budget_dir_ + "/inactive_kept.csv", std::ios::out | std::ios::trunc);
+        budget_evt_out_.open(budget_dir_ + "/inactive_batches.csv", std::ios::out | std::ios::trunc);
+        budget_step_out_.open(budget_dir_ + "/train_steps.csv", std::ios::out | std::ios::trunc);
+        budget_kept_out_ << "batch,keyframe_fid,global_candidate_index,local_index,hash,kept\n";
+        budget_evt_out_ << "batch,iteration,keyframe_fid,candidates,kept,keep_frac,seed\n";
+        budget_step_out_ << "raw_iteration,route,keep_frac\n";
+    }
+    std::cerr << "[Budget] keep_frac=" << budget_keep_frac_ << " seed=" << budget_seed_
+              << " dir=" << budget_dir_ << std::endl;
+}
+
+bool GaussianMapperLine::applyInactiveBudget(torch::Tensor& pts, torch::Tensor& cols)
+{
+    budgetInit();
+    const long long N = pts.defined() ? pts.size(0) : 0;
+    if (N <= 0) return false;
+    const long long base = budget_cand_;
+    ++budget_batches_;
+
+    if (budget_keep_frac_ >= 1.0f) {                 // R100: accept the whole batch
+        budget_cand_ += N;
+        budget_kept_ += N;
+        if (budget_evt_out_.is_open())
+            budget_evt_out_ << budget_batches_ << ',' << getIteration() << ','
+                            << budget_cur_kf_fid_ << ',' << N << ',' << N << ','
+                            << budget_keep_frac_ << ',' << budget_seed_ << '\n';
+        return false;                                 // tensors unchanged
+    }
+
+    const long long n_keep =
+        std::max(0LL, static_cast<long long>(std::llround(budget_keep_frac_ * static_cast<double>(N))));
+    std::vector<std::uint64_t> h(static_cast<std::size_t>(N));
+    for (long long i = 0; i < N; ++i) {
+        const std::uint64_t key =
+            splitmix64(static_cast<std::uint64_t>(budget_cur_kf_fid_ + 1) * 0x100000001B3ULL ^
+                       static_cast<std::uint64_t>(base + i) * 0xC2B2AE3D27D4EB4FULL ^
+                       budget_seed_);
+        h[static_cast<std::size_t>(i)] = key;
+    }
+    torch::Tensor ht;
+    {
+        std::vector<std::int64_t> hi(static_cast<std::size_t>(N));
+        for (long long i = 0; i < N; ++i) hi[static_cast<std::size_t>(i)] = static_cast<std::int64_t>(h[static_cast<std::size_t>(i)]);
+        ht = torch::from_blob(hi.data(), {N}, torch::TensorOptions().dtype(torch::kLong)).clone();
+    }
+    auto order = std::get<1>(torch::sort(ht, /*dim=*/0));          // ascending by hash
+    auto keep_local = order.index({torch::indexing::Slice(0, n_keep)});
+    auto mask = torch::zeros({N}, torch::TensorOptions().dtype(torch::kBool));
+    mask.index_put_({keep_local}, true);
+
+    if (budget_kept_out_.is_open()) {
+        auto local = torch::nonzero(mask).flatten();
+        auto lc = local.to(torch::kCPU);
+        auto ac = lc.accessor<std::int64_t, 1>();
+        for (long long i = 0; i < lc.size(0); ++i) {
+            const long long li = ac[i];
+            budget_kept_out_ << budget_batches_ << ',' << budget_cur_kf_fid_ << ','
+                             << (base + li) << ',' << li << ',' << h[static_cast<std::size_t>(li)]
+                             << ',' << 1 << '\n';
+        }
+        budget_kept_out_.flush();
+    }
+    budget_cand_ += N;
+    budget_kept_ += n_keep;
+    if (budget_evt_out_.is_open()) {
+        budget_evt_out_ << budget_batches_ << ',' << getIteration() << ','
+                        << budget_cur_kf_fid_ << ',' << N << ',' << n_keep << ','
+                        << budget_keep_frac_ << ',' << budget_seed_ << '\n';
+        budget_evt_out_.flush();
+    }
+    auto mdev = mask.to(pts.device());
+    pts = pts.index({mdev}).contiguous();
+    if (cols.defined()) cols = cols.index({mdev}).contiguous();
+    return true;                                      // tensors filtered
+}
+
+void GaussianMapperLine::budgetSetCondition(float keep_frac, const std::string& dir)
+{
+    budget_keep_frac_ = keep_frac;
+    budget_dir_ = dir;
+    budget_initialised_ = true;          // overrides any env-based init
+    budget_batches_ = budget_cand_ = budget_kept_ = 0;
+    if (budget_kept_out_.is_open()) budget_kept_out_.close();
+    if (budget_evt_out_.is_open()) budget_evt_out_.close();
+    if (budget_step_out_.is_open()) budget_step_out_.close();
+    if (!budget_dir_.empty()) {
+        std::filesystem::create_directories(budget_dir_);
+        budget_kept_out_.open(budget_dir_ + "/inactive_kept.csv", std::ios::out | std::ios::trunc);
+        budget_evt_out_.open(budget_dir_ + "/inactive_batches.csv", std::ios::out | std::ios::trunc);
+        budget_kept_out_ << "batch,keyframe_fid,global_candidate_index,local_index,hash,kept\n";
+        budget_evt_out_ << "batch,iteration,keyframe_fid,candidates,kept,keep_frac,seed\n";
+    }
+    std::cerr << "[Budget][" << budget_dir_ << "] keep_frac=" << budget_keep_frac_
+              << " seed=" << budget_seed_ << std::endl;
+}
+
+void GaussianMapperLine::budgetSummary(){
+    if (budget_evt_out_.is_open()) {
+        std::cerr << "[Budget] batches=" << budget_batches_ << " candidates=" << budget_cand_
+                  << " kept=" << budget_kept_ << " keep_frac=" << budget_keep_frac_
+                  << " effective="
+                  << (budget_cand_ > 0 ? static_cast<double>(budget_kept_) / budget_cand_ : 0.0)
+                  << std::endl;
+    }
+}
+
+void GaussianMapperLine::recordTrainStep()
+{
+    // Per-step CSV only when explicitly asked for; the formal timing run leaves
+    // it off so the hook costs one static-bool test plus the (cheap) snapshot
+    // check.
+    static const bool log_steps = (std::getenv("PHOTO_SLAM_BUDGET_STEPS") != nullptr);
+    if (log_steps) {
+        budgetInit();
+        if (budget_step_out_.is_open())
+            budget_step_out_ << getIteration() << ",train," << budget_keep_frac_ << '\n';
+    }
+    // Unified snapshot trigger: fires for step 0 / 100 / 9000 / 20000 whether the
+    // step was executed by trainForOneIterationErrorGuided() or
+    // trainForOneIteration().
+    maybeSnapshotAndAudit();
+}
+
+void GaussianMapperLine::replayInitInactiveDriver()
+{
+    const char* e = std::getenv("PHOTO_SLAM_REPLAY_INACTIVE");
+    replay_inactive_enabled_ = (e != nullptr && std::atoi(e) != 0);
+    // The depth cache and its cursor are per-run accumulators. Without this the
+    // second arm would inherit the FIRST arm's leftover candidates and the two
+    // arms would no longer share the same external stream (measured: R50's first
+    // batch contained keyframe ids left over from R100).
+    depth_cached_ = 0;
+    depth_cache_points_ = torch::Tensor();
+    depth_cache_colors_ = torch::Tensor();
+    replay_kf_cursor_ = 0;
+    if (!replay_inactive_enabled_ || !scene_) return;
+    replay_kf_order_.clear();
+    for (auto& kv : scene_->keyframes()) replay_kf_order_.push_back(kv.second);
+    if (const char* p = std::getenv("PHOTO_SLAM_REPLAY_INACTIVE_PERIOD"))
+        replay_inactive_period_ = std::atoll(p);
+    if (replay_inactive_period_ < 1) replay_inactive_period_ = 1;
+    std::cerr << "[ReplayInactive] keyframes=" << replay_kf_order_.size()
+              << " period=" << replay_inactive_period_ << std::endl;
+}
+
+void GaussianMapperLine::replayDriveInactiveGeo()
+{
+    if (!replay_inactive_enabled_ || frozen_fixed_count_) return;
+    if (replay_kf_cursor_ >= replay_kf_order_.size()) return;
+    if (getIteration() % replay_inactive_period_ != 0) return;
+    auto pkf = replay_kf_order_[replay_kf_cursor_++];
+    if (!pkf) return;
+    // Deterministic: one frozen keyframe per period, ascending id order, the same
+    // in every arm. This replaces the SLAM keyframe thread as the supplier of the
+    // external geometry stream; the candidate GENERATION is therefore not
+    // re-measured here (stated explicitly in the report).
+    pkf->done_inactive_geo_densify_ = false;
+    budget_cur_kf_fid_ = static_cast<long long>(pkf->fid_);
+    increasePcdByKeyframeInactiveGeoDensify(pkf);
+}
+
 void GaussianMapperLine::runMicroBench(const std::string& tag, long long step)
 {
     if (!gaussians_ || frozen_eval_kf_seq_.empty() || !gaussians_->xyz_.defined())
@@ -2332,6 +2524,14 @@ void GaussianMapperLine::runFrozenAblation()
                     c.use_line_gaussians = true;  c.line_loss = true;
                     c.directional_densify = false;
                     c.w_position = 0.0f; c.w_ecc = -1.0f; c.w_orient = 0.0f;
+                } else if (base == 'R' && item.size() > 1 && (item.substr(1) == "100" || item.substr(1) == "50")) {
+                    // mapper-budget-v2-hash: the ONE algorithmic variable.
+                    // Both arms identical except the inactive-geo acceptance
+                    // fraction. Line structural loss OFF, no directional densify,
+                    // no line-Gaussian subsetting.
+                    c.use_line_gaussians = true;  c.line_loss = false;
+                    c.directional_densify = false;
+                    c.inactive_keep = (item.substr(1) == "100") ? 1.0f : 0.5f;
                 } else if (base == 'Q') {
                     // Line-density conditions: ordinary Gaussians untouched,
                     // structural loss OFF, only the number of line Gaussians
@@ -2341,6 +2541,15 @@ void GaussianMapperLine::runFrozenAblation()
                     const std::string num = item.substr(1);
                     const int pct = num.empty() ? 100 : std::atoi(num.c_str());
                     c.keep_line_frac = static_cast<float>(pct) / 100.0f;
+                } else if (base == 'R' && item.size() > 1 &&
+                           (item.substr(1) == "100" || item.substr(1) == "50")) {
+                    // mapper-budget-v2-hash: the ONE algorithmic variable.
+                    // Both arms are identical except for the inactive-geo
+                    // acceptance fraction. Line structural loss OFF, no
+                    // directional densify, no line-Gaussian subsetting.
+                    c.use_line_gaussians = true;  c.line_loss = false;
+                    c.directional_densify = false;
+                    c.inactive_keep = (item.substr(1) == "100") ? 1.0f : 0.5f;
                 } else if (base == 'J' || base == 'K') {
                     // all three structural terms, implementation forced:
                     //   J = pre-optimisation (S-original), K = optimised (S-fast)
@@ -2694,6 +2903,7 @@ void GaussianMapperLine::runFrozenAblation()
             frozen_train_views_flat_.clear();
             frozen_kf_replay_ = true;
             frozen_kf_step_ = 0;
+            replayInitInactiveDriver();   // mapper-budget-v2-hash: reset per condition
             // Per-keyframe training state also lives on the keyframes, which are
             // shared by all conditions. getCurrentGausPyramidLevel() CONSUMES
             // gaus_pyramid_times_of_use_ (15 uses per sub-level per keyframe), so
@@ -2716,6 +2926,8 @@ void GaussianMapperLine::runFrozenAblation()
 
             result_dir_ = base_result_dir / c.tag;
             std::filesystem::create_directories(result_dir_);
+            // mapper-budget-v2-hash: per-condition budget + its own audit files.
+            budgetSetCondition(c.inactive_keep, result_dir_.string());
 
             // Train wall time covers exactly the optimizer steps (boundaries
             // synchronised so pending CUDA work is not billed to metrics).
@@ -2792,6 +3004,11 @@ void GaussianMapperLine::runFrozenAblation()
             while (frozen_opt_steps_ < frozen_ablation_steps_ && !isStopped()) {
                 syncDevice();
                 const auto t_step0 = std::chrono::steady_clock::now();
+                // mapper-budget-v2-hash: supply the external geometry stream (the
+                // inactive-geo补点 entry) deterministically BEFORE the step, so the
+                // accepted points take part in that step's photometric update.
+                // Identical order and payload in every arm; no SLAM KF thread.
+                replayDriveInactiveGeo();
                 trainForOneIterationErrorGuided();
                 syncDevice();
                 mapping_seconds +=
@@ -5000,6 +5217,8 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
     // produces so ordinary MapPoint seeding can be told apart from it.
     gaussians_->auditSetReason("inactive_geo_densify");
     gaussians_->auditInitIfNeeded();
+    budgetInit();                                   // mapper-budget-v2-hash
+    budget_cur_kf_fid_ = static_cast<long long>(pkf->fid_);
     // Frozen-count experiment: adding Gaussians here would break the invariant.
     if (frozen_fixed_count_ && frozen_kf_replay_)
         return;
@@ -5240,7 +5459,12 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
         depth_cached_ = 0;
         // Add new points to the model
         std::unique_lock<std::mutex> lock_render(mutex_render_);
-        gaussians_->increasePcd(depth_cache_points_, depth_cache_colors_, getIteration());
+        // mapper-budget-v2-hash: the ONLY algorithmic variable. R100 passes the
+        // batch through unchanged; R50 replaces it with a deterministic
+        // hash-selected half of the SAME candidate pool.
+        torch::Tensor pts = depth_cache_points_, cols = depth_cache_colors_;
+        applyInactiveBudget(pts, cols);
+        gaussians_->increasePcd(pts, cols, getIteration());
     }
 
 // auto end_timing = std::chrono::steady_clock::now();
@@ -5639,8 +5863,14 @@ int GaussianMapperLine::getIteration()
 }
 void GaussianMapperLine::increaseIteration(const int inc)
 {
-    std::unique_lock<std::mutex> lock(mutex_status_);
-    iteration_ += inc;
+    {
+        std::unique_lock<std::mutex> lock(mutex_status_);
+        iteration_ += inc;
+    }
+    // mapper-budget-v2-hash: the ONE place BOTH training loops pass through, so
+    // the per-step record and the snapshot trigger fire regardless of route.
+    // Called AFTER the status lock is released (the snapshot writes 10s of MB).
+    recordTrainStep();
 }
 
 float GaussianMapperLine::positionLearningRateInit()
