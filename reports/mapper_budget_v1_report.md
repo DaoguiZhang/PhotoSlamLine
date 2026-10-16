@@ -113,8 +113,10 @@ must not be forced to carry one. That gap is stated, not filled by proximity.
 
 1. **Only one of the two requested snapshots fired.** `PHOTO_SLAM_SNAPSHOT_AT=9000,20000` produced
    `snapshots/model_step20000.pt` only (193 354 Gaussians, `default_sh=3`, 55 MB, full tensors).
-   The trigger is checked in `trainForOneIterationErrorGuided()`; step 9000 was executed by
-   `trainForOneIteration()`, which is not hooked. Fixing it needs the second hook plus a re-capture.
+   Verified cause: the online run executes **both** training loops — `trainForOneIterationErrorGuided()`
+   (called at `src/gaussian_mapper_line.cpp:920`) and `trainForOneIteration()` (at
+   `src/gaussian_mapper_line.cpp:761`/`805`) — and the snapshot trigger is only in the first. Fixing it
+   needs the same hook in `trainForOneIteration()` plus a re-capture.
 2. `creation_log.bin` records kind + iteration + xyz + rgb (+ direction for line seeds) but **not**
    the per-step training-view schedule, so a replay cannot yet reproduce the captured view order —
    only the recorded creation stream. Both are required before the paired replay is meaningful.
