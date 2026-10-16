@@ -24,6 +24,7 @@ namespace BACKWARD
 		const dim3 grid, dim3 block,
 		const uint2* ranges,
 		const uint32_t* point_list,
+		const int n_gaussians,
 		int W, int H,
 		const float* bg_color,
 		const float2* means2D,

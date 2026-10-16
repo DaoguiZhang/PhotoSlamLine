@@ -10,6 +10,10 @@
  */
 
 #include "backward.h"
+#include <cstdlib>
+#include <cstdio>
+#include <cmath>
+#include <vector>
 #include "auxiliary.h"
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
@@ -395,8 +399,51 @@ __global__ void preprocessCUDA(
 		computeCov3D(idx, scales[idx], scale_modifier, rotations[idx], dL_dcov3D, dL_dscale, dL_drot);
 }
 
+// ---------------------------------------------------------------------------
+// raster-perf-v2: warp-aggregated gradient write-back (candidate backend).
+//
+// PRECONDITION, verified in this file: inside the inner loop `global_id` is read
+// from `collected_id[j]` (SHARED memory), so it is identical for every thread of
+// the block at a given inner-loop step. All participating lanes therefore write
+// to the SAME Gaussian and the SAME gradient component, and different Gaussians
+// can never be mixed. Lanes that left the loop via `continue` (power > 0,
+// alpha < 1/255) or that had already reached last_contributor are not in
+// __activemask() and are excluded, so no contribution is dropped or duplicated.
+//
+// The reduction enumerates the active lanes explicitly, with a trip count that
+// is uniform for every lane in the active mask. That is valid for ANY subset of
+// lanes - unlike a butterfly shuffle over a partial mask, which would read from
+// lanes outside the mask. Exactly one lane per active mask issues one atomicAdd
+// per gradient component.
+//
+// Semantics preserved: the per-pixel transmittance recursion, the colour
+// recursion, the alpha threshold, the early exits and every gradient formula are
+// untouched; only the summation order of the write-back changes, which float
+// addition permits.
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ void warp_agg_add(float* __restrict__ addr, const float val)
+{
+	const unsigned act = __activemask();
+	if (act == 0) return;
+	const int n = __popc(act);
+	float total = 0.0f;
+	for (int i = 0; i < n; ++i)
+	{
+		// __fns(mask, base, offset) searches for the offset-th set bit AFTER bit
+		// `base`; offset is 0-based from `base`. Passing i (not i+1) enumerates
+		// every active lane exactly once, starting with the lowest one.
+		const int lane = __fns(act, 0, i);
+		if (lane < 0) break;
+		total += __shfl_sync(act, val, lane);
+	}
+	if ((unsigned)(threadIdx.x & 31u) == (unsigned)(__ffs(act) - 1))
+		atomicAdd(addr, total);
+}
+
+#define AGGADD(PTR, VAL) do { if (AGG) warp_agg_add((PTR), (VAL)); else atomicAdd((PTR), (VAL)); } while (0)
+
 // Backward version of the rendering procedure.
-template <uint32_t C>
+template <uint32_t C, bool AGG>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
 	const uint2* __restrict__ ranges,
@@ -520,7 +567,7 @@ renderCUDA(
 				// Update the gradients w.r.t. color of the Gaussian. 
 				// Atomic, since this pixel is just one of potentially
 				// many that were affected by this Gaussian.
-				atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
+				AGGADD(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
 			}
 			dL_dalpha *= T;
 			// Update last alpha (to be used in the next iteration)
@@ -542,16 +589,16 @@ renderCUDA(
 			const float dG_ddely = -gdy * con_o.z - gdx * con_o.y;
 
 			// Update gradients w.r.t. 2D mean position of the Gaussian
-			atomicAdd(&dL_dmean2D[global_id].x, dL_dG * dG_ddelx * ddelx_dx);
-			atomicAdd(&dL_dmean2D[global_id].y, dL_dG * dG_ddely * ddely_dy);
+			AGGADD(&dL_dmean2D[global_id].x, dL_dG * dG_ddelx * ddelx_dx);
+			AGGADD(&dL_dmean2D[global_id].y, dL_dG * dG_ddely * ddely_dy);
 
 			// Update gradients w.r.t. 2D covariance (2x2 matrix, symmetric)
-			atomicAdd(&dL_dconic2D[global_id].x, -0.5f * gdx * d.x * dL_dG);
-			atomicAdd(&dL_dconic2D[global_id].y, -0.5f * gdx * d.y * dL_dG);
-			atomicAdd(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);
+			AGGADD(&dL_dconic2D[global_id].x, -0.5f * gdx * d.x * dL_dG);
+			AGGADD(&dL_dconic2D[global_id].y, -0.5f * gdx * d.y * dL_dG);
+			AGGADD(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);
 
 			// Update gradients w.r.t. opacity of the Gaussian
-			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
+			AGGADD(&(dL_dopacity[global_id]), G * dL_dalpha);
 		}
 	}
 }
@@ -625,6 +672,7 @@ void BACKWARD::render(
 	const dim3 grid, const dim3 block,
 	const uint2* ranges,
 	const uint32_t* point_list,
+	const int n_gaussians,
 	int W, int H,
 	const float* bg_color,
 	const float2* means2D,
@@ -638,20 +686,110 @@ void BACKWARD::render(
 	float* dL_dopacity,
 	float* dL_dcolors)
 {
-	renderCUDA<NUM_CHANNELS> << <grid, block >> >(
-		ranges,
-		point_list,
-		W, H,
-		bg_color,
-		means2D,
-		conic_opacity,
-		colors,
-		final_Ts,
-		n_contrib,
-		dL_dpixels,
-		dL_dmean2D,
-		dL_dconic2D,
-		dL_dopacity,
-		dL_dcolors
-		);
+	// raster-perf-v2: the backend is chosen at runtime inside ONE binary, and the
+	// backend actually used is printed once so a run can never be mislabelled.
+	static const bool warp_agg = []() {
+		const char* e = std::getenv("PHOTO_SLAM_RASTER_WARP_AGG");
+		const bool on = (e != nullptr && std::atoi(e) != 0);
+		printf("[RasterBackend] BACKWARD::render = %s\n",
+		       on ? "warp-aggregated candidate" : "reference (per-lane atomicAdd)");
+		fflush(stdout);
+		return on;
+	}();
+	auto launch = [&](bool agg) {
+		if (agg)
+			renderCUDA<NUM_CHANNELS, true> << <grid, block >> >(
+				ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+				final_Ts, n_contrib, dL_dpixels, dL_dmean2D, dL_dconic2D,
+				dL_dopacity, dL_dcolors);
+		else
+			renderCUDA<NUM_CHANNELS, false> << <grid, block >> >(
+				ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+				final_Ts, n_contrib, dL_dpixels, dL_dmean2D, dL_dconic2D,
+				dL_dopacity, dL_dcolors);
+	};
+
+	// ---------------------------------------------------------------------
+	// Correctness verification on IDENTICAL inputs (PHOTO_SLAM_RASTER_AGG_SELFCHECK=1).
+	// Reference and candidate are launched on the same forward buffers and the
+	// same dL_dpixels; the reference is additionally run twice so the numerical
+	// noise floor (ref vs ref) is measured before the candidate error is judged.
+	// The reference result is the one written to the caller's outputs.
+	// ---------------------------------------------------------------------
+	static const int selfcheck = []() {
+		const char* e = std::getenv("PHOTO_SLAM_RASTER_AGG_SELFCHECK");
+		return e ? std::atoi(e) : 0;
+	}();
+	if (selfcheck && n_gaussians > 0)
+	{
+		const size_t P = (size_t)n_gaussians;
+		const size_t n_mean = P * 3, n_conic = P * 4;
+		const size_t n_op = P, n_col = P * NUM_CHANNELS;
+		float *tmpA = nullptr, *tmpB = nullptr, *tmpC = nullptr;
+		const size_t sz = (n_mean + n_conic + n_op + n_col) * sizeof(float);
+		cudaMalloc(&tmpA, sz); cudaMalloc(&tmpB, sz); cudaMalloc(&tmpC, sz);
+		if (tmpA && tmpB && tmpC)
+		{
+			float* A_mean = tmpA; float* A_conic = A_mean + n_mean;
+			float* A_op = A_conic + n_conic; float* A_col = A_op + n_op;
+			float* B_mean = tmpB; float* B_conic = B_mean + n_mean;
+			float* B_op = B_conic + n_conic; float* B_col = B_op + n_op;
+			float* C_mean = tmpC; float* C_conic = C_mean + n_mean;
+			float* C_op = C_conic + n_conic; float* C_col = C_op + n_op;
+			cudaMemset(tmpA, 0, sz); cudaMemset(tmpB, 0, sz); cudaMemset(tmpC, 0, sz);
+
+			float ms_ref = 0, ms_ref2 = 0, ms_cand = 0;
+			cudaEvent_t e0, e1; cudaEventCreate(&e0); cudaEventCreate(&e1);
+
+			cudaEventRecord(e0);
+			renderCUDA<NUM_CHANNELS, false> << <grid, block >> >(ranges, point_list, W, H, bg_color,
+				means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels,
+				(float3*)A_mean, (float4*)A_conic, A_op, A_col);
+			cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms_ref, e0, e1);
+
+			cudaEventRecord(e0);
+			renderCUDA<NUM_CHANNELS, false> << <grid, block >> >(ranges, point_list, W, H, bg_color,
+				means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels,
+				(float3*)C_mean, (float4*)C_conic, C_op, C_col);
+			cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms_ref2, e0, e1);
+
+			cudaEventRecord(e0);
+			renderCUDA<NUM_CHANNELS, true> << <grid, block >> >(ranges, point_list, W, H, bg_color,
+				means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels,
+				(float3*)B_mean, (float4*)B_conic, B_op, B_col);
+			cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms_cand, e0, e1);
+
+			auto cmp = [&](const char* nm, const float* a, const float* b, size_t n) {
+				double ma = 0, mr = 0;
+				std::vector<float> ha(n), hb(n);
+				cudaMemcpy(ha.data(), a, n * sizeof(float), cudaMemcpyDeviceToHost);
+				cudaMemcpy(hb.data(), b, n * sizeof(float), cudaMemcpyDeviceToHost);
+				for (size_t i = 0; i < n; ++i) {
+					const double d = std::fabs((double)ha[i] - (double)hb[i]);
+					if (d > ma) ma = d;
+					const double den = std::fabs((double)hb[i]);
+					if (den > 1e-12) { const double r = d / den; if (r > mr) mr = r; }
+				}
+				printf("    %-22s max_abs=%.6e max_rel=%.6e\n", nm, ma, mr);
+			};
+			printf("[AggSelfCheck] P=%zu  ref_ms=%.4f ref2_ms=%.4f cand_ms=%.4f\n",
+			       P, ms_ref, ms_ref2, ms_cand);
+			printf("  noise floor (reference vs reference):\n");
+			cmp("mean2D", (float*)C_mean, (float*)A_mean, n_mean);
+			cmp("conic2D", (float*)C_conic, (float*)A_conic, n_conic);
+			cmp("opacity", C_op, A_op, n_op);
+			cmp("colors", C_col, A_col, n_col);
+			printf("  candidate (warp-aggregated) vs reference:\n");
+			cmp("mean2D", (float*)B_mean, (float*)A_mean, n_mean);
+			cmp("conic2D", (float*)B_conic, (float*)A_conic, n_conic);
+			cmp("opacity", B_op, A_op, n_op);
+			cmp("colors", B_col, A_col, n_col);
+			fflush(stdout);
+			cudaFree(tmpA); cudaFree(tmpB); cudaFree(tmpC);
+		}
+		launch(false);   // authoritative result = reference
+		return;
+	}
+
+	launch(warp_agg);
 }

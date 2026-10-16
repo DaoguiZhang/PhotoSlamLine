@@ -474,6 +474,7 @@ void CudaRasterizer::Rasterizer::backward(
 		block,
 		imgState.ranges,
 		binningState.point_list,
+		P,
 		width, height,
 		background,
 		geomState.means2D,
