@@ -227,7 +227,7 @@ torch::Tensor GaussianModelLine::computeLineCoherenceLoss(float lambda_line)
     return lambda_line * loss;
 }
 
-torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherence)
+torch::Tensor GaussianModelLine::computeVectorizedLineLossRef(float lambda_coherence)
 {
     using namespace torch::indexing;
 
@@ -4108,7 +4108,7 @@ torch::Tensor GaussianModelLine::computeGroupedLineLoss(
     return (count > 0) ? (total_loss * lambda_coherence) : total_loss;
 }
 
-torch::Tensor GaussianModelLine::computeLineShapeConstraint(float lambda_ecc, float lambda_ori) {
+torch::Tensor GaussianModelLine::computeLineShapeConstraintRef(float lambda_ecc, float lambda_ori) {
     auto line_mask = this->is_line_;
     // 不再调用 line_mask.any().item<bool>()（每次迭代的 CPU-GPU 同步）；
     // 无线高斯时布尔索引得到空张量，sum 为 0，语义不变。
@@ -4588,4 +4588,154 @@ float GaussianModelLine::exponLrFunc(int step)
     float t = std::clamp(static_cast<float>(step) / max_steps_, 0.0f, 1.0f);
     float log_lerp = std::exp(std::log(lr_init_) * (1 - t) + std::log(lr_final_) * t);
     return delay_rate * log_lerp;
+}
+
+// ===========================================================================
+// Stage-1 performance: cached line subset + optimised structural losses.
+// Everything added below is implementation-only; the expressions, the
+// normalisations and the gradient paths are unchanged (verified numerically by
+// PHOTO_SLAM_FGM_EQCHECK against the *_Ref implementations).
+// ===========================================================================
+void GaussianModelLine::refreshLineCache()
+{
+    const long n_is = is_line_.defined() ? is_line_.size(0) : -1;
+    const long n_init = xyz_init_.defined() ? xyz_init_.size(0) : -1;
+    const long n_dir = line_dir_w_.defined() ? line_dir_w_.size(0) : -1;
+    const void* p_is = is_line_.defined() ? is_line_.data_ptr() : nullptr;
+    const void* p_init = xyz_init_.defined() ? xyz_init_.data_ptr() : nullptr;
+    const void* p_dir = line_dir_w_.defined() ? line_dir_w_.data_ptr() : nullptr;
+
+    if (line_idx_.defined() && n_is == lc_n_is_ && n_init == lc_n_init_ &&
+        n_dir == lc_n_dir_ && p_is == lc_p_is_ && p_init == lc_p_init_ &&
+        p_dir == lc_p_dir_)
+        return;   // fresh: no device work at all
+
+    torch::NoGradGuard ng;
+    if (n_is > 0) {
+        // torch::nonzero is the only device-count read, and it now happens once
+        // per topology instead of once per boolean-mask gather.
+        line_idx_ = torch::nonzero(is_line_).flatten().to(torch::kLong).contiguous();
+    } else {
+        line_idx_ = torch::zeros(
+            {0}, torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+    }
+    line_anchor_cached_ = (xyz_init_.defined() && xyz_init_.size(0) == n_is)
+                              ? xyz_init_.index_select(0, line_idx_).contiguous()
+                              : torch::Tensor();
+    line_dir_cached_ = (line_dir_w_.defined() && line_dir_w_.size(0) == n_is)
+                           ? line_dir_w_.index_select(0, line_idx_).contiguous()
+                           : torch::Tensor();
+    lc_n_is_ = n_is; lc_n_init_ = n_init; lc_n_dir_ = n_dir;
+    lc_p_is_ = p_is; lc_p_init_ = p_init; lc_p_dir_ = p_dir;
+}
+
+torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherence)
+{
+    // Mathematically identical to computeVectorizedLineLossRef():
+    //   * a zero weight returns before building any graph node;
+    //   * the 3 boolean-mask gathers are replaced by 1 cached int64 index and
+    //     index_select, and the two constant tensors (xyz_init_, line_dir_w_)
+    //     are gathered once instead of every call.
+    // The index order returned by nonzero() is row order, the same order the
+    // boolean mask gathered in, so the reduction order is unchanged.
+    if (lambda_coherence == 0.0f)
+        return torch::zeros({}, torch::TensorOptions().device(device_type_));
+    if (!this->xyz_init_.defined() || this->xyz_init_.size(0) != this->xyz_.size(0)) {
+        return torch::zeros({}, torch::TensorOptions().device(device_type_));
+    }
+    if (this->line_dir_w_.size(0) != this->xyz_.size(0)) {
+        return torch::zeros({}, torch::TensorOptions().device(device_type_));
+    }
+
+    refreshLineCache();
+
+    auto p_m   = this->xyz_.index_select(0, line_idx_);   // [Nl,3]
+    auto p_ref = line_anchor_cached_;                     // [Nl,3] constant
+    auto d_m   = line_dir_cached_;                        // [Nl,3] constant
+
+    auto ap = p_m - p_ref;
+    auto dist_parallel = torch::sum(ap * d_m, /*dim=*/1, /*keepdim=*/true);
+    auto projection = dist_parallel * d_m;
+    auto error_perp = ap - projection;
+
+    const float delta = 0.01f;
+    auto dist_perp = torch::norm(error_perp, 2, 1, true);
+    auto is_small_error = dist_perp <= delta;
+    auto loss_small = 0.5 * dist_perp.pow(2);
+    auto loss_large = delta * (dist_perp - 0.5 * delta);
+    auto huber_loss = torch::where(is_small_error, loss_small, loss_large);
+
+    auto line_loss = lambda_coherence * huber_loss.sum();
+    if (ORB_SLAM3::IsLineLossDiag()) {
+        std::cerr << "[LINE-LOSS] L_ori=" << line_loss.item().toFloat()
+                  << " n_line_gaussians=" << p_m.size(0)
+                  << " lambda_coherence=" << lambda_coherence << std::endl;
+    }
+    return line_loss;
+}
+
+torch::Tensor GaussianModelLine::computeLineShapeConstraint(
+    float lambda_ecc, float lambda_ori, const torch::Tensor& scaling_activation)
+{
+    // Mathematically identical to computeLineShapeConstraintRef():
+    //   * a cached int64 line index replaces 3 boolean-mask gathers;
+    //   * exp(scaling_) is reused from the caller when supplied (the mapper has
+    //     already built it for the anisotropy penalty), so the activation is not
+    //     constructed twice per iteration;
+    //   * each term is only built when its own weight is non-zero; adding an
+    //     exact 0.0f is the identity for a finite value, so the sum is unchanged.
+    if (lambda_ecc == 0.0f && lambda_ori == 0.0f)
+        return torch::zeros({}, xyz_.options());
+    if (this->line_dir_w_.size(0) != this->xyz_.size(0)
+        || this->scaling_.size(0) != this->xyz_.size(0)
+        || this->rotation_.size(0) != this->xyz_.size(0))
+        return torch::zeros({}, xyz_.options());
+
+    refreshLineCache();
+
+    torch::Tensor ecc_term, ori_term;
+    if (lambda_ecc > 0.0f) {
+        torch::Tensor s;
+        if (scaling_activation.defined() &&
+            scaling_activation.size(0) == this->scaling_.size(0)) {
+            s = scaling_activation.index_select(0, line_idx_);
+        } else {
+            s = torch::exp(this->scaling_).index_select(0, line_idx_);
+        }
+        auto s_parallel = s.index({torch::indexing::Slice(), 0});
+        auto s_perpendicular =
+            s.index({torch::indexing::Slice(), torch::indexing::Slice(1, 3)});
+        auto eccentricity_loss = (s_perpendicular.mean(1) / (s_parallel + 1e-6)).sum();
+        ecc_term = lambda_ecc * eccentricity_loss;
+    }
+
+    if (lambda_ori > 0.0f) {
+        auto rot_l = this->rotation_.index_select(0, line_idx_);
+        auto rot_norm =
+            torch::sqrt(torch::sum(rot_l * rot_l, 1, true).clamp_min(1e-16f));
+        auto q_current = rot_l / rot_norm;
+        auto qw = q_current.index({torch::indexing::Slice(), 0});
+        auto qx = q_current.index({torch::indexing::Slice(), 1});
+        auto qy = q_current.index({torch::indexing::Slice(), 2});
+        auto qz = q_current.index({torch::indexing::Slice(), 3});
+        auto local_x = torch::stack({
+            1 - 2 * (qy * qy + qz * qz),
+            2 * (qx * qy + qw * qz),
+            2 * (qx * qz - qw * qy)}, 1);
+        auto d_init = line_dir_cached_;
+        auto cos_sim = torch::abs(torch::sum(local_x * d_init, 1));
+        ori_term = lambda_ori * (1.0 - cos_sim).sum();
+    }
+
+    if (ORB_SLAM3::IsLineLossDiag()) {
+        std::cerr << "[LINE-LOSS] L_ecc=" << (ecc_term.defined() ? ecc_term.item().toFloat() : 0.0f)
+                  << " L_shape_ori=" << (ori_term.defined() ? ori_term.item().toFloat() : 0.0f)
+                  << " lambda_ecc=" << lambda_ecc << " lambda_ori=" << lambda_ori
+                  << std::endl;
+    }
+    if (ecc_term.defined() && ori_term.defined())
+        return ecc_term + ori_term;
+    if (ecc_term.defined())
+        return ecc_term;
+    return ori_term;
 }

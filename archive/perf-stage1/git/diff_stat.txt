@@ -1,0 +1,6 @@
+ include/gaussian_mapper_line.h |  19 ++
+ include/gaussian_model_line.h  |  28 ++-
+ scripts/lpips_fgm.py           |   6 +-
+ src/gaussian_mapper_line.cpp   | 459 ++++++++++++++++++++++++++++++++++++-----
+ src/gaussian_model_line.cpp    | 154 +++++++++++++-
+ 5 files changed, 613 insertions(+), 53 deletions(-)

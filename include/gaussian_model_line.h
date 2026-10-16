@@ -85,6 +85,11 @@ public:
     static Eigen::Vector4f initQuatAlignXToDir(const Eigen::Vector3f& dir_unit);
     torch::Tensor computeLineCoherenceLoss(float lambda_line = 1.0f);
     torch::Tensor computeVectorizedLineLoss(float lambda_coherence = 1.0f);
+    // Reference (pre-optimisation) implementations. Kept ONLY so the
+    // equivalence check can evaluate both on one parameter snapshot and compare
+    // loss value and gradient exactly. Not called on any hot path.
+    torch::Tensor computeVectorizedLineLossRef(float lambda_coherence);
+    torch::Tensor computeLineShapeConstraintRef(float lambda_ecc, float lambda_ori);
 
     void oneUpShDegree();
     void setShDegree(const int sh);
@@ -210,7 +215,8 @@ public:
         const std::map<point3D_id_t, int>& pnt_id_to_tensor_idx, // 预先建立点ID到Tensor行号的映射
         float lambda_coherence);
 
-    torch::Tensor computeLineShapeConstraint(float lambda_ecc, float lambda_ori);
+    torch::Tensor computeLineShapeConstraint(float lambda_ecc, float lambda_ori,
+                                             const torch::Tensor& scaling_activation = {});
 
 // void increasePointsIterationsOfExistence(const int i = 1);
 
@@ -249,6 +255,26 @@ public:
     torch::Tensor is_line_;   // [P] bool, check whether point is line sampled or not
     // 可选：每个 line Gaussian 的方向（世界系）
     torch::Tensor line_dir_w_;  // N x 3, float
+
+    // --- Stage-1 performance: cached line subset -----------------------------
+    // Boolean-mask indexing on CUDA reads the true-count back from the device,
+    // so every `t.index({is_line_})` costs a synchronisation. With a fixed
+    // Gaussian topology the mask and the constant per-line anchors/directions do
+    // not change, so the gathers are replaced by ONE cached int64 index plus
+    // index_select.
+    //
+    // Cache key = (numel, data_ptr) of is_line_ / xyz_init_ / line_dir_w_.
+    // Every writer of those three tensors REPLACES the tensor (verified: no
+    // in-place mutation anywhere in this file), so a pointer change is a
+    // reliable invalidation signal and a topology change cannot be missed.
+    torch::Tensor line_idx_;             // [Nl] int64
+    torch::Tensor line_anchor_cached_;   // [Nl,3] xyz_init_[line_idx_]
+    torch::Tensor line_dir_cached_;      // [Nl,3] line_dir_w_[line_idx_]
+    long lc_n_is_ = -1, lc_n_init_ = -1, lc_n_dir_ = -1;
+    const void* lc_p_is_ = nullptr;
+    const void* lc_p_init_ = nullptr;
+    const void* lc_p_dir_ = nullptr;
+    void refreshLineCache();
     torch::Tensor point_ids_; // [N] 类型为 kLong，存储每个点的唯一 ID （用于后续处理）
     torch::Tensor features_dc_;
     torch::Tensor features_rest_;

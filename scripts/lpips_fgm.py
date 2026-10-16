@@ -110,7 +110,7 @@ def main(argv):
 
     results = {}
     for lbl in labels:
-        for tag in ("B", "C", "E", "F", "G", "B0", "B1"):
+        for tag in ("B", "C", "E", "F", "G", "B0", "B1", "J", "K"):
             tag_dir = os.path.join(ROOT, lbl, tag)
             if not os.path.isdir(tag_dir):
                 continue
@@ -142,10 +142,10 @@ def main(argv):
         common = sorted({s for (l, t, s) in results if l == lbl and t == "C"}
                         & {s for (l, t, s) in results if l == lbl and t == "B"})
         if common:
-            print(f"{lbl}: paired dLPIPS (C - B), lower is better for B")
+            print(f"{lbl}: paired dLPIPS (K - B0), lower is better for B0")
             for s in common:
                 b = results[(lbl, "B", s)]
-                c = results[(lbl, "C", s)]
+                c = results[(lbl, "K", s)]
                 print(f"   step {s:>6}: B={b:.5f} C={c:.5f} d={c-b:+.5f}")
     return 0
 

@@ -311,6 +311,10 @@ public:
         float w_position = -1.0f;   // weight_line_coherence_  -> perpendicular offset term
         float w_ecc = -1.0f;        // weight_line_shape_ecc_  -> eccentricity term
         float w_orient = -1.0f;     // weight_line_shape_ori_  -> local-X vs fixed line-dir term
+        // -1 = follow PHOTO_SLAM_FGM_USE_REF, 1 = force the pre-optimisation
+        // implementation, 0 = force the optimised one. Lets S-original and
+        // S-fast run as two conditions of ONE process on ONE frozen scene.
+        int force_ref = -1;
     };
     std::vector<FrozenAblationCondition> frozen_conditions_;
     std::filesystem::path frozen_ablation_dir_;
@@ -349,9 +353,24 @@ public:
     // Per-eval-point mechanism diagnostics (reads only, plus an env-gated
     // separated-gradient probe that restores the gradient buffers afterwards).
     void diagAtFrozenStep(long long opt_steps, const std::string& tag);
+    // Controlled micro-benchmark (PHOTO_SLAM_FGM_MICROBENCH=1): attributes the
+    // per-iteration cost between render, photometric loss, each structural term
+    // and the backward pass, on ONE FIXED parameter snapshot, without ever
+    // calling optimizer.step(). Used only to locate cost, never as a speed
+    // result.
+    void runMicroBench(const std::string& tag, long long step);
+    // Numerical equivalence check (PHOTO_SLAM_FGM_EQCHECK=1): evaluates the
+    // optimised and the reference structural-loss implementations on ONE
+    // parameter snapshot and reports max|d loss| and max|d grad| per target
+    // parameter, so "mathematically equivalent" is measured, not asserted.
+    void runEquivCheck(const std::string& tag, long long step);
     long long frozen_count_ref_all_ = -1;
     long long frozen_count_ref_line_ = -1;
     int frozen_count_violation_ = 0;
+    // Effective selector for the structural-loss implementation, resolved from
+    // PHOTO_SLAM_FGM_USE_REF and overridable per condition.
+    int frozen_use_ref_ = -1;
+    bool useRefStructLoss() const;
     double frozen_eval_seconds_total_ = 0.0;
     // Reference init fingerprint captured from the canonical checkpoint; every
     // variant must reproduce it after restoring + before the first step.

@@ -23,6 +23,8 @@
 #include <cstdlib>
 #include <string>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <algorithm>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -1196,6 +1198,18 @@ void fgmSaveImage(const torch::Tensor& img, const std::filesystem::path& path)
 }
 } // namespace
 
+// Effective structural-loss implementation selector (see header).
+bool GaussianMapperLine::useRefStructLoss() const
+{
+    if (frozen_use_ref_ == 1) return true;
+    if (frozen_use_ref_ == 0) return false;
+    static const bool env_ref = []() {
+        const char* e = std::getenv("PHOTO_SLAM_FGM_USE_REF");
+        return e != nullptr && std::atoi(e) != 0;
+    }();
+    return env_ref;
+}
+
 // Hard guard: with the count frozen, ANY change to the Gaussian total or to the
 // number of line Gaussians is a bug and must be reported, not silently averaged
 // into the metrics.
@@ -1375,6 +1389,323 @@ void GaussianMapperLine::diagAtFrozenStep(long long opt_steps, const std::string
               << " frac_aspect_lt2=" << v[46]
               << (g.size() > 4 ? (" cos=" + std::to_string(g[4])) : std::string())
               << std::endl;
+}
+
+// ---------------------------------------------------------------------------
+// Controlled micro-benchmark (see header). One fixed parameter snapshot, one
+// fixed view and resolution, no optimizer.step() for the loss variants.
+//
+// Each variant is measured in TWO loops that differ only by the backward call,
+// after an identical warmup, and the derived backward time is the difference:
+//     fwd_ms = loop(forward+loss) - loop(zero_grad)
+//     bwd_ms = loop(forward+loss+backward) - loop(forward+loss)
+// A sync brackets every loop so pending asynchronous work is never billed to
+// the wrong section.
+// ---------------------------------------------------------------------------
+void GaussianMapperLine::runMicroBench(const std::string& tag, long long step)
+{
+    if (!gaussians_ || frozen_eval_kf_seq_.empty() || !gaussians_->xyz_.defined())
+        return;
+    std::vector<std::shared_ptr<GaussianKeyframeLine>> views;
+    for (auto& kv : scene_->keyframes())
+        views.push_back(kv.second);
+    const std::size_t idx0 = frozen_eval_kf_seq_[0];
+    if (idx0 >= views.size() || !views[idx0])
+        return;
+    auto pkf = views[idx0];
+    const int H = static_cast<int>(pkf->image_height_);
+    const int Wd = static_cast<int>(pkf->image_width_);
+    auto mask = undistort_mask_[pkf->camera_id_];
+    auto gt = pkf->original_image_;
+
+    const float w_pos = frozen_line_w_coherence_;
+    const float w_ecc = frozen_line_w_ecc_;
+    const float w_ori = frozen_line_w_ori_;
+    const float lam = lambdaDssim();
+    const float lam_aniso = opt_params_.lambda_anisotropy_;
+    const float aniso_th = opt_params_.max_anisotropy_threshold_;
+
+    auto sync = [&]() {
+        if (device_type_ == torch::kCUDA)
+            torch::cuda::synchronize();
+    };
+
+    // Preserve render-time buffers so the micro-benchmark cannot perturb state.
+    torch::Tensor saved_radii, saved_hits, saved_alpha;
+    const bool had_radii = gaussians_->max_radii2D_.defined();
+    if (had_radii) saved_radii = gaussians_->max_radii2D_.clone();
+    const bool had_hits = gaussians_->debug_hit_count_.defined();
+    if (had_hits) saved_hits = gaussians_->debug_hit_count_.clone();
+    const bool had_alpha = gaussians_->debug_alpha_accum_.defined();
+    if (had_alpha) saved_alpha = gaussians_->debug_alpha_accum_.clone();
+
+    auto buildLoss = [&](int variant) -> torch::Tensor {
+        auto rp = GaussianRendererWithLine::renderWithLine(
+            pkf, H, Wd, gaussians_, pipe_params_, background_, override_color_);
+        if (variant == 0)
+            return torch::Tensor();                       // render only
+        auto mi = std::get<0>(rp) * mask;
+        auto l1 = loss_utils::l1_loss(mi, gt);
+        auto loss = (1.0 - lam) * l1 +
+                    lam * (1.0 - loss_utils::ssim(mi, gt, device_type_));
+        if (variant == 1)
+            return loss;                                  // + photometric
+        torch::Tensor scaling_act;
+        {
+            // anisotropy penalty: a public constraint, kept in every variant
+            // that carries a loss at all
+            auto sc = gaussians_->getScaling();
+            scaling_act = sc;
+            auto mx = std::get<0>(torch::max(sc, 1));
+            auto mn = std::get<0>(torch::min(sc, 1));
+            auto ratio = mx / (mn + 1e-6);
+            loss = loss + lam_aniso *
+                   torch::pow(torch::clamp(ratio - aniso_th, 0), 2).mean();
+        }
+        if (variant == 2)
+            return loss;                                  // + aniso
+        if (variant == 3)
+            return loss + gaussians_->computeVectorizedLineLoss(w_pos);
+        if (variant == 4)
+            return loss + gaussians_->computeLineShapeConstraint(w_ecc, 0.0f);
+        if (variant == 5)
+            return loss + gaussians_->computeLineShapeConstraint(0.0f, w_ori);
+        if (variant == 6)
+            return loss + gaussians_->computeVectorizedLineLoss(w_pos) +
+                   gaussians_->computeLineShapeConstraint(w_ecc, w_ori, scaling_act);
+        if (variant == 7)
+            return loss + gaussians_->computeVectorizedLineLossRef(w_pos) +
+                   gaussians_->computeLineShapeConstraintRef(w_ecc, w_ori);
+        // Variants 8/9 build a graph containing ONLY the structural loss, so the
+        // photometric backward (which dominates and fluctuates) cannot mask the
+        // difference being measured.
+        if (variant == 8) {
+            auto sa = gaussians_->getScaling();
+            return gaussians_->computeVectorizedLineLoss(w_pos) +
+                   gaussians_->computeLineShapeConstraint(w_ecc, w_ori, sa);
+        }
+        if (variant == 9)
+            return gaussians_->computeVectorizedLineLossRef(w_pos) +
+                   gaussians_->computeLineShapeConstraintRef(w_ecc, w_ori);
+        return loss;
+    };
+
+    const char* nms[] = {"render_only", "photo", "photo_aniso", "photo_aniso_position",
+                         "photo_aniso_ecc", "photo_aniso_ori",
+                         "photo_aniso_all_struct_fast", "photo_aniso_all_struct_ref",
+                         "struct_only_fast", "struct_only_ref"};
+    const bool bwd[] = {false, true, true, true, true, true, true, true, true, true};
+    const int NVARIANT = 10;
+    const int WARM = 30, REPS = 200;
+
+    // min-of-NBLOCK blocks: the GPU is shared, so the minimum block is the most
+    // robust estimator of the launch-bound cost of this code.
+    const int NBLOCK = 3;
+    auto timeLoops = [&](int variant, bool with_bwd, double& out_ms) {
+        double best = std::numeric_limits<double>::max();
+        for (int b = 0; b < NBLOCK; ++b) {
+            for (int i = 0; i < WARM; ++i) {
+                gaussians_->optimizer_->zero_grad(true);
+                auto l = buildLoss(variant);
+                if (with_bwd && bwd[variant] && l.defined())
+                    l.backward();
+            }
+            sync();
+            gaussians_->optimizer_->zero_grad(true);
+            sync();
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int i = 0; i < REPS; ++i) {
+                gaussians_->optimizer_->zero_grad(true);
+                auto l = buildLoss(variant);
+                if (with_bwd && bwd[variant] && l.defined())
+                    l.backward();
+            }
+            sync();
+            best = std::min(best,
+                std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+                    std::chrono::steady_clock::now() - t0).count() / REPS);
+        }
+        out_ms = best;
+    };
+
+    double zero_ms = 0.0;
+    {
+        for (int i = 0; i < WARM; ++i) gaussians_->optimizer_->zero_grad(true);
+        sync();
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < REPS; ++i) gaussians_->optimizer_->zero_grad(true);
+        sync();
+        zero_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+                      std::chrono::steady_clock::now() - t0).count() / REPS;
+    }
+
+    std::ofstream out(frozen_ablation_dir_ /
+                      (tag + "_microbench_step" + std::to_string(step) + ".csv"));
+    out << "variant,zero_grad_ms,fwd_only_ms,fwd_bwd_ms,derived_fwd_ms,derived_bwd_ms\n";
+    std::cerr << "[MicroBench][" << tag << "] step=" << step << " zero_grad=" << zero_ms
+              << " ms" << std::endl;
+    for (int v = 0; v < NVARIANT; ++v) {
+        double t_f, t_fb;
+        timeLoops(v, false, t_f);
+        if (!bwd[v]) {
+            t_fb = t_f;
+        } else {
+            timeLoops(v, true, t_fb);
+        }
+        out << nms[v] << ',' << zero_ms << ',' << t_f << ',' << t_fb << ','
+            << (t_f - zero_ms) << ',' << (t_fb - t_f) << '\n';
+        std::cerr << "[MicroBench][" << tag << "] " << nms[v]
+                  << "  fwd=" << (t_f - zero_ms) << " ms  bwd=" << (t_fb - t_f)
+                  << " ms" << std::endl;
+    }
+
+    // optimizer.step cost, measured on CLONED leaves so the training optimizer's
+    // state is never touched.
+    {
+        std::vector<torch::Tensor> v;
+        v.push_back(gaussians_->xyz_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->features_dc_.detach().clone().requires_grad_());
+        if (gaussians_->features_rest_.defined() && gaussians_->features_rest_.numel() > 0)
+            v.push_back(gaussians_->features_rest_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->opacity_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->scaling_.detach().clone().requires_grad_());
+        v.push_back(gaussians_->rotation_.detach().clone().requires_grad_());
+        torch::optim::AdamOptions ao;
+        ao.set_lr(1e-4);
+        ao.eps() = 1e-15;
+        auto opt = std::make_shared<torch::optim::Adam>(
+            std::vector<torch::Tensor>{v[0]}, ao);
+        for (std::size_t i = 1; i < v.size(); ++i)
+            opt->add_param_group(std::vector<torch::Tensor>{v[i]});
+        for (auto& t : v)
+            t.mutable_grad() = torch::ones_like(t);
+        for (int i = 0; i < WARM; ++i) opt->step();
+        sync();
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < REPS; ++i) opt->step();
+        sync();
+        const double ms =
+            std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+                std::chrono::steady_clock::now() - t0).count() / REPS;
+        out << "optimizer_step," << 0 << ',' << ms << ',' << ms << ',' << ms << ',' << 0
+            << '\n';
+        std::cerr << "[MicroBench][" << tag << "] optimizer_step=" << ms << " ms" << std::endl;
+    }
+    out.close();
+
+    // restore exactly the state the eval point was in
+    if (had_radii && saved_radii.defined()) gaussians_->max_radii2D_.copy_(saved_radii);
+    if (had_hits && saved_hits.defined()) gaussians_->debug_hit_count_.copy_(saved_hits);
+    if (had_alpha && saved_alpha.defined()) gaussians_->debug_alpha_accum_.copy_(saved_alpha);
+    gaussians_->optimizer_->zero_grad(true);
+    sync();
+}
+
+// ---------------------------------------------------------------------------
+// Numerical equivalence check (PHOTO_SLAM_FGM_EQCHECK=1).
+//
+// Both implementations are evaluated on the SAME parameter snapshot, each from
+// a fresh graph with zeroed gradients. Reported per expression:
+//   max|d loss|               - absolute difference of the loss value
+//   max|d grad|/<|grad|ref>   - relative difference of the target gradient
+//
+// Acceptance: the changes are algebraic identities (same rows gathered in the
+// same order, the same exp() result reused, "term + 0" dropped, amax/amin
+// instead of max/min values). IEEE-754 therefore yields bitwise-identical
+// results, and max|d| == 0 is the expected outcome; 1e-6 relative is kept only
+// as an allowance for a different ATen reduction schedule. A larger difference
+// means the "equivalent" claim is wrong.
+// ---------------------------------------------------------------------------
+void GaussianMapperLine::runEquivCheck(const std::string& tag, long long step)
+{
+    if (!gaussians_ || !gaussians_->xyz_.defined() || !gaussians_->is_line_.defined())
+        return;
+    const float w_pos = frozen_line_w_coherence_;
+    const float w_ecc = frozen_line_w_ecc_;
+    const float w_ori = frozen_line_w_ori_;
+
+    auto probe = [&](const std::function<torch::Tensor()>& fn,
+                     const std::vector<torch::Tensor>& params,
+                     double& loss_out, std::vector<torch::Tensor>& grads_out) {
+        gaussians_->optimizer_->zero_grad(true);
+        auto l = fn();
+        loss_out = l.item().toDouble();
+        l.backward();
+        grads_out.clear();
+        for (const auto& p : params)
+            grads_out.push_back(p.grad().defined() ? p.grad().detach().clone()
+                                                   : torch::Tensor());
+        gaussians_->optimizer_->zero_grad(true);
+    };
+    auto relDiff = [](const torch::Tensor& a, const torch::Tensor& b) {
+        if (!a.defined() || !b.defined()) return std::nan("");
+        auto d = (a - b).abs().max().item<double>();
+        auto r = b.abs().max().item<double>();
+        return r > 0 ? d / r : d;
+    };
+
+    struct Res { std::string name; double dl; double dg; };
+    std::vector<Res> rows;
+    auto both = [&](const char* name,
+                    const std::function<torch::Tensor()>& f_ref,
+                    const std::function<torch::Tensor()>& f_opt,
+                    const std::vector<torch::Tensor>& params) {
+        double lr = 0, lo = 0;
+        std::vector<torch::Tensor> gr, go;
+        probe(f_ref, params, lr, gr);
+        probe(f_opt, params, lo, go);
+        double dg = 0;
+        for (std::size_t i = 0; i < gr.size(); ++i)
+            dg = std::max(dg, relDiff(gr[i], go[i]));
+        rows.push_back({name, std::abs(lr - lo), dg});
+    };
+
+    // Each lambda must build its OWN tensors: the graph is freed by the first
+    // backward, so sharing a tensor between the two probes would fail.
+    both("position", [&]{ return gaussians_->computeVectorizedLineLossRef(w_pos); },
+                     [&]{ return gaussians_->computeVectorizedLineLoss(w_pos); },
+         {gaussians_->xyz_});
+    both("ecc",
+         [&]{ return gaussians_->computeLineShapeConstraintRef(w_ecc, 0.0f); },
+         [&]{ auto sa = gaussians_->getScaling();
+              return gaussians_->computeLineShapeConstraint(w_ecc, 0.0f, sa); },
+         {gaussians_->scaling_});
+    both("ori",
+         [&]{ return gaussians_->computeLineShapeConstraintRef(0.0f, w_ori); },
+         [&]{ auto sa = gaussians_->getScaling();
+              return gaussians_->computeLineShapeConstraint(0.0f, w_ori, sa); },
+         {gaussians_->rotation_});
+    both("all_struct",
+         [&]{ return gaussians_->computeVectorizedLineLossRef(w_pos) +
+                      gaussians_->computeLineShapeConstraintRef(w_ecc, w_ori); },
+         [&]{ auto sa = gaussians_->getScaling();
+              return gaussians_->computeVectorizedLineLoss(w_pos) +
+                     gaussians_->computeLineShapeConstraint(w_ecc, w_ori, sa); },
+         {gaussians_->xyz_, gaussians_->scaling_, gaussians_->rotation_});
+    // the exact substitution used by the eccentricity term:
+    //   exp(full).index_select(idx)  ==  exp(scaling[idx])
+    both("exp_subset_substitution",
+         [&]{ return torch::exp(gaussians_->scaling_.index({gaussians_->is_line_})).sum(); },
+         [&]{ return torch::exp(gaussians_->scaling_)
+                      .index_select(0, gaussians_->line_idx_).sum(); },
+         {gaussians_->scaling_});
+
+    std::ofstream out(frozen_ablation_dir_ /
+                      (tag + "_eqcheck_step" + std::to_string(step) + ".csv"));
+    out << "expression,max_abs_delta_loss,max_rel_delta_grad,verdict\n";
+    bool ok = true;
+    for (const auto& r : rows) {
+        const bool pass = (r.dl == 0.0) && (r.dg <= 1e-6);
+        if (!pass) ok = false;
+        out << r.name << ',' << std::setprecision(12) << r.dl << ',' << r.dg << ','
+            << (pass ? "PASS" : "FAIL") << '\n';
+        std::cerr << "[EqCheck][" << tag << "] " << r.name
+                  << " max|dloss|=" << r.dl << " max_reld|grad|=" << r.dg
+                  << (pass ? "  PASS" : "  FAIL") << std::endl;
+    }
+    std::cerr << "[EqCheck][" << tag << "] step=" << step
+              << " overall=" << (ok ? "PASS" : "FAIL") << std::endl;
+    gaussians_->optimizer_->zero_grad(true);
 }
 
 // Render a FIXED set of views and report mean PSNR/SSIM plus the eval wall time.
@@ -1563,6 +1894,12 @@ void GaussianMapperLine::runFrozenAblation()
                     c.use_line_gaussians = true;  c.line_loss = true;
                     c.directional_densify = false;
                     c.w_position = 0.0f; c.w_ecc = -1.0f; c.w_orient = 0.0f;
+                } else if (base == 'J' || base == 'K') {
+                    // all three structural terms, implementation forced:
+                    //   J = pre-optimisation (S-original), K = optimised (S-fast)
+                    c.use_line_gaussians = true;  c.line_loss = true;
+                    c.directional_densify = false;
+                    c.force_ref = (base == 'J') ? 1 : 0;
                 } else if (base == 'G') {
                     // perpendicular offset (position) term only
                     c.use_line_gaussians = true;  c.line_loss = true;
@@ -1795,7 +2132,7 @@ void GaussianMapperLine::runFrozenAblation()
            "opt_steps,refine_seconds,nan,grad_finite,exit,"
            "fixed_count,init_fingerprint,init_restore,init_fp_match,"
            "count_violation,eval_count,eval_params_stable,mapping_seconds,"
-           "w_position_eff,w_ecc_eff,w_orient_eff,"
+           "w_position_eff,w_ecc_eff,w_orient_eff,use_ref_struct_loss,"
            "input_hash,image_hash,kf_seq_hash\n";
 
     for (const auto& c : order) {
@@ -1848,6 +2185,7 @@ void GaussianMapperLine::runFrozenAblation()
             }
             frozen_count_violation_ = 0;
             frozen_eval_seconds_total_ = 0.0;
+            frozen_use_ref_ = c.force_ref;
             init_fingerprint = gaussians_->paramFingerprint();
             init_fp_match = (init_fingerprint == frozen_ref_fingerprint_) ? 1 : 0;
             if (!init_fp_match)
@@ -1930,6 +2268,10 @@ void GaussianMapperLine::runFrozenAblation()
                     double ep = -1.0, es = -1.0, el1 = -1.0, eori = -1.0, eshape = -1.0, et = 0.0;
                     evalAtFrozenStep(frozen_opt_steps_, c.tag, ep, es, el1, eori, eshape, et);
                     diagAtFrozenStep(frozen_opt_steps_, c.tag);
+                    if (std::getenv("PHOTO_SLAM_FGM_MICROBENCH"))
+                        runMicroBench(c.tag, frozen_opt_steps_);
+                    if (std::getenv("PHOTO_SLAM_FGM_EQCHECK"))
+                        runEquivCheck(c.tag, frozen_opt_steps_);
                     const int fp_stable = (fp_before == gaussians_->paramFingerprint()) ? 1 : 0;
                     const int it_stable = (getIteration() == it_before) ? 1 : 0;
                     frozen_eval_seconds_total_ += et;
@@ -2078,6 +2420,7 @@ void GaussianMapperLine::runFrozenAblation()
             << frozen_count_violation_ << ',' << eval_count << ','
             << eval_params_stable << ',' << mapping_seconds << ','
             << w_position_eff << ',' << w_ecc_eff << ',' << w_orient_eff << ','
+            << (useRefStructLoss() ? 1 : 0) << ','
             << input_hash << ',' << image_hash << ',' << seq_hash << '\n';
         csv.flush();
     }
@@ -2281,24 +2624,31 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
     float max_aniso_th = opt_params_.max_anisotropy_threshold_; 
     float lambda_aniso = opt_params_.lambda_anisotropy_; 
 
-    // 1. 获取当前尺度 [N, 3]
-    torch::Tensor scaling = gaussians_->getScaling(); 
-    
-    // 2. 修正 max/min 的 tuple 访问方式
-    // torch::max 返回 std::tuple<Tensor, Tensor>，第 0 个是 values
-    auto max_res = torch::max(scaling, /*dim=*/1);
-    torch::Tensor max_s = std::get<0>(max_res);
-    
-    auto min_res = torch::min(scaling, /*dim=*/1);
-    torch::Tensor min_s = std::get<0>(min_res);
-    
-    // 3. 计算比值 Ratio = max / (min + eps)
-    torch::Tensor ratio = max_s / (min_s + 1e-6);
-    
-    // 4. 计算 L2 惩罚项
-    torch::Tensor loss_aniso = torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
-    
-    loss = loss + (lambda_aniso * loss_aniso);
+    // Structural weights are read here so the scale activation can be shared
+    // between the anisotropy penalty and the eccentricity term below.
+    float w_ori = opt_params_.weight_line_coherence_;
+    float w_shape_ecc = opt_params_.weight_line_shape_ecc_;
+    float w_shape_ori = opt_params_.weight_line_shape_ori_;
+
+    // Stage-1: exp(scaling_) is needed by the anisotropy penalty AND by the
+    // eccentricity term. Build it at most ONCE per iteration and pass it down,
+    // instead of letting each term construct its own activation. When neither
+    // term is active nothing is built at all.
+    torch::Tensor scaling_act;
+    const bool need_scale_act = (lambda_aniso > 0.0f) || (w_shape_ecc > 0.0f);
+    if (need_scale_act)
+        scaling_act = gaussians_->getScaling();
+
+    if (lambda_aniso > 0.0f) {
+        // amax/amin instead of max(dim)/min(dim): the values are identical, but
+        // the argmax/argmin tensors and their backward nodes are not built.
+        torch::Tensor max_s = torch::amax(scaling_act, /*dim=*/1);
+        torch::Tensor min_s = torch::amin(scaling_act, /*dim=*/1);
+        torch::Tensor ratio = max_s / (min_s + 1e-6);
+        torch::Tensor loss_aniso =
+            torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
+        loss = loss + (lambda_aniso * loss_aniso);
+    }
     // ==============================================================================
 
     // ==============================================================================
@@ -2306,9 +2656,8 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
     // ==============================================================================
     // 从配置文件中读取权重，而不是硬编码 0.1f 或 0.05f
     // 如果权重为 0，则代表正在做 "关闭 L_str" 的消融实验 (Ablation Study)
-    float w_ori = opt_params_.weight_line_coherence_; // 论文中的 omega_1
-    float w_shape_ecc = opt_params_.weight_line_shape_ecc_;     // 论文中的 omega_2   ///lambda_ecc
-    float w_shape_ori = opt_params_.weight_line_shape_ori_;   // 论文中的 omega_3   ///lambda_shape
+    // w_ori / w_shape_ecc / w_shape_ori are read above, next to the anisotropy
+    // penalty, so one scale activation can serve both.
 
     // Formula-preserving: all three terms are individually weighted inside the
     // callees, so the block must also be entered when ONLY the orientation weight
@@ -2323,7 +2672,9 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         if (w_ori > 0.0f) {
             // 建议：将权重乘法移到函数外部，让函数只返回纯粹的 Loss 标量，更符合 PyTorch 规范
             //loss_str = loss_str +  gaussians_->computeLineCoherenceLoss(w_ori);
-            loss_str = loss_str +  gaussians_->computeVectorizedLineLoss(w_ori);
+            loss_str = loss_str + (useRefStructLoss()
+                                       ? gaussians_->computeVectorizedLineLossRef(w_ori)
+                                       : gaussians_->computeVectorizedLineLoss(w_ori));
         }
         // 形状各向异性约束 L_ecc
         // Formula-preserving decoupling: each term is already multiplied by its
@@ -2332,7 +2683,10 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         // eccentricity and orientation terms to be ablated independently. The
         // previous `&&` gate made them inseparable.
         if (w_shape_ecc > 0.0f || w_shape_ori > 0.0f) {
-            loss_str = loss_str + gaussians_->computeLineShapeConstraint(w_shape_ecc, w_shape_ori);
+            loss_str = loss_str + (useRefStructLoss()
+                                       ? gaussians_->computeLineShapeConstraintRef(w_shape_ecc, w_shape_ori)
+                                       : gaussians_->computeLineShapeConstraint(
+                                             w_shape_ecc, w_shape_ori, scaling_act));
         }
         
         loss = loss + loss_str;
@@ -2604,24 +2958,31 @@ void GaussianMapperLine::trainForOneIteration()
     float max_aniso_th = opt_params_.max_anisotropy_threshold_; 
     float lambda_aniso = opt_params_.lambda_anisotropy_; 
 
-    // 1. 获取当前尺度 [N, 3]
-    torch::Tensor scaling = gaussians_->getScaling(); 
-    
-    // 2. 修正 max/min 的 tuple 访问方式
-    // torch::max 返回 std::tuple<Tensor, Tensor>，第 0 个是 values
-    auto max_res = torch::max(scaling, /*dim=*/1);
-    torch::Tensor max_s = std::get<0>(max_res);
-    
-    auto min_res = torch::min(scaling, /*dim=*/1);
-    torch::Tensor min_s = std::get<0>(min_res);
-    
-    // 3. 计算比值 Ratio = max / (min + eps)
-    torch::Tensor ratio = max_s / (min_s + 1e-6);
-    
-    // 4. 计算 L2 惩罚项
-    torch::Tensor loss_aniso = torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
-    
-    loss = loss + (lambda_aniso * loss_aniso);
+    // Structural weights are read here so the scale activation can be shared
+    // between the anisotropy penalty and the eccentricity term below.
+    float w_ori = opt_params_.weight_line_coherence_;
+    float w_shape_ecc = opt_params_.weight_line_shape_ecc_;
+    float w_shape_ori = opt_params_.weight_line_shape_ori_;
+
+    // Stage-1: exp(scaling_) is needed by the anisotropy penalty AND by the
+    // eccentricity term. Build it at most ONCE per iteration and pass it down,
+    // instead of letting each term construct its own activation. When neither
+    // term is active nothing is built at all.
+    torch::Tensor scaling_act;
+    const bool need_scale_act = (lambda_aniso > 0.0f) || (w_shape_ecc > 0.0f);
+    if (need_scale_act)
+        scaling_act = gaussians_->getScaling();
+
+    if (lambda_aniso > 0.0f) {
+        // amax/amin instead of max(dim)/min(dim): the values are identical, but
+        // the argmax/argmin tensors and their backward nodes are not built.
+        torch::Tensor max_s = torch::amax(scaling_act, /*dim=*/1);
+        torch::Tensor min_s = torch::amin(scaling_act, /*dim=*/1);
+        torch::Tensor ratio = max_s / (min_s + 1e-6);
+        torch::Tensor loss_aniso =
+            torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
+        loss = loss + (lambda_aniso * loss_aniso);
+    }
     // ==============================================================================
 
     // ==============================================================================
@@ -2629,9 +2990,8 @@ void GaussianMapperLine::trainForOneIteration()
     // ==============================================================================
     // 从配置文件中读取权重，而不是硬编码 0.1f 或 0.05f
     // 如果权重为 0，则代表正在做 "关闭 L_str" 的消融实验 (Ablation Study)
-    float w_ori = opt_params_.weight_line_coherence_; // 论文中的 omega_1
-    float w_shape_ecc = opt_params_.weight_line_shape_ecc_;     // 论文中的 omega_2   ///lambda_ecc
-    float w_shape_ori = opt_params_.weight_line_shape_ori_;   // 论文中的 omega_3   ///lambda_shape
+    // w_ori / w_shape_ecc / w_shape_ori are read above, next to the anisotropy
+    // penalty, so one scale activation can serve both.
 
     // Formula-preserving: all three terms are individually weighted inside the
     // callees, so the block must also be entered when ONLY the orientation weight
@@ -2646,7 +3006,9 @@ void GaussianMapperLine::trainForOneIteration()
         if (w_ori > 0.0f) {
             // 建议：将权重乘法移到函数外部，让函数只返回纯粹的 Loss 标量，更符合 PyTorch 规范
             //loss_str = loss_str +  gaussians_->computeLineCoherenceLoss(w_ori);
-            loss_str = loss_str +  gaussians_->computeVectorizedLineLoss(w_ori);
+            loss_str = loss_str + (useRefStructLoss()
+                                       ? gaussians_->computeVectorizedLineLossRef(w_ori)
+                                       : gaussians_->computeVectorizedLineLoss(w_ori));
         }
         // 形状各向异性约束 L_ecc
         // Formula-preserving decoupling: each term is already multiplied by its
@@ -2655,7 +3017,10 @@ void GaussianMapperLine::trainForOneIteration()
         // eccentricity and orientation terms to be ablated independently. The
         // previous `&&` gate made them inseparable.
         if (w_shape_ecc > 0.0f || w_shape_ori > 0.0f) {
-            loss_str = loss_str + gaussians_->computeLineShapeConstraint(w_shape_ecc, w_shape_ori);
+            loss_str = loss_str + (useRefStructLoss()
+                                       ? gaussians_->computeLineShapeConstraintRef(w_shape_ecc, w_shape_ori)
+                                       : gaussians_->computeLineShapeConstraint(
+                                             w_shape_ecc, w_shape_ori, scaling_act));
         }
         
         loss = loss + loss_str;
