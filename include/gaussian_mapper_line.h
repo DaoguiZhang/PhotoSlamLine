@@ -315,6 +315,11 @@ public:
         // implementation, 0 = force the optimised one. Lets S-original and
         // S-fast run as two conditions of ONE process on ONE frozen scene.
         int force_ref = -1;
+        // Line-density experiment: fraction of the EXISTING line Gaussians to
+        // keep. 1.0 = keep all (default), 0.0 = drop every line Gaussian. Only
+        // line rows are affected; ordinary Gaussians always keep their exact
+        // initial parameters. Sets are deterministic and NESTED across fractions.
+        float keep_line_frac = 1.0f;
     };
     std::vector<FrozenAblationCondition> frozen_conditions_;
     std::filesystem::path frozen_ablation_dir_;
@@ -364,6 +369,12 @@ public:
     // parameter snapshot and reports max|d loss| and max|d grad| per target
     // parameter, so "mathematically equivalent" is measured, not asserted.
     void runEquivCheck(const std::string& tag, long long step);
+    // Deterministic, nested, direction-stratified subset of the line Gaussians.
+    // No explicit MapLine->sample association exists at freeze time (the
+    // line_to_sample_ids path is unused), so line membership is approximated by
+    // the quantised world direction; lines sharing a direction are
+    // indistinguishable. Documented as a limitation.
+    torch::Tensor makeLineSubsetMask(float keep_frac) const;
     long long frozen_count_ref_all_ = -1;
     long long frozen_count_ref_line_ = -1;
     int frozen_count_violation_ = 0;

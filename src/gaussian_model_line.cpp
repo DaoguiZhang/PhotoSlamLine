@@ -417,9 +417,11 @@ void GaussianModelLine::createFromPcd(
     torch::Tensor color = torch::zeros(
         {num_points, 3},
         torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+    invalidateLineCache();   // cache version bump (assignment below)
     is_line_ = torch::zeros(
         {num_points},
         torch::TensorOptions().dtype(torch::kBool).device(device_type_));
+    invalidateLineCache();   // cache version bump (assignment below)
     line_dir_w_ = torch::zeros(
         {num_points, 3}, 
         torch::TensorOptions().dtype(torch::kFloat).device(device_type_)); 
@@ -518,7 +520,9 @@ void GaussianModelLine::createFromPcd(
     // =========================================================================
     scales = scales_cpu.to(device_type_).contiguous();
     rots   = rots_cpu.to(device_type_).contiguous();
+    invalidateLineCache();   // cache version bump (assignment below)
     line_dir_w_ = line_dir_cpu.to(device_type_).contiguous(); // 更新成员变量
+    invalidateLineCache();   // cache version bump (assignment below)
     this->is_line_ = is_line_cpu.to(device_type_).contiguous(); // 更新成员变量
 
     // 6. 初始化 Opacity 和其他参数
@@ -534,6 +538,7 @@ void GaussianModelLine::createFromPcd(
     // 7. 赋值给可优化参数 (Requires Grad)
     this->xyz_ = fused_point_cloud.requires_grad_();
     // 创建一个不带梯度的初始位置副本
+    invalidateLineCache();   // cache version bump (assignment below)
     this->xyz_init_ = this->xyz_.detach().clone();
     this->features_dc_ = features.index({torch::indexing::Slice(),
                                          torch::indexing::Slice(),
@@ -612,9 +617,11 @@ void GaussianModelLine::createFromPcd(
     torch::Tensor color = torch::zeros(
         {num_points, 3},
         torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+    invalidateLineCache();   // cache version bump (assignment below)
     is_line_ = torch::zeros(
         {num_points},
         torch::TensorOptions().dtype(torch::kBool).device(device_type_));
+    invalidateLineCache();   // cache version bump (assignment below)
     line_dir_w_ = torch::zeros({num_points, 3}, torch::TensorOptions().dtype(torch::kFloat).device(device_type_));  //Set line direction
 
     auto is_line_cpu = is_line_.cpu();
@@ -758,6 +765,7 @@ void GaussianModelLine::createFromPcd(
                  torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
 
     this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
+    invalidateLineCache();   // cache version bump (assignment below)
     this->is_line_ = is_line_cpu.to(device_type_);  //cp back to gpu
 }
 #endif
@@ -1278,6 +1286,7 @@ void GaussianModelLine::applyScaledTransformation(
     transformPoints(this->xyz_, T_tensor);
     // 在 applyScaledTransformation 中同步变换线方向(由于 line_dir_w_ 目前在你的代码里是 requires_grad(false)，如果线本身的位置发生了旋转，line_dir_w_ 就失效了)
     torch::Tensor R_tensor = T_tensor.slice(0, 0, 3).slice(1, 0, 3); // 提取旋转部分
+    invalidateLineCache();   // cache version bump (assignment below)
     this->line_dir_w_ = torch::matmul(R_tensor, this->line_dir_w_.transpose(0,1)).transpose(0,1);
 
 // torch::Tensor scales;
@@ -1358,6 +1367,7 @@ void GaussianModelLine::scaledTransformVisiblePointsOfKeyframe(
             torch::Tensor dirs = this->line_dir_w_;
             torch::Tensor rotated = torch::matmul(R, dirs.transpose(0, 1).contiguous()).transpose(0, 1);
             torch::Tensor m3 = line_mask.unsqueeze(1).expand({-1, 3});
+    invalidateLineCache();   // cache version bump (assignment below)
             this->line_dir_w_ = torch::where(m3, rotated, dirs);
         }
 
@@ -1658,15 +1668,18 @@ void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
 
     // --- 🌟 关键修改：同步裁剪影子张量 ---
     if (this->xyz_init_.defined()) {
+    invalidateLineCache();   // cache version bump (assignment below)
         this->xyz_init_ = this->xyz_init_.index({valid_points_mask});
     }
 
     // =====================================================
     // C. Structure-only & auxiliary tensors (NO optimizer)
     // =====================================================
+    invalidateLineCache();   // cache version bump (assignment below)
     this->is_line_ =
         this->is_line_.index({valid_points_mask});
 
+    invalidateLineCache();   // cache version bump (assignment below)
     this->line_dir_w_ =
         this->line_dir_w_.index({valid_points_mask});
 
@@ -1843,9 +1856,11 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     // =====================================================
     // B. Structure-only tensors (NO optimizer state)
     // =====================================================
+    invalidateLineCache();   // cache version bump (assignment below)
     this->is_line_ =
         torch::cat({this->is_line_, new_is_line.to(this->is_line_.device())}, 0);
 
+    invalidateLineCache();   // cache version bump (assignment below)
     this->line_dir_w_ =
         torch::cat({this->line_dir_w_, new_line_dir_w.to(this->line_dir_w_.device())}, 0);
 
@@ -2020,13 +2035,16 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     this->point_ids_ = torch::cat({this->point_ids_, new_ids}, 0);
 
     // --- 🌟 关键修改：同步拼接影子张量 ---
+    invalidateLineCache();   // cache version bump (assignment below)
     this->xyz_init_ = torch::cat({this->xyz_init_, new_xyz_init.to(device_type_)}, 0).detach();
 
     // =====================================================
     // C. Structure-only tensors (NO optimizer state)
     // =====================================================
     // 确保这些 tensor 也在正确的设备上
+    invalidateLineCache();   // cache version bump (assignment below)
     this->is_line_ = torch::cat({this->is_line_, new_is_line.to(device_type_)}, 0);
+    invalidateLineCache();   // cache version bump (assignment below)
     this->line_dir_w_ = torch::cat({this->line_dir_w_, new_line_dir_w.to(device_type_)}, 0);
     this->exist_since_iter_ = torch::cat({this->exist_since_iter_, new_exist_since_iter.to(device_type_)}, 0);
 
@@ -4362,8 +4380,11 @@ std::size_t GaussianModelLine::restoreInitCheckpoint(const std::filesystem::path
     put(opacity_, ts[4], "opacity");
     put(rotation_, ts[5], "rotation");
     put(is_line_, ts[6], "is_line");
+    invalidateLineCache();   // in-place copy_(): pointer does not change
     put(line_dir_w_, ts[7], "line_dir_w");
+    invalidateLineCache();   // in-place copy_(): pointer does not change
     put(xyz_init_, ts[8], "xyz_init");
+    invalidateLineCache();   // in-place copy_(): pointer does not change
     return ts.size();
 }
 
@@ -4605,9 +4626,11 @@ void GaussianModelLine::refreshLineCache()
     const void* p_init = xyz_init_.defined() ? xyz_init_.data_ptr() : nullptr;
     const void* p_dir = line_dir_w_.defined() ? line_dir_w_.data_ptr() : nullptr;
 
-    if (line_idx_.defined() && n_is == lc_n_is_ && n_init == lc_n_init_ &&
-        n_dir == lc_n_dir_ && p_is == lc_p_is_ && p_init == lc_p_init_ &&
-        p_dir == lc_p_dir_)
+    // Primary: the explicit version. Secondary: the (numel, data_ptr) signature,
+    // which catches a writer that forgot to bump the version.
+    if (line_idx_.defined() && line_cache_version_ == line_partition_version_ &&
+        n_is == lc_n_is_ && n_init == lc_n_init_ && n_dir == lc_n_dir_ &&
+        p_is == lc_p_is_ && p_init == lc_p_init_ && p_dir == lc_p_dir_)
         return;   // fresh: no device work at all
 
     torch::NoGradGuard ng;
@@ -4627,6 +4650,7 @@ void GaussianModelLine::refreshLineCache()
                            : torch::Tensor();
     lc_n_is_ = n_is; lc_n_init_ = n_init; lc_n_dir_ = n_dir;
     lc_p_is_ = p_is; lc_p_init_ = p_init; lc_p_dir_ = p_dir;
+    line_cache_version_ = line_partition_version_;
 }
 
 torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherence)
@@ -4738,4 +4762,61 @@ torch::Tensor GaussianModelLine::computeLineShapeConstraint(
     if (ecc_term.defined())
         return ecc_term;
     return ori_term;
+}
+
+// ===========================================================================
+// Line-density experiment: deterministic subsetting.
+// ===========================================================================
+void GaussianModelLine::keepSubset(const torch::Tensor& keep_mask)
+{
+    torch::NoGradGuard ng;
+    auto m = keep_mask.to(xyz_.device()).to(torch::kBool).flatten();
+    TORCH_CHECK(m.size(0) == xyz_.size(0),
+                "keepSubset: mask/parameter size mismatch");
+    auto sel = [&](torch::Tensor& t) {
+        if (t.defined() && t.size(0) == m.size(0))
+            t = t.index_select(0, torch::nonzero(m).flatten()).contiguous();
+        else if (t.defined() && t.size(0) != m.size(0) && t.numel() > 0)
+            t = torch::Tensor();   // size-mismatched auxiliary: drop it
+    };
+    sel(xyz_);           xyz_ = xyz_.detach().requires_grad_();
+    sel(xyz_init_);
+    sel(is_line_);
+    sel(line_dir_w_);
+    sel(point_ids_);
+    sel(features_dc_);   features_dc_ = features_dc_.detach().requires_grad_();
+    if (features_rest_.defined() && features_rest_.numel() > 0) {
+        sel(features_rest_);
+        features_rest_ = features_rest_.detach().requires_grad_();
+    }
+    sel(opacity_);       opacity_ = opacity_.detach().requires_grad_();
+    sel(scaling_);       scaling_ = scaling_.detach().requires_grad_();
+    sel(rotation_);      rotation_ = rotation_.detach().requires_grad_();
+    sel(max_radii2D_);
+    sel(exist_since_iter_);
+    sel(xyz_gradient_accum_);
+    sel(denom_);
+    invalidateLineCache();          // topology changed
+    rebuildParamVectors();
+}
+
+std::string GaussianModelLine::paramFingerprintNonLine()
+{
+    std::uint64_t h = 1469598103934665603ULL;
+    torch::Tensor keep;
+    {
+        torch::NoGradGuard ng;
+        keep = ~(is_line_.defined() ? is_line_.to(torch::kBool) : torch::zeros_like(xyz_.select(1, 0)).to(torch::kBool));
+    }
+    auto sub = [&](const torch::Tensor& t) {
+        if (t.defined() && t.size(0) == keep.size(0))
+            fgmHashTensor(t.index_select(0, torch::nonzero(keep).flatten()), h);
+    };
+    sub(xyz_); sub(opacity_); sub(scaling_); sub(rotation_);
+    sub(features_dc_); sub(xyz_init_);
+    const long long n = keep.sum().item().toLong();
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "%016llx_nonlin%lld",
+                  static_cast<unsigned long long>(h), n);
+    return std::string(buf);
 }

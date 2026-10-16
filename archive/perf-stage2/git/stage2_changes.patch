@@ -1,0 +1,459 @@
+diff --git a/include/gaussian_mapper_line.h b/include/gaussian_mapper_line.h
+index 6031f73193..8ec204d871 100755
+--- a/include/gaussian_mapper_line.h
++++ b/include/gaussian_mapper_line.h
+@@ -315,6 +315,11 @@ public:
+         // implementation, 0 = force the optimised one. Lets S-original and
+         // S-fast run as two conditions of ONE process on ONE frozen scene.
+         int force_ref = -1;
++        // Line-density experiment: fraction of the EXISTING line Gaussians to
++        // keep. 1.0 = keep all (default), 0.0 = drop every line Gaussian. Only
++        // line rows are affected; ordinary Gaussians always keep their exact
++        // initial parameters. Sets are deterministic and NESTED across fractions.
++        float keep_line_frac = 1.0f;
+     };
+     std::vector<FrozenAblationCondition> frozen_conditions_;
+     std::filesystem::path frozen_ablation_dir_;
+@@ -364,6 +369,12 @@ public:
+     // parameter snapshot and reports max|d loss| and max|d grad| per target
+     // parameter, so "mathematically equivalent" is measured, not asserted.
+     void runEquivCheck(const std::string& tag, long long step);
++    // Deterministic, nested, direction-stratified subset of the line Gaussians.
++    // No explicit MapLine->sample association exists at freeze time (the
++    // line_to_sample_ids path is unused), so line membership is approximated by
++    // the quantised world direction; lines sharing a direction are
++    // indistinguishable. Documented as a limitation.
++    torch::Tensor makeLineSubsetMask(float keep_frac) const;
+     long long frozen_count_ref_all_ = -1;
+     long long frozen_count_ref_line_ = -1;
+     int frozen_count_violation_ = 0;
+diff --git a/include/gaussian_model_line.h b/include/gaussian_model_line.h
+index 43f83772d1..f9959a048e 100755
+--- a/include/gaussian_model_line.h
++++ b/include/gaussian_model_line.h
+@@ -274,7 +274,26 @@ public:
+     const void* lc_p_is_ = nullptr;
+     const void* lc_p_init_ = nullptr;
+     const void* lc_p_dir_ = nullptr;
++    // PRIMARY invalidation mechanism: an explicit monotonic version that every
++    // writer of is_line_ / xyz_init_ / line_dir_w_ bumps. numel+data_ptr alone
++    // is NOT a reliable version: restoreInitCheckpoint() and loadPly() write
++    // those tensors IN PLACE with copy_(), so the pointer stays the same while
++    // the content changes. The pointer/size pair is kept only as a secondary
++    // safety net for any writer that was missed.
++    long line_partition_version_ = 0;
++    long line_cache_version_ = -1;
++    void invalidateLineCache() { ++line_partition_version_; }
+     void refreshLineCache();
++    // Replace the Gaussian set with a deterministic subset (see the density
++    // experiment). Ordinary Gaussians keep their EXACT current parameters; only
++    // rows are dropped. Parameter vectors are re-pointed so a caller can build a
++    // fresh optimizer over the filtered tensors.
++    void keepSubset(const torch::Tensor& keep_mask);
++    // FNV-1a fingerprint over the NON-line Gaussians only, plus their count.
++    // Used to prove that the line-density conditions share identical ordinary
++    // Gaussians (they differ only in how many line Gaussians they carry).
++    std::string paramFingerprintNonLine();
++    void rebuildParamVectors() { GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE }
+     torch::Tensor point_ids_; // [N] 类型为 kLong，存储每个点的唯一 ID （用于后续处理）
+     torch::Tensor features_dc_;
+     torch::Tensor features_rest_;
+diff --git a/scripts/lpips_fgm.py b/scripts/lpips_fgm.py
+index 2edf669f4c..12d1d64343 100644
+--- a/scripts/lpips_fgm.py
++++ b/scripts/lpips_fgm.py
+@@ -110,7 +110,7 @@ def main(argv):
+ 
+     results = {}
+     for lbl in labels:
+-        for tag in ("B", "C", "E", "F", "G", "B0", "B1", "J", "K"):
++        for tag in ("B", "C", "E", "F", "G", "B0", "B1", "J", "K", "Q0", "Q25", "Q50", "Q100"):
+             tag_dir = os.path.join(ROOT, lbl, tag)
+             if not os.path.isdir(tag_dir):
+                 continue
+diff --git a/src/gaussian_mapper_line.cpp b/src/gaussian_mapper_line.cpp
+index 3f1713135a..6bddd0e1b9 100755
+--- a/src/gaussian_mapper_line.cpp
++++ b/src/gaussian_mapper_line.cpp
+@@ -1601,6 +1601,55 @@ void GaussianMapperLine::runMicroBench(const std::string& tag, long long step)
+     sync();
+ }
+ 
++// ---------------------------------------------------------------------------
++// Line-density experiment: deterministic, nested, direction-stratified subset.
++// ---------------------------------------------------------------------------
++torch::Tensor GaussianMapperLine::makeLineSubsetMask(float keep_frac) const
++{
++    torch::NoGradGuard ng;
++    const auto is_line_cpu = gaussians_->is_line_.to(torch::kCPU).to(torch::kBool).flatten();
++    auto keep = (~is_line_cpu).clone();                       // ordinary Gaussians: always kept
++    auto idx = torch::nonzero(is_line_cpu).flatten();          // line rows, ascending order
++    const long long nl = idx.size(0);
++    if (nl == 0) return keep;
++    if (keep_frac >= 1.0f) { keep.index_put_({idx}, true); return keep; }
++    if (keep_frac <= 0.0f) return keep;                        // Q0: every line row dropped
++
++    int k = static_cast<int>(std::lround(1.0f / keep_frac));
++    if (k < 1) k = 1;
++
++    const auto dir = gaussians_->line_dir_w_.to(torch::kCPU).to(torch::kFloat).contiguous();
++    auto da = dir.accessor<float, 2>();
++    auto ia = idx.accessor<int64_t, 1>();
++
++    // Group by the quantised world direction so that a stride does not drop a
++    // whole line. Canonicalise the sign first so opposite directions share a
++    // group. (No explicit MapLine association exists at freeze time.)
++    std::map<std::array<long long, 3>, std::vector<long long>> groups;
++    for (long long p = 0; p < nl; ++p) {
++        const long long row = ia[p];            // GLOBAL row index into line_dir_w_
++        float x = da[row][0], y = da[row][1], z = da[row][2];
++        if (x < 0.f || (x == 0.f && (y < 0.f || (y == 0.f && z < 0.f)))) { x = -x; y = -y; z = -z; }
++        groups[{std::llround(x * 100.0), std::llround(y * 100.0),
++                std::llround(z * 100.0)}].push_back(row);
++    }
++    std::vector<int64_t> kept;
++    for (auto& kv : groups) {
++        auto& v = kv.second;                       // ascending row index order
++        for (std::size_t p = 0; p < v.size(); ++p)
++            if (p % k == 0) kept.push_back(static_cast<int64_t>(v[p]));
++    }
++    if (!kept.empty()) {
++        auto t = torch::from_blob(kept.data(), {static_cast<int64_t>(kept.size())},
++                                  torch::TensorOptions().dtype(torch::kLong)).clone();
++        keep.index_put_({t}, true);
++    }
++    std::cerr << "[Density] keep_line_frac=" << keep_frac << " stride=" << k
++              << " direction_groups=" << groups.size() << " line_kept=" << kept.size()
++              << " / " << nl << std::endl;
++    return keep;
++}
++
+ // ---------------------------------------------------------------------------
+ // Numerical equivalence check (PHOTO_SLAM_FGM_EQCHECK=1).
+ //
+@@ -1894,6 +1943,15 @@ void GaussianMapperLine::runFrozenAblation()
+                     c.use_line_gaussians = true;  c.line_loss = true;
+                     c.directional_densify = false;
+                     c.w_position = 0.0f; c.w_ecc = -1.0f; c.w_orient = 0.0f;
++                } else if (base == 'Q') {
++                    // Line-density conditions: ordinary Gaussians untouched,
++                    // structural loss OFF, only the number of line Gaussians
++                    // changes. Q0 / Q25 / Q50 / Q100.
++                    c.use_line_gaussians = true;  c.line_loss = false;
++                    c.directional_densify = false;
++                    const std::string num = item.substr(1);
++                    const int pct = num.empty() ? 100 : std::atoi(num.c_str());
++                    c.keep_line_frac = static_cast<float>(pct) / 100.0f;
+                 } else if (base == 'J' || base == 'K') {
+                     // all three structural terms, implementation forced:
+                     //   J = pre-optimisation (S-original), K = optimised (S-fast)
+@@ -2133,6 +2191,7 @@ void GaussianMapperLine::runFrozenAblation()
+            "fixed_count,init_fingerprint,init_restore,init_fp_match,"
+            "count_violation,eval_count,eval_params_stable,mapping_seconds,"
+            "w_position_eff,w_ecc_eff,w_orient_eff,use_ref_struct_loss,"
++           "keep_line_frac,nonline_fp,"
+            "input_hash,image_hash,kf_seq_hash\n";
+ 
+     for (const auto& c : order) {
+@@ -2154,6 +2213,10 @@ void GaussianMapperLine::runFrozenAblation()
+         int eval_params_stable = 1;
+         std::vector<std::vector<double>> eval_rows;
+         float w_position_eff = -1.0f, w_ecc_eff = -1.0f, w_orient_eff = -1.0f;
++        // Non-line fingerprint: proves the ordinary Gaussians are identical
++        // across the line-density conditions.
++        std::string nonline_fp;
++        long long n_line_init = 0;
+ 
+         try {
+             // Identical input, minus the line-sampled seeds for the point baseline.
+@@ -2183,6 +2246,24 @@ void GaussianMapperLine::runFrozenAblation()
+                           << n_gauss_init << " vs " << frozen_count_ref_all_
+                           << ") - checkpoint NOT applied." << std::endl;
+             }
++            // Line-density condition: drop rows from the SAME restored
++            // checkpoint. Ordinary Gaussians keep their exact initial
++            // parameters; only line rows are removed. A fresh optimizer is then
++            // built over the filtered tensors.
++            if (c.keep_line_frac < 1.0f) {
++                auto keepmask = makeLineSubsetMask(c.keep_line_frac);
++                gaussians_->keepSubset(keepmask);
++                gaussians_->trainingSetup(opt_params_);
++                n_gauss_init = gaussians_->getXYZ().size(0);
++            }
++            nonline_fp = gaussians_->paramFingerprintNonLine();
++            // The count reference is the CONDITION's own post-subset count, so
++            // count_violation means "the count changed during this condition"
++            // rather than "this condition has fewer line Gaussians than Q100".
++            frozen_count_ref_all_ = static_cast<long long>(gaussians_->xyz_.size(0));
++            frozen_count_ref_line_ =
++                (gaussians_->is_line_.defined() && gaussians_->is_line_.numel() > 0)
++                    ? gaussians_->is_line_.to(torch::kCPU).sum().item().toLong() : 0LL;
+             frozen_count_violation_ = 0;
+             frozen_eval_seconds_total_ = 0.0;
+             frozen_use_ref_ = c.force_ref;
+@@ -2421,6 +2502,7 @@ void GaussianMapperLine::runFrozenAblation()
+             << eval_params_stable << ',' << mapping_seconds << ','
+             << w_position_eff << ',' << w_ecc_eff << ',' << w_orient_eff << ','
+             << (useRefStructLoss() ? 1 : 0) << ','
++            << c.keep_line_frac << ',' << nonline_fp << ','
+             << input_hash << ',' << image_hash << ',' << seq_hash << '\n';
+         csv.flush();
+     }
+@@ -2640,10 +2722,17 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
+         scaling_act = gaussians_->getScaling();
+ 
+     if (lambda_aniso > 0.0f) {
+-        // amax/amin instead of max(dim)/min(dim): the values are identical, but
+-        // the argmax/argmin tensors and their backward nodes are not built.
+-        torch::Tensor max_s = torch::amax(scaling_act, /*dim=*/1);
+-        torch::Tensor min_s = torch::amin(scaling_act, /*dim=*/1);
++        // NOTE: max(dim)/min(dim) VALUES are used, NOT amax/amin. The values are
++        // identical but the GRADIENTS are not: max(dim) routes the gradient to
++        // the single argmax, while amax spreads it over every tied extremum.
++        // Measured in this LibTorch (2.12) with the real initialisation pattern
++        // (scale_axis1 == scale_axis2 exactly): relative gradient difference
++        // 0.5. Reverted deliberately - the substitution changed training
++        // semantics. See reports/perf_stage2_report.md section 1.
++        auto max_res = torch::max(scaling_act, /*dim=*/1);
++        torch::Tensor max_s = std::get<0>(max_res);
++        auto min_res = torch::min(scaling_act, /*dim=*/1);
++        torch::Tensor min_s = std::get<0>(min_res);
+         torch::Tensor ratio = max_s / (min_s + 1e-6);
+         torch::Tensor loss_aniso =
+             torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
+@@ -2974,10 +3063,17 @@ void GaussianMapperLine::trainForOneIteration()
+         scaling_act = gaussians_->getScaling();
+ 
+     if (lambda_aniso > 0.0f) {
+-        // amax/amin instead of max(dim)/min(dim): the values are identical, but
+-        // the argmax/argmin tensors and their backward nodes are not built.
+-        torch::Tensor max_s = torch::amax(scaling_act, /*dim=*/1);
+-        torch::Tensor min_s = torch::amin(scaling_act, /*dim=*/1);
++        // NOTE: max(dim)/min(dim) VALUES are used, NOT amax/amin. The values are
++        // identical but the GRADIENTS are not: max(dim) routes the gradient to
++        // the single argmax, while amax spreads it over every tied extremum.
++        // Measured in this LibTorch (2.12) with the real initialisation pattern
++        // (scale_axis1 == scale_axis2 exactly): relative gradient difference
++        // 0.5. Reverted deliberately - the substitution changed training
++        // semantics. See reports/perf_stage2_report.md section 1.
++        auto max_res = torch::max(scaling_act, /*dim=*/1);
++        torch::Tensor max_s = std::get<0>(max_res);
++        auto min_res = torch::min(scaling_act, /*dim=*/1);
++        torch::Tensor min_s = std::get<0>(min_res);
+         torch::Tensor ratio = max_s / (min_s + 1e-6);
+         torch::Tensor loss_aniso =
+             torch::pow(torch::clamp(ratio - max_aniso_th, /*min=*/0), 2).mean();
+diff --git a/src/gaussian_model_line.cpp b/src/gaussian_model_line.cpp
+index c962d566aa..8a791fdbd6 100755
+--- a/src/gaussian_model_line.cpp
++++ b/src/gaussian_model_line.cpp
+@@ -417,9 +417,11 @@ void GaussianModelLine::createFromPcd(
+     torch::Tensor color = torch::zeros(
+         {num_points, 3},
+         torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
++    invalidateLineCache();   // cache version bump (assignment below)
+     is_line_ = torch::zeros(
+         {num_points},
+         torch::TensorOptions().dtype(torch::kBool).device(device_type_));
++    invalidateLineCache();   // cache version bump (assignment below)
+     line_dir_w_ = torch::zeros(
+         {num_points, 3}, 
+         torch::TensorOptions().dtype(torch::kFloat).device(device_type_)); 
+@@ -518,7 +520,9 @@ void GaussianModelLine::createFromPcd(
+     // =========================================================================
+     scales = scales_cpu.to(device_type_).contiguous();
+     rots   = rots_cpu.to(device_type_).contiguous();
++    invalidateLineCache();   // cache version bump (assignment below)
+     line_dir_w_ = line_dir_cpu.to(device_type_).contiguous(); // 更新成员变量
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->is_line_ = is_line_cpu.to(device_type_).contiguous(); // 更新成员变量
+ 
+     // 6. 初始化 Opacity 和其他参数
+@@ -534,6 +538,7 @@ void GaussianModelLine::createFromPcd(
+     // 7. 赋值给可优化参数 (Requires Grad)
+     this->xyz_ = fused_point_cloud.requires_grad_();
+     // 创建一个不带梯度的初始位置副本
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->xyz_init_ = this->xyz_.detach().clone();
+     this->features_dc_ = features.index({torch::indexing::Slice(),
+                                          torch::indexing::Slice(),
+@@ -612,9 +617,11 @@ void GaussianModelLine::createFromPcd(
+     torch::Tensor color = torch::zeros(
+         {num_points, 3},
+         torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
++    invalidateLineCache();   // cache version bump (assignment below)
+     is_line_ = torch::zeros(
+         {num_points},
+         torch::TensorOptions().dtype(torch::kBool).device(device_type_));
++    invalidateLineCache();   // cache version bump (assignment below)
+     line_dir_w_ = torch::zeros({num_points, 3}, torch::TensorOptions().dtype(torch::kFloat).device(device_type_));  //Set line direction
+ 
+     auto is_line_cpu = is_line_.cpu();
+@@ -758,6 +765,7 @@ void GaussianModelLine::createFromPcd(
+                  torch::TensorOptions().dtype(torch::kFloat).device(device_type_));
+ 
+     this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->is_line_ = is_line_cpu.to(device_type_);  //cp back to gpu
+ }
+ #endif
+@@ -1278,6 +1286,7 @@ void GaussianModelLine::applyScaledTransformation(
+     transformPoints(this->xyz_, T_tensor);
+     // 在 applyScaledTransformation 中同步变换线方向(由于 line_dir_w_ 目前在你的代码里是 requires_grad(false)，如果线本身的位置发生了旋转，line_dir_w_ 就失效了)
+     torch::Tensor R_tensor = T_tensor.slice(0, 0, 3).slice(1, 0, 3); // 提取旋转部分
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->line_dir_w_ = torch::matmul(R_tensor, this->line_dir_w_.transpose(0,1)).transpose(0,1);
+ 
+ // torch::Tensor scales;
+@@ -1358,6 +1367,7 @@ void GaussianModelLine::scaledTransformVisiblePointsOfKeyframe(
+             torch::Tensor dirs = this->line_dir_w_;
+             torch::Tensor rotated = torch::matmul(R, dirs.transpose(0, 1).contiguous()).transpose(0, 1);
+             torch::Tensor m3 = line_mask.unsqueeze(1).expand({-1, 3});
++    invalidateLineCache();   // cache version bump (assignment below)
+             this->line_dir_w_ = torch::where(m3, rotated, dirs);
+         }
+ 
+@@ -1658,15 +1668,18 @@ void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
+ 
+     // --- 🌟 关键修改：同步裁剪影子张量 ---
+     if (this->xyz_init_.defined()) {
++    invalidateLineCache();   // cache version bump (assignment below)
+         this->xyz_init_ = this->xyz_init_.index({valid_points_mask});
+     }
+ 
+     // =====================================================
+     // C. Structure-only & auxiliary tensors (NO optimizer)
+     // =====================================================
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->is_line_ =
+         this->is_line_.index({valid_points_mask});
+ 
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->line_dir_w_ =
+         this->line_dir_w_.index({valid_points_mask});
+ 
+@@ -1843,9 +1856,11 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
+     // =====================================================
+     // B. Structure-only tensors (NO optimizer state)
+     // =====================================================
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->is_line_ =
+         torch::cat({this->is_line_, new_is_line.to(this->is_line_.device())}, 0);
+ 
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->line_dir_w_ =
+         torch::cat({this->line_dir_w_, new_line_dir_w.to(this->line_dir_w_.device())}, 0);
+ 
+@@ -2020,13 +2035,16 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
+     this->point_ids_ = torch::cat({this->point_ids_, new_ids}, 0);
+ 
+     // --- 🌟 关键修改：同步拼接影子张量 ---
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->xyz_init_ = torch::cat({this->xyz_init_, new_xyz_init.to(device_type_)}, 0).detach();
+ 
+     // =====================================================
+     // C. Structure-only tensors (NO optimizer state)
+     // =====================================================
+     // 确保这些 tensor 也在正确的设备上
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->is_line_ = torch::cat({this->is_line_, new_is_line.to(device_type_)}, 0);
++    invalidateLineCache();   // cache version bump (assignment below)
+     this->line_dir_w_ = torch::cat({this->line_dir_w_, new_line_dir_w.to(device_type_)}, 0);
+     this->exist_since_iter_ = torch::cat({this->exist_since_iter_, new_exist_since_iter.to(device_type_)}, 0);
+ 
+@@ -4362,8 +4380,11 @@ std::size_t GaussianModelLine::restoreInitCheckpoint(const std::filesystem::path
+     put(opacity_, ts[4], "opacity");
+     put(rotation_, ts[5], "rotation");
+     put(is_line_, ts[6], "is_line");
++    invalidateLineCache();   // in-place copy_(): pointer does not change
+     put(line_dir_w_, ts[7], "line_dir_w");
++    invalidateLineCache();   // in-place copy_(): pointer does not change
+     put(xyz_init_, ts[8], "xyz_init");
++    invalidateLineCache();   // in-place copy_(): pointer does not change
+     return ts.size();
+ }
+ 
+@@ -4605,9 +4626,11 @@ void GaussianModelLine::refreshLineCache()
+     const void* p_init = xyz_init_.defined() ? xyz_init_.data_ptr() : nullptr;
+     const void* p_dir = line_dir_w_.defined() ? line_dir_w_.data_ptr() : nullptr;
+ 
+-    if (line_idx_.defined() && n_is == lc_n_is_ && n_init == lc_n_init_ &&
+-        n_dir == lc_n_dir_ && p_is == lc_p_is_ && p_init == lc_p_init_ &&
+-        p_dir == lc_p_dir_)
++    // Primary: the explicit version. Secondary: the (numel, data_ptr) signature,
++    // which catches a writer that forgot to bump the version.
++    if (line_idx_.defined() && line_cache_version_ == line_partition_version_ &&
++        n_is == lc_n_is_ && n_init == lc_n_init_ && n_dir == lc_n_dir_ &&
++        p_is == lc_p_is_ && p_init == lc_p_init_ && p_dir == lc_p_dir_)
+         return;   // fresh: no device work at all
+ 
+     torch::NoGradGuard ng;
+@@ -4627,6 +4650,7 @@ void GaussianModelLine::refreshLineCache()
+                            : torch::Tensor();
+     lc_n_is_ = n_is; lc_n_init_ = n_init; lc_n_dir_ = n_dir;
+     lc_p_is_ = p_is; lc_p_init_ = p_init; lc_p_dir_ = p_dir;
++    line_cache_version_ = line_partition_version_;
+ }
+ 
+ torch::Tensor GaussianModelLine::computeVectorizedLineLoss(float lambda_coherence)
+@@ -4739,3 +4763,60 @@ torch::Tensor GaussianModelLine::computeLineShapeConstraint(
+         return ecc_term;
+     return ori_term;
+ }
++
++// ===========================================================================
++// Line-density experiment: deterministic subsetting.
++// ===========================================================================
++void GaussianModelLine::keepSubset(const torch::Tensor& keep_mask)
++{
++    torch::NoGradGuard ng;
++    auto m = keep_mask.to(xyz_.device()).to(torch::kBool).flatten();
++    TORCH_CHECK(m.size(0) == xyz_.size(0),
++                "keepSubset: mask/parameter size mismatch");
++    auto sel = [&](torch::Tensor& t) {
++        if (t.defined() && t.size(0) == m.size(0))
++            t = t.index_select(0, torch::nonzero(m).flatten()).contiguous();
++        else if (t.defined() && t.size(0) != m.size(0) && t.numel() > 0)
++            t = torch::Tensor();   // size-mismatched auxiliary: drop it
++    };
++    sel(xyz_);           xyz_ = xyz_.detach().requires_grad_();
++    sel(xyz_init_);
++    sel(is_line_);
++    sel(line_dir_w_);
++    sel(point_ids_);
++    sel(features_dc_);   features_dc_ = features_dc_.detach().requires_grad_();
++    if (features_rest_.defined() && features_rest_.numel() > 0) {
++        sel(features_rest_);
++        features_rest_ = features_rest_.detach().requires_grad_();
++    }
++    sel(opacity_);       opacity_ = opacity_.detach().requires_grad_();
++    sel(scaling_);       scaling_ = scaling_.detach().requires_grad_();
++    sel(rotation_);      rotation_ = rotation_.detach().requires_grad_();
++    sel(max_radii2D_);
++    sel(exist_since_iter_);
++    sel(xyz_gradient_accum_);
++    sel(denom_);
++    invalidateLineCache();          // topology changed
++    rebuildParamVectors();
++}
++
++std::string GaussianModelLine::paramFingerprintNonLine()
++{
++    std::uint64_t h = 1469598103934665603ULL;
++    torch::Tensor keep;
++    {
++        torch::NoGradGuard ng;
++        keep = ~(is_line_.defined() ? is_line_.to(torch::kBool) : torch::zeros_like(xyz_.select(1, 0)).to(torch::kBool));
++    }
++    auto sub = [&](const torch::Tensor& t) {
++        if (t.defined() && t.size(0) == keep.size(0))
++            fgmHashTensor(t.index_select(0, torch::nonzero(keep).flatten()), h);
++    };
++    sub(xyz_); sub(opacity_); sub(scaling_); sub(rotation_);
++    sub(features_dc_); sub(xyz_init_);
++    const long long n = keep.sum().item().toLong();
++    char buf[128];
++    std::snprintf(buf, sizeof(buf), "%016llx_nonlin%lld",
++                  static_cast<unsigned long long>(h), n);
++    return std::string(buf);
++}

@@ -274,7 +274,26 @@ public:
     const void* lc_p_is_ = nullptr;
     const void* lc_p_init_ = nullptr;
     const void* lc_p_dir_ = nullptr;
+    // PRIMARY invalidation mechanism: an explicit monotonic version that every
+    // writer of is_line_ / xyz_init_ / line_dir_w_ bumps. numel+data_ptr alone
+    // is NOT a reliable version: restoreInitCheckpoint() and loadPly() write
+    // those tensors IN PLACE with copy_(), so the pointer stays the same while
+    // the content changes. The pointer/size pair is kept only as a secondary
+    // safety net for any writer that was missed.
+    long line_partition_version_ = 0;
+    long line_cache_version_ = -1;
+    void invalidateLineCache() { ++line_partition_version_; }
     void refreshLineCache();
+    // Replace the Gaussian set with a deterministic subset (see the density
+    // experiment). Ordinary Gaussians keep their EXACT current parameters; only
+    // rows are dropped. Parameter vectors are re-pointed so a caller can build a
+    // fresh optimizer over the filtered tensors.
+    void keepSubset(const torch::Tensor& keep_mask);
+    // FNV-1a fingerprint over the NON-line Gaussians only, plus their count.
+    // Used to prove that the line-density conditions share identical ordinary
+    // Gaussians (they differ only in how many line Gaussians they carry).
+    std::string paramFingerprintNonLine();
+    void rebuildParamVectors() { GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE }
     torch::Tensor point_ids_; // [N] 类型为 kLong，存储每个点的唯一 ID （用于后续处理）
     torch::Tensor features_dc_;
     torch::Tensor features_rest_;
