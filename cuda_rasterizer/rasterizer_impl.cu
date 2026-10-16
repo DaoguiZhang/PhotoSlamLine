@@ -195,6 +195,79 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
+// ---------------------------------------------------------------------------
+// raster-perf-v1: stage-level rasteriser profile (PHOTO_SLAM_RASTER_PROF=1).
+//
+// CUDA events are recorded at the rasteriser's OWN stage boundaries, so each
+// stage is measured directly instead of being inferred from a whole
+// forward/backward span. Stages are disjoint, so they are not double counted.
+// Off by default: no events are created and no arithmetic changes.
+// ---------------------------------------------------------------------------
+struct RasterProf {
+	bool on = false;
+	int cycles = 0;
+	int min_p = 0;            // only profile at/above this Gaussian count
+	bool active = false;      // per-cycle gate
+	cudaEvent_t ev[10];
+	// cumulative, in stage order: preproc, scan, duplicate, sort, tile_ranges,
+	// fwd_render, fwd_total, bwd_render, bwd_preproc
+	double cum[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+	double prev[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+	int prev_cycles = 0;
+	double inst = 0.0;
+	long long inst_max = 0, inst_last = 0;
+	RasterProf() {
+		on = (std::getenv("PHOTO_SLAM_RASTER_PROF") != nullptr);
+		if (const char* m = std::getenv("PHOTO_SLAM_RASTER_PROF_MIN_P"))
+			min_p = std::atoi(m);
+		if (on) for (int i = 0; i < 10; ++i) cudaEventCreate(&ev[i]);
+		if (on)
+			printf("[RasterProf] enabled, min_P=%d (only cycles at/above this "
+			       "Gaussian count are profiled)\n", min_p);
+	}
+	inline bool gate(int P) { active = on && P >= min_p; return active; }
+	inline void mark(int i) { if (active) cudaEventRecord(ev[i]); }
+	inline void setInst(int n) { inst_last = n; inst += n; if (n > inst_max) inst_max = n; }
+	void finish() {
+		if (!active) return;
+		cudaEventSynchronize(ev[9]);
+		auto span = [&](int a, int b) { float v = 0.0f; cudaEventElapsedTime(&v, ev[a], ev[b]); return (double)v; };
+		cum[0] += span(0, 1);   // FORWARD::preprocess (projection + SH + cov + bounding)
+		cum[1] += span(1, 2);   // cub scan + the host read of num_rendered
+		cum[2] += span(2, 3);   // duplicateWithKeys (tile instances)
+		cum[3] += span(3, 4);   // DeviceRadixSort
+		cum[4] += span(4, 5);   // identifyTileRanges (+ memset)
+		cum[5] += span(5, 6);   // FORWARD::render
+		cum[6] += span(0, 6);   // forward total
+		cum[7] += span(7, 8);   // BACKWARD::render
+		cum[8] += span(8, 9);   // BACKWARD::preprocess
+		++cycles;
+		if (cycles % 500 == 0) {
+			// Incremental (independent block) means since the previous report, so
+			// the printed series IS the distribution across blocks rather than a
+			// single growing average.
+			const double n = (double)(cycles - prev_cycles);
+			double b[9];
+			for (int i = 0; i < 9; ++i) { b[i] = (cum[i] - prev[i]) / n; prev[i] = cum[i]; }
+			prev_cycles = cycles;
+			printf("[RasterProf] block cycles=%d..%d instances_mean=%.0f instances_max=%lld\n"
+			       "    preprocess        %.4f ms\n"
+			       "    scan+host_read    %.4f ms\n"
+			       "    duplicateWithKeys %.4f ms\n"
+			       "    sort              %.4f ms\n"
+			       "    identifyRanges    %.4f ms\n"
+			       "    FORWARD::render   %.4f ms\n"
+			       "    forward_total     %.4f ms\n"
+			       "    BACKWARD::render  %.4f ms\n"
+			       "    BACKWARD::preproc %.4f ms\n",
+			       prev_cycles - (int)n, prev_cycles, inst / (double)cycles, inst_max,
+			       b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]);
+			fflush(stdout);
+		}
+	}
+};
+static RasterProf g_raster_prof;
+
 int CudaRasterizer::Rasterizer::forward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
@@ -221,6 +294,8 @@ int CudaRasterizer::Rasterizer::forward(
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
+	g_raster_prof.gate(P);
+	g_raster_prof.mark(0);
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P);
@@ -271,6 +346,7 @@ int CudaRasterizer::Rasterizer::forward(
 		prefiltered
 	);
 
+	g_raster_prof.mark(1);
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
 	cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size,
@@ -284,6 +360,7 @@ int CudaRasterizer::Rasterizer::forward(
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
 	BinningState binningState = BinningState::fromChunk(binning_chunkptr, num_rendered);
 
+	g_raster_prof.mark(2);
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
 	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
@@ -297,6 +374,7 @@ int CudaRasterizer::Rasterizer::forward(
 		tile_grid
 		);
 
+	g_raster_prof.mark(3);
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
 
 	// Sort complete list of (duplicated) Gaussian indices by keys
@@ -307,6 +385,7 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_unsorted, binningState.point_list,
 		num_rendered, 0, 32 + bit);
 
+	g_raster_prof.mark(4);
 	cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2));
 
 	// Identify start and end of per-tile workloads in sorted list
@@ -317,6 +396,7 @@ int CudaRasterizer::Rasterizer::forward(
 			imgState.ranges
 			);
 
+	g_raster_prof.mark(5);
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
 	FORWARD::render(
@@ -332,6 +412,8 @@ int CudaRasterizer::Rasterizer::forward(
 		background,
 		out_color);
 
+	g_raster_prof.mark(6);
+	g_raster_prof.setInst(num_rendered);
 	return num_rendered;
 }
 
@@ -367,6 +449,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dscale,
 	float* dL_drot)
 {
+	g_raster_prof.mark(7);
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
 	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
@@ -404,6 +487,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dopacity,
 		dL_dcolor);
 
+	g_raster_prof.mark(8);
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
 	// use the one we computed ourselves.
@@ -430,4 +514,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
 		(glm::vec4*)dL_drot);
+
+	g_raster_prof.mark(9);
+	g_raster_prof.finish();
 }
