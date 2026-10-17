@@ -1,5 +1,12 @@
 # 第三轮：共同视角评价工具（实现结果与硬阻塞）
 
+> **更正（同一轮内）**：上一版把 `ply/input.ply` 当成最终模型，判断"12 份地图不可渲染"是**选错文件**。
+> `input.ply` 是 `saveSparsePointsPly()` 写的稀疏点云；完整 Gaussian 模型在
+> `supply: <run>/<iter>_shutdown/ply/point_cloud/iteration_<iter>/point_cloud.ply`，
+> 头部含 `f_dc_* / f_rest_* / opacity / scale_* / rot_*`（实测顶点 184588，P 与 L 均有）。
+> 因此旧产物**可恢复**，无需重跑四组。下文"硬阻塞"一节作废，保留作记录。
+
+
 ## 已完成
 - 新增 headless 入口 `examples/eval_common_views.cpp`（编译通过，CMake 目标
   `eval_common_views`）：加载 PLY + ORB 内参，对给定 Tcw 列表逐视角渲染并写 PNG/CSV，
