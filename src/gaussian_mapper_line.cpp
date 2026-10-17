@@ -33,6 +33,8 @@
 
 // defined in cuda_rasterizer/backward.cu
 void SetRasterBackend(int b);
+// geom-sync-v1 contract self-test (gaussian_model_line.cpp)
+bool runRigidCorrectionContractTest();
 // raster-perf-v6 call-trace hooks (cuda_rasterizer/rasterizer_impl.cu)
 void RasterCallTraceReset();
 void RasterCallTraceGet(long long* out);
@@ -830,7 +832,17 @@ void GaussianMapperLine::run()
 
             // 【修改点 1】循环清空所有积压的操作，确保最后一批 Line Gaussians 全部入场
             const auto drain_start = std::chrono::steady_clock::now();
-            while (pSLAM_->getAtlas()->hasMappingOperation()) {
+            // geom-sync-v1: one-shot CPU contract self-test (diagnostic only).
+    {
+        static const bool contract_test =
+            (std::getenv("PHOTO_SLAM_SYNC_CONTRACT_TEST") != nullptr);
+        static bool contract_done = false;
+        if (contract_test && !contract_done) {
+            contract_done = true;
+            runRigidCorrectionContractTest();
+        }
+    }
+    while (pSLAM_->getAtlas()->hasMappingOperation()) {
                 combineMappingOperations_withLine();
             }
             phase_drain_ms_ += std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -3979,6 +3991,16 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(std::shared_ptr
 void GaussianMapperLine::combineMappingOperations()
 {
     // Get Mapping Operations
+    // geom-sync-v1: one-shot CPU contract self-test (diagnostic only).
+    {
+        static const bool contract_test =
+            (std::getenv("PHOTO_SLAM_SYNC_CONTRACT_TEST") != nullptr);
+        static bool contract_done = false;
+        if (contract_test && !contract_done) {
+            contract_done = true;
+            runRigidCorrectionContractTest();
+        }
+    }
     while (pSLAM_->getAtlas()->hasMappingOperation()) {
         ORB_SLAM3::MappingOperation opr =
             pSLAM_->getAtlas()->getAndPopMappingOperation();
@@ -4187,6 +4209,16 @@ void GaussianMapperLine::combineMappingOperations()
 void GaussianMapperLine::combineMappingOperations_withLine()
 {
     // Get Mapping Operations
+    // geom-sync-v1: one-shot CPU contract self-test (diagnostic only).
+    {
+        static const bool contract_test =
+            (std::getenv("PHOTO_SLAM_SYNC_CONTRACT_TEST") != nullptr);
+        static bool contract_done = false;
+        if (contract_test && !contract_done) {
+            contract_done = true;
+            runRigidCorrectionContractTest();
+        }
+    }
     while (pSLAM_->getAtlas()->hasMappingOperation()) {
         ORB_SLAM3::MappingOperation opr =
             pSLAM_->getAtlas()->getAndPopMappingOperation();
@@ -4564,6 +4596,16 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 void GaussianMapperLine::combineMappingOperations_withLine()
 {
     // Get Mapping Operations
+    // geom-sync-v1: one-shot CPU contract self-test (diagnostic only).
+    {
+        static const bool contract_test =
+            (std::getenv("PHOTO_SLAM_SYNC_CONTRACT_TEST") != nullptr);
+        static bool contract_done = false;
+        if (contract_test && !contract_done) {
+            contract_done = true;
+            runRigidCorrectionContractTest();
+        }
+    }
     while (pSLAM_->getAtlas()->hasMappingOperation()) {
         ORB_SLAM3::MappingOperation opr =
             pSLAM_->getAtlas()->getAndPopMappingOperation();

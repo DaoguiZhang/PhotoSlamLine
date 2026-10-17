@@ -1372,6 +1372,98 @@ void GaussianModelLine::scaledTransformationPostfix(
     this->Tensor_vec_scaling_ = {this->scaling_};
 }
 
+// ---------------------------------------------------------------------------
+// geom-sync-v1 一: CPU reference test for the rigid-correction contract.
+//
+// Purpose: prove, numerically, that the transform entry recovers the TRUE R and
+// t from the tensor layout the mapper actually passes, and that the row-vector
+// multiplication rotates a direction by R (not R^T). It also measures the OLD
+// expression so the defect is a number, not an argument.
+//
+// Pure CPU; independent of the CUDA kernel and of any real loop closure.
+// ---------------------------------------------------------------------------
+bool runRigidCorrectionContractTest()
+{
+    auto cpu = torch::TensorOptions().dtype(torch::kFloat);
+    float worst_rec = 0.f, worst_dir = 0.f, worst_anchor = 0.f, old_dir = 0.f;
+
+    auto check = [&](const Eigen::Matrix4f& M, const Eigen::Vector3f& d,
+                     const Eigen::Vector3f& a, float s, const char* label) {
+        // Emulate exactly what the mapper does: EigenMatrix2TorchTensor(M)
+        // yields T[i][j] = M(i,j); then .transpose(0,1).
+        Eigen::Matrix4f MT = M.transpose();
+        torch::Tensor T = torch::from_blob(MT.data(), {4, 4}, cpu).clone();
+        torch::Tensor diff_pose = T.transpose(0, 1);
+
+        // New entry.
+        torch::Tensor Mc = diff_pose.transpose(0, 1).contiguous();
+        torch::Tensor R = Mc.slice(0, 0, 3).slice(1, 0, 3);
+        torch::Tensor t = Mc.slice(0, 0, 3).slice(1, 3, 4).transpose(0, 1);
+
+        float rec = 0.f;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                rec = std::max(rec, std::abs(R.index({i, j}).item<float>() - M(i, j)));
+        for (int j = 0; j < 3; ++j)
+            rec = std::max(rec, std::abs(t.index({0, j}).item<float>() - M(j, 3)));
+        worst_rec = std::max(worst_rec, rec);
+
+        torch::Tensor dv = torch::from_blob((void*)d.data(), {1, 3}, cpu).clone();
+        torch::Tensor av = torch::from_blob((void*)a.data(), {1, 3}, cpu).clone();
+
+        Eigen::Vector3f dref = M.block<3, 3>(0, 0) * d;
+        torch::Tensor rot = torch::matmul(dv, R.transpose(0, 1));
+        float ed = 0.f;
+        for (int j = 0; j < 3; ++j)
+            ed = std::max(ed, std::abs(rot.index({0, j}).item<float>() - dref[j]));
+        worst_dir = std::max(worst_dir, ed);
+
+        // OLD expression (slice straight off diff_pose) for contrast.
+        torch::Tensor Rold = diff_pose.slice(0, 0, 3).slice(1, 0, 3);
+        torch::Tensor rotold = torch::matmul(dv, Rold.transpose(0, 1));
+        float eo = 0.f;
+        for (int j = 0; j < 3; ++j)
+            eo = std::max(eo, std::abs(rotold.index({0, j}).item<float>() - dref[j]));
+        old_dir = std::max(old_dir, eo);
+
+        Eigen::Vector3f aref = s * (M.block<3, 3>(0, 0) * a) + M.block<3, 1>(0, 3);
+        torch::Tensor moved = torch::matmul(av, R.transpose(0, 1)) * s + t;
+        float ea = 0.f;
+        for (int j = 0; j < 3; ++j)
+            ea = std::max(ea, std::abs(moved.index({0, j}).item<float>() - aref[j]));
+        worst_anchor = std::max(worst_anchor, ea);
+
+        printf("[SyncContract] %-14s recover=%.2e direction=%.2e anchor=%.2e "
+               "old_expression=%.2e\n", label, rec, ed, ea, eo);
+    };
+
+    auto mk = [](const Eigen::Matrix3f& R, const Eigen::Vector3f& t) {
+        Eigen::Matrix4f M = Eigen::Matrix4f::Identity();
+        M.block<3, 3>(0, 0) = R;
+        M.block<3, 1>(0, 3) = t;
+        return M;
+    };
+
+    check(mk(Eigen::Matrix3f::Identity(), Eigen::Vector3f::Zero()),
+          {1.f, 0.f, 0.f}, {0.3f, -0.2f, 1.7f}, 1.f, "identity");
+    check(mk(Eigen::Matrix3f::Identity(), {0.5f, -0.25f, 1.f}),
+          {0.f, 1.f, 0.f}, {1.f, 2.f, 3.f}, 1.f, "translation");
+    const float c = std::cos(3.14159265358979f / 2.f), sn = std::sin(3.14159265358979f / 2.f);
+    Eigen::Matrix3f Rz;
+    Rz << c, -sn, 0.f, sn, c, 0.f, 0.f, 0.f, 1.f;
+    check(mk(Rz, {0.2f, 0.4f, -0.1f}), {1.f, 0.f, 0.f}, {0.5f, 0.1f, -0.7f}, 1.f, "Rz90+trans");
+    check(mk(Rz, {0.2f, 0.4f, -0.1f}), {1.f, 0.f, 0.f}, {0.5f, 0.1f, -0.7f}, 2.f, "Rz90+scale2");
+
+    const bool pass = (worst_rec < 1e-5f) && (worst_dir < 1e-5f) &&
+                      (worst_anchor < 1e-5f);
+    printf("[SyncContract] worst recover=%.2e direction=%.2e anchor=%.2e | "
+           "old expression error=%.2e | %s\n",
+           worst_rec, worst_dir, worst_anchor, old_dir,
+           pass ? "PASS (new entry)" : "FAIL (new entry)");
+    fflush(stdout);
+    return pass;
+}
+
 void GaussianModelLine::scaledTransformVisiblePointsOfKeyframe(
     torch::Tensor& point_not_transformed_flags,
     torch::Tensor& diff_pose,
@@ -1418,14 +1510,54 @@ void GaussianModelLine::scaledTransformVisiblePointsOfKeyframe(
         // Sync line direction (world) for line-sampled gaussians only. The
         // anisotropic gaussian rotation (rotation_) is already updated by the
         // kernel; line_dir_w_ must follow the same rigid rotation.
+        // ------------------------------------------------------------------
+        // geom-sync-v1: explicit rigid-correction entry for world-space line
+        // metadata.
+        //
+        // Contract (derived from the actual code, not assumed):
+        //   * `diff_pose` arrives as EigenMatrix2TorchTensor(M).transpose(0,1).
+        //     EigenMatrix2TorchTensor returns T[i][j] = M(i,j), so what we get
+        //     here is logically M^T.
+        //   * The CUDA kernel consumes `diff_pose.contiguous()`, which for that
+        //     transposed view is M in COLUMN-major order -- exactly what
+        //     transformPoint4x3 indexes ([0],[4],[8],[12]). That is why the
+        //     CENTRES are correct and are left to the kernel.
+        //   * Index-based slicing, however, sees M^T, so
+        //     diff_pose.slice(0,0,3).slice(1,0,3) is R^T -- NOT R. The previous
+        //     code used that slice for the line direction, i.e. it applied the
+        //     INVERSE rotation to line_dir_w_.
+        // ------------------------------------------------------------------
+        torch::Tensor M = diff_pose.transpose(0, 1).contiguous().to(torch::kFloat);
+        torch::Tensor R = M.slice(0, 0, 3).slice(1, 0, 3);   // true R, [3,3]
+        // M is a homogeneous matrix: the translation is COLUMN 3 (rows 0..2),
+        // not row 3. Reading row 3 (as the first draft did) yields (0,0,0) and
+        // was caught by the contract self-test before it shipped.
+        torch::Tensor t = M.slice(0, 0, 3).slice(1, 3, 4).transpose(0, 1); // [1,3]
+
         torch::Tensor line_mask = torch::logical_and(newly_transformed, this->is_line_);
         if (line_mask.any().item<bool>() && this->line_dir_w_.size(0) == this->xyz_.size(0)) {
-            torch::Tensor R = diff_pose.slice(0, 0, 3).slice(1, 0, 3).to(torch::kFloat);
             torch::Tensor dirs = this->line_dir_w_;
-            torch::Tensor rotated = torch::matmul(R, dirs.transpose(0, 1).contiguous()).transpose(0, 1);
+            // Row-vector convention: (R d)^T = d^T R^T. Directions take the
+            // rotation only -- no translation, no scale.
+            torch::Tensor rotated = torch::matmul(dirs, R.transpose(0, 1));
             torch::Tensor m3 = line_mask.unsqueeze(1).expand({-1, 3});
-    invalidateLineCache();   // cache version bump (assignment below)
+            invalidateLineCache();   // cache version bump (assignment below)
             this->line_dir_w_ = torch::where(m3, rotated, dirs);
+        }
+
+        // World-space line ANCHOR. xyz_init_ is consumed as a point on the line
+        // by the structural losses (see the anchor read above), so it must take
+        // exactly the same rigid map as the centre:
+        //     anchor' = s * (R * anchor) + t
+        // (the kernel applies p' = M (s p), i.e. the scale is applied before
+        // the rotation).
+        if (this->xyz_init_.defined() && this->xyz_init_.size(0) == this->xyz_.size(0)) {
+            torch::Tensor anchors = this->xyz_init_;
+            torch::Tensor moved = torch::matmul(anchors, R.transpose(0, 1)) * scale
+                                  + t.expand({anchors.size(0), 3});
+            torch::Tensor m3 = newly_transformed.unsqueeze(1).expand({-1, 3});
+            this->xyz_init_ = torch::where(m3, moved, anchors);
+            invalidateLineCache();
         }
 
         // Sync world scale / covariance magnitude for a scale-changing loop.
