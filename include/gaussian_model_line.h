@@ -115,8 +115,11 @@ public:
     // xyz first moment is rotated, the second moment is left in place.
     struct GbaCorrectionStats
     {
-        long long moved_rows = 0;
-        long long line_rows_moved = 0;    // subset of moved_rows with is_line_
+        long long moved_rows = 0;          // rows processed (selected)
+        long long nonzero_moved_rows = 0;  // rows whose centre actually moved
+        long long line_rows_moved = 0;     // subset of moved_rows with is_line_
+        double translation_sum = 0.0;      // sum of |p' - p| over processed rows
+        float max_translation = 0.0f;
         long long stale_rows = 0;         // coord_event_id_ >= event id
         long long unassigned_rows = 0;    // ref_kf_id_ < 0
         long long missing_event_rows = 0; // ref kf absent from the payload
@@ -128,6 +131,9 @@ public:
     unsigned long lastAppliedGbaEvent() const { return last_applied_gba_event_; }
     torch::Tensor refKfIds() const { return ref_kf_id_; }
     torch::Tensor coordEventIds() const { return coord_event_id_; }
+    // FNV-1a over the six Adam (step, exp_avg, exp_avg_sq) states. Used to
+    // prove that a recovery snapshot restored the optimiser, not just geometry.
+    std::string adamFingerprint();
 
     void applyScaledTransformation(
         const float s = 1.0,

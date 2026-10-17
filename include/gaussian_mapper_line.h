@@ -452,6 +452,78 @@ public:
     // {completed_optimizer_steps, keyframe fid, gaussian pyramid level, default_sh_}.
     std::vector<int> frozen_train_views_flat_;
 
+    // ---- gba-recovery-v1: in-process state snapshot + two-arm experiment ----
+public:
+    struct RecoveryAdamState
+    {
+        long long step = -1;
+        torch::Tensor exp_avg, exp_avg_sq;
+    };
+    struct RecoveryKfState
+    {
+        int remaining_times_of_use = 0;
+        std::vector<int> pyramid_times_of_use;
+        float tracking_error = 1.0f;
+        bool done_inactive_densify = false;
+        bool has_pose = false;
+        Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
+        Eigen::Vector3d t = Eigen::Vector3d::Zero();
+    };
+    struct RecoverySnapshot
+    {
+        torch::Tensor xyz, xyz_init, is_line, line_dir_w, ref_kf_id, coord_event_id;
+        torch::Tensor features_dc, features_rest, scaling, rotation, opacity;
+        torch::Tensor point_ids, exist_since_iter, max_radii2D;
+        torch::Tensor xyz_grad_accum, denom;
+        std::vector<RecoveryAdamState> adam;   // 6 optimizer groups
+        long long iteration = 0;
+        long long frozen_opt_steps = 0;
+        int active_sh = 0;
+        int default_sh = 0;
+        float ema_loss = 0.0f;
+        std::map<std::size_t, int> kfs_used_times;
+        std::map<std::size_t, RecoveryKfState> kfs;
+    };
+    struct RecoveryArmResult
+    {
+        bool ok = false;
+        double sync_seconds = 0.0;
+        double train_seconds = 0.0;
+        long long steps = 0;
+        long long updated_rows = 0;
+        long long gaussians = 0;
+        long long line_gaussians = 0;
+        float max_translation = 0.0f;
+        double mean_translation = 0.0;
+        std::string param_fp;
+        std::string adam_fp;
+        std::string param_fp0;   // immediately after arm sync, before step 0
+        std::string adam_fp0;
+        std::string schedule_fp; // iteration/SH/keyframe usage/training views
+        // completed_optimizer_step -> (PSNR, SSIM)
+        std::map<long long, std::pair<double, double>> eval_quality;
+        // Only filled for short repeat arms (steps <= 10).
+        std::map<long long, std::string> step_param_fp;
+    };
+
+    RecoverySnapshot captureRecoverySnapshot();
+    void restoreRecoverySnapshot(const RecoverySnapshot& snap);
+    RecoveryArmResult runRecoveryArm(
+        const std::string& tag, const RecoverySnapshot& base,
+        const RecoverySnapshot& kf_usage,
+        const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses,
+        const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+        unsigned long evt, bool apply_map, int steps,
+        const std::vector<long long>& eval_steps,
+        const std::filesystem::path& out_dir);
+    void runGbaRecoveryExperiment(
+        const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+        const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses,
+        unsigned long evt);
+
+    bool gba_recovery_done_ = false;
+
+protected:
     std::map<camera_id_t, torch::Tensor> undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_main_undistort_mask_;
     std::map<camera_id_t, torch::Tensor> viewer_sub_undistort_mask_;

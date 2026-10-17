@@ -1,0 +1,14 @@
+head=gba-recovery-v1
+event_evt=1
+gaussians=104328
+line_gaussians=238
+kfs=246
+iteration=13657
+frozen_opt_steps=13657
+active_sh=3
+default_sh=3
+param_fp=191d00b04c8b207c_n104328_nline238
+adam_fp=92c2ba537376207e
+steps=500
+eval_views=24
+raster_backend_env=C

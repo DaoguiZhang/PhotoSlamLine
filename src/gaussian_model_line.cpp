@@ -1471,6 +1471,38 @@ void GaussianModelLine::ensureGbaMetadata()
         coord_event_id_ = coord_event_id_.to(device_type_).to(torch::kLong).contiguous();
 }
 
+namespace { void fgmHashTensor(const torch::Tensor& t, std::uint64_t& h); }
+
+std::string GaussianModelLine::adamFingerprint()
+{
+    std::uint64_t h = 1469598103934665603ULL;
+    if (!optimizer_)
+        return std::string("no_optimizer");
+    auto& groups = optimizer_->param_groups();
+    auto& state = optimizer_->state();
+    for (std::size_t i = 0; i < groups.size() && i < 6; ++i)
+    {
+        if (groups[i].params().empty()) continue;
+        auto& p = groups[i].params()[0];
+        auto it = state.find(p.unsafeGetTensorImpl());
+        if (it == state.end())
+        {
+            h ^= 0x9e3779b97f4a7c15ULL * (i + 1);
+            continue;
+        }
+        auto& st = static_cast<torch::optim::AdamParamState&>(*it->second);
+        h ^= static_cast<std::uint64_t>(st.step());
+        h *= 1099511628211ULL;
+        fgmHashTensor(st.exp_avg(), h);
+        fgmHashTensor(st.exp_avg_sq(), h);
+        h ^= 0xc2b2ae3d27d4eb4fULL * (i + 1);
+    }
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%016llx",
+                  static_cast<unsigned long long>(h));
+    return std::string(buf);
+}
+
 GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
     const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
     unsigned long event_id)
@@ -1530,6 +1562,19 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
             torch::Tensor moved = torch::matmul(dst, R.transpose(0, 1)) + t;
             dst.index_copy_(0, sel, moved.index_select(0, sel));
         };
+        {
+            // Measure the actual displacement before mutating xyz_ so that
+            // "processed" and "non-zero displacement" are separate numbers.
+            torch::Tensor before = xyz_.index_select(0, sel);
+            torch::Tensor after =
+                torch::matmul(before, R.transpose(0, 1)) + t;
+            torch::Tensor disp = (after - before).norm(2, 1);
+            st.nonzero_moved_rows += static_cast<long long>(
+                disp.gt(1e-6f).sum().item<std::int64_t>());
+            st.translation_sum += disp.sum().item<double>();
+            st.max_translation = std::max(
+                st.max_translation, disp.max().item<float>());
+        }
         rigid_move(xyz_);
         rigid_move(xyz_init_);
 

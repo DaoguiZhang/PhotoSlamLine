@@ -2424,8 +2424,10 @@ void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string
     std::filesystem::create_directories(pdir);
     const auto img_dir = pdir / "image";
     const auto gt_dir = pdir / "image_gt";
+    const auto resid_dir = pdir / "image_residual";
     std::filesystem::create_directories(img_dir);
     std::filesystem::create_directories(gt_dir);
+    std::filesystem::create_directories(resid_dir);
     std::ofstream pf(pdir / "per_frame.csv");
     pf << "step,variant,kf_index,kf_id,fid,psnr,ssim,l1\n";
 
@@ -2473,6 +2475,9 @@ void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string
             std::snprintf(name, sizeof(name), "%06zu.png", static_cast<std::size_t>(pkf->fid_));
             fgmSaveImage(masked_image, img_dir / name);
             fgmSaveImage(gt_image, gt_dir / name);
+            // Signed residual centred at 0.5: red = render brighter than GT.
+            torch::Tensor resid = (0.5f + 2.0f * (masked_image - gt_image)).clamp(0.f, 1.f);
+            fgmSaveImage(resid, resid_dir / name);
         }
         pf << opt_steps << ',' << tag << ',' << idx << ',' << ids[idx] << ','
            << pkf->fid_ << ',' << std::fixed << std::setprecision(8) << p << ','
@@ -3999,6 +4004,641 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(std::shared_ptr
 */
 
 
+// ===========================================================================
+// gba-recovery-v1: controlled two-arm experiment.
+//
+// One immutable GBA event is captured. Both arms start from the SAME
+// in-process snapshot (Gaussian parameters, Adam state, learning-rate/SH/
+// pyramid schedule, keyframe usage and pose). Both receive the same corrected
+// camera poses and replay the same pre-generated training-view sequence.
+// PoseOnly keeps the Gaussian geometry; PoseAndMap also applies the current
+// ref-keyframe correction. External geometry is frozen (no add/densify/clone/
+// split/prune/opacity reset). Evaluation order is exchanged on a second pass.
+// ===========================================================================
+GaussianMapperLine::RecoverySnapshot GaussianMapperLine::captureRecoverySnapshot()
+{
+    RecoverySnapshot s;
+    if (!gaussians_) return s;
+    auto cp = [](const torch::Tensor& t) {
+        return t.defined() ? t.detach().clone() : torch::Tensor();
+    };
+    s.xyz = cp(gaussians_->xyz_);
+    s.xyz_init = cp(gaussians_->xyz_init_);
+    s.is_line = cp(gaussians_->is_line_);
+    s.line_dir_w = cp(gaussians_->line_dir_w_);
+    s.ref_kf_id = cp(gaussians_->ref_kf_id_);
+    s.coord_event_id = cp(gaussians_->coord_event_id_);
+    s.features_dc = cp(gaussians_->features_dc_);
+    s.features_rest = cp(gaussians_->features_rest_);
+    s.scaling = cp(gaussians_->scaling_);
+    s.rotation = cp(gaussians_->rotation_);
+    s.opacity = cp(gaussians_->opacity_);
+    s.point_ids = cp(gaussians_->point_ids_);
+    s.exist_since_iter = cp(gaussians_->exist_since_iter_);
+    s.max_radii2D = cp(gaussians_->max_radii2D_);
+    s.xyz_grad_accum = cp(gaussians_->xyz_gradient_accum_);
+    s.denom = cp(gaussians_->denom_);
+
+    s.adam.resize(6);
+    if (gaussians_->optimizer_)
+    {
+        auto& groups = gaussians_->optimizer_->param_groups();
+        auto& state = gaussians_->optimizer_->state();
+        for (std::size_t i = 0; i < groups.size() && i < 6; ++i)
+        {
+            if (groups[i].params().empty()) continue;
+            auto& p = groups[i].params()[0];
+            auto it = state.find(p.unsafeGetTensorImpl());
+            if (it == state.end()) continue;
+            auto& st = static_cast<torch::optim::AdamParamState&>(*it->second);
+            s.adam[i].step = static_cast<long long>(st.step());
+            s.adam[i].exp_avg = cp(st.exp_avg());
+            s.adam[i].exp_avg_sq = cp(st.exp_avg_sq());
+        }
+    }
+
+    s.iteration = iteration_;
+    s.frozen_opt_steps = frozen_opt_steps_;
+    s.active_sh = gaussians_->active_sh_degree_;
+    s.default_sh = default_sh_;
+    s.ema_loss = ema_loss_for_log_;
+    s.kfs_used_times = kfs_used_times_;
+    for (auto& kv : scene_->keyframes())
+    {
+        auto& pkf = kv.second;
+        if (!pkf) continue;
+        RecoveryKfState k;
+        k.remaining_times_of_use = pkf->remaining_times_of_use_;
+        k.pyramid_times_of_use = pkf->gaus_pyramid_times_of_use_;
+        k.tracking_error = pkf->tracking_error_;
+        k.done_inactive_densify = pkf->done_inactive_geo_densify_;
+        Sophus::SE3d pose = pkf->getPose();
+        k.q = pose.unit_quaternion();
+        k.t = pose.translation();
+        k.has_pose = true;
+        s.kfs[kv.first] = k;
+    }
+    return s;
+}
+
+void GaussianMapperLine::restoreRecoverySnapshot(const RecoverySnapshot& s)
+{
+    if (!gaussians_) return;
+    torch::NoGradGuard ng;
+    auto cp = [](torch::Tensor& dst, const torch::Tensor& src, const char* name) {
+        if (!src.defined()) return;
+        TORCH_CHECK(dst.defined(), "[GbaRecovery] ", name, " is undefined");
+        TORCH_CHECK(dst.sizes() == src.sizes(), "[GbaRecovery] ", name,
+                    " shape mismatch: ", dst.sizes(), " vs ", src.sizes());
+        dst.copy_(src);
+    };
+    cp(gaussians_->xyz_, s.xyz, "xyz");
+    cp(gaussians_->xyz_init_, s.xyz_init, "xyz_init");
+    cp(gaussians_->is_line_, s.is_line, "is_line");
+    cp(gaussians_->line_dir_w_, s.line_dir_w, "line_dir_w");
+    cp(gaussians_->ref_kf_id_, s.ref_kf_id, "ref_kf_id");
+    cp(gaussians_->coord_event_id_, s.coord_event_id, "coord_event_id");
+    cp(gaussians_->features_dc_, s.features_dc, "features_dc");
+    cp(gaussians_->features_rest_, s.features_rest, "features_rest");
+    cp(gaussians_->scaling_, s.scaling, "scaling");
+    cp(gaussians_->rotation_, s.rotation, "rotation");
+    cp(gaussians_->opacity_, s.opacity, "opacity");
+    cp(gaussians_->point_ids_, s.point_ids, "point_ids");
+    cp(gaussians_->exist_since_iter_, s.exist_since_iter, "exist_since_iter");
+    cp(gaussians_->max_radii2D_, s.max_radii2D, "max_radii2D");
+    cp(gaussians_->xyz_gradient_accum_, s.xyz_grad_accum, "xyz_gradient_accum");
+    cp(gaussians_->denom_, s.denom, "denom");
+    gaussians_->invalidateLineCache();
+
+    if (gaussians_->optimizer_)
+    {
+        auto& groups = gaussians_->optimizer_->param_groups();
+        auto& state = gaussians_->optimizer_->state();
+        for (std::size_t i = 0; i < groups.size() && i < 6; ++i)
+        {
+            if (groups[i].params().empty()) continue;
+            auto& p = groups[i].params()[0];
+            auto key = p.unsafeGetTensorImpl();
+            auto it = state.find(key);
+            if (it == state.end())
+            {
+                auto st = std::make_unique<torch::optim::AdamParamState>();
+                if (i < s.adam.size() && s.adam[i].step >= 0)
+                    st->step(s.adam[i].step);
+                if (i < s.adam.size() && s.adam[i].exp_avg.defined())
+                    st->exp_avg(s.adam[i].exp_avg.clone());
+                if (i < s.adam.size() && s.adam[i].exp_avg_sq.defined())
+                    st->exp_avg_sq(s.adam[i].exp_avg_sq.clone());
+                state[key] = std::move(st);
+            }
+            else
+            {
+                auto& st = static_cast<torch::optim::AdamParamState&>(*it->second);
+                if (i < s.adam.size() && s.adam[i].step >= 0)
+                    st.step(s.adam[i].step);
+                if (i < s.adam.size() && s.adam[i].exp_avg.defined())
+                    st.exp_avg(s.adam[i].exp_avg.clone());
+                if (i < s.adam.size() && s.adam[i].exp_avg_sq.defined())
+                    st.exp_avg_sq(s.adam[i].exp_avg_sq.clone());
+            }
+        }
+    }
+
+    iteration_ = s.iteration;
+    frozen_opt_steps_ = s.frozen_opt_steps;
+    default_sh_ = s.default_sh;
+    ema_loss_for_log_ = s.ema_loss;
+    kfs_used_times_ = s.kfs_used_times;
+    gaussians_->setShDegree(s.active_sh);
+
+    for (auto& kv : s.kfs)
+    {
+        auto pkf = scene_->getKeyframe(kv.first);
+        if (!pkf) continue;
+        if (kv.second.has_pose)
+        {
+            pkf->setPose(kv.second.q, kv.second.t);
+            pkf->computeTransformTensors();
+        }
+        pkf->remaining_times_of_use_ = kv.second.remaining_times_of_use;
+        pkf->gaus_pyramid_times_of_use_ = kv.second.pyramid_times_of_use;
+        pkf->tracking_error_ = kv.second.tracking_error;
+        pkf->done_inactive_geo_densify_ = kv.second.done_inactive_densify;
+    }
+    frozen_kf_step_ = 0;
+    frozen_train_views_flat_.clear();
+}
+
+GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
+    const std::string& tag, const RecoverySnapshot& base,
+    const RecoverySnapshot& kf_usage,
+    const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses,
+    const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+    unsigned long evt, bool apply_map, int steps,
+    const std::vector<long long>& eval_steps,
+    const std::filesystem::path& out_dir)
+{
+    RecoveryArmResult r;
+    if (!gaussians_) return r;
+
+    restoreRecoverySnapshot(base);
+    for (auto& kv : kf_usage.kfs)
+    {
+        auto pkf = scene_->getKeyframe(kv.first);
+        if (!pkf) continue;
+        pkf->remaining_times_of_use_ = kv.second.remaining_times_of_use;
+        pkf->gaus_pyramid_times_of_use_ = kv.second.pyramid_times_of_use;
+        pkf->tracking_error_ = kv.second.tracking_error;
+        pkf->done_inactive_geo_densify_ = kv.second.done_inactive_densify;
+    }
+    frozen_fixed_count_ = true;
+    frozen_kf_replay_ = true;
+    frozen_kf_step_ = 0;
+    frozen_train_views_flat_.clear();
+    frozen_opt_steps_ = 0;
+    result_dir_ = out_dir;
+    std::filesystem::create_directories(out_dir);
+    const long long base_count = gaussians_->xyz_.size(0);
+
+    auto syncDev = [&]() {
+        if (device_type_ == torch::kCUDA && gaussians_->xyz_.defined() &&
+            gaussians_->xyz_.numel() > 0)
+            (void)gaussians_->xyz_.select(0, 0).sum().item<double>();
+    };
+
+    syncDev();
+    const auto t_sync0 = std::chrono::steady_clock::now();
+    // Both arms receive exactly the same corrected camera poses.
+    for (const auto& p : after_poses)
+    {
+        auto pkf = scene_->getKeyframe(p.first);
+        if (!pkf) continue;
+        pkf->setPose(p.second.unit_quaternion().cast<double>(),
+                     p.second.translation().cast<double>());
+        pkf->computeTransformTensors();
+    }
+    if (apply_map)
+    {
+        auto st = gaussians_->applyGbaCorrections(world_deltas, evt);
+        r.updated_rows = st.nonzero_moved_rows;
+        r.max_translation = st.max_translation;
+        r.mean_translation = st.moved_rows > 0
+            ? st.translation_sum / static_cast<double>(st.moved_rows) : 0.0;
+    }
+    syncDev();
+    r.sync_seconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - t_sync0).count() / 1e6;
+
+    r.param_fp0 = gaussians_->paramFingerprint();
+    r.adam_fp0 = gaussians_->adamFingerprint();
+
+    std::ofstream csv(out_dir / "metrics.csv");
+    csv << "arm,step,psnr,ssim,l1,eval_seconds,cum_sync_seconds,"
+           "cum_train_seconds,total_seconds,gaussians,line_gaussians,"
+           "iteration,active_sh,default_sh\n";
+
+    auto lineCount = [&]() -> long long {
+        if (!gaussians_->is_line_.defined() || gaussians_->is_line_.numel() == 0)
+            return 0;
+        return gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>();
+    };
+
+    auto doEval = [&](long long step) {
+        double p = -1.0, s = -1.0, l1 = -1.0, ori = -1.0, shape = -1.0, et = 0.0;
+        evalAtFrozenStep(step, tag, p, s, l1, ori, shape, et);
+        r.eval_quality[step] = {p, s};
+        csv << tag << ',' << step << ',' << std::setprecision(10) << p << ','
+            << s << ',' << l1 << ',' << et << ',' << r.sync_seconds << ','
+            << r.train_seconds << ',' << (r.sync_seconds + r.train_seconds)
+            << ',' << gaussians_->xyz_.size(0) << ',' << lineCount() << ','
+            << iteration_ << ',' << gaussians_->active_sh_degree_ << ','
+            << default_sh_ << '\n';
+        csv.flush();
+    };
+
+    doEval(0);
+    std::size_t next_eval = 1;
+    int stall = 0;
+    while (frozen_opt_steps_ < steps && !isStopped())
+    {
+        syncDev();
+        const auto t_step0 = std::chrono::steady_clock::now();
+        const long long before = frozen_opt_steps_;
+        trainForOneIterationErrorGuided();
+        syncDev();
+        r.train_seconds += std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - t_step0).count() / 1e6;
+        TORCH_CHECK(gaussians_->xyz_.size(0) == base_count,
+                    "[GbaRecovery] arm ", tag, " changed the Gaussian count: ",
+                    base_count, " -> ", gaussians_->xyz_.size(0));
+        if (frozen_opt_steps_ == before)
+        {
+            if (++stall > 5) break;
+        }
+        else
+        {
+            stall = 0;
+            if (steps <= 10)
+                r.step_param_fp[frozen_opt_steps_] =
+                    gaussians_->paramFingerprint();
+        }
+        while (next_eval < eval_steps.size() &&
+               eval_steps[next_eval] <= frozen_opt_steps_)
+        {
+            if (eval_steps[next_eval] > 0 &&
+                eval_steps[next_eval] == frozen_opt_steps_)
+                doEval(frozen_opt_steps_);
+            ++next_eval;
+        }
+    }
+    r.steps = frozen_opt_steps_;
+    r.gaussians = gaussians_->xyz_.size(0);
+    r.line_gaussians = lineCount();
+    r.param_fp = gaussians_->paramFingerprint();
+    r.adam_fp = gaussians_->adamFingerprint();
+    {
+        std::ostringstream ss;
+        ss << "it=" << iteration_ << ";sh=" << gaussians_->active_sh_degree_
+           << "/" << default_sh_ << ";";
+        for (const auto& kv : kfs_used_times_)
+            ss << kv.first << ":" << kv.second << ",";
+        ss << ";";
+        for (const auto& kv : scene_->keyframes())
+        {
+            auto& pkf = kv.second;
+            if (!pkf) continue;
+            ss << kv.first << ":" << pkf->remaining_times_of_use_ << ":";
+            for (int v : pkf->gaus_pyramid_times_of_use_) ss << v << "/";
+            ss << ";";
+        }
+        ss << ";views=";
+        for (int v : frozen_train_views_flat_) ss << v << ",";
+        r.schedule_fp = frozenAblHashHex(ss.str());
+    }
+    r.ok = (r.steps == steps);
+    return r;
+}
+
+void GaussianMapperLine::runGbaRecoveryExperiment(
+    const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+    const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses,
+    unsigned long evt)
+{
+    const char* dir_env = std::getenv("PHOTO_SLAM_GBA_RECOVERY");
+    if (!dir_env || dir_env[0] == '\0' || gba_recovery_done_ || !gaussians_)
+        return;
+    gba_recovery_done_ = true;
+    const std::filesystem::path root(dir_env);
+    std::filesystem::create_directories(root);
+
+    int steps = 500;
+    if (const char* e = std::getenv("PHOTO_SLAM_GBA_RECOVERY_STEPS"))
+    {
+        const int v = std::atoi(e);
+        if (v > 0) steps = v;
+    }
+    std::vector<long long> eval_steps;
+    {
+        std::string spec = "0,10,50,100,250,500";
+        if (const char* e = std::getenv("PHOTO_SLAM_GBA_RECOVERY_EVAL_STEPS"))
+            spec = e;
+        std::string item;
+        for (std::size_t i = 0; i <= spec.size(); ++i)
+        {
+            if (i < spec.size() && spec[i] != ',') { item += spec[i]; continue; }
+            if (item.find_first_not_of(" \t") != std::string::npos)
+            {
+                const long long v = std::atoll(item.c_str());
+                if (v >= 0 && v <= steps) eval_steps.push_back(v);
+            }
+            item.clear();
+        }
+        std::sort(eval_steps.begin(), eval_steps.end());
+        eval_steps.erase(std::unique(eval_steps.begin(), eval_steps.end()),
+                         eval_steps.end());
+        if (eval_steps.empty() || eval_steps.front() != 0)
+            eval_steps.insert(eval_steps.begin(), 0);
+        if (eval_steps.back() != steps) eval_steps.push_back(steps);
+    }
+
+    int want_views = 24;
+    if (const char* e = std::getenv("PHOTO_SLAM_GBA_RECOVERY_VIEWS"))
+        want_views = std::atoi(e);
+
+    // Save production switch state.
+    const auto saved_result_dir = result_dir_;
+    const bool saved_fixed = frozen_fixed_count_;
+    const bool saved_replay = frozen_kf_replay_;
+    const std::size_t saved_kf_step = frozen_kf_step_;
+    const auto saved_eval_seq = frozen_eval_kf_seq_;
+    const auto saved_kf_seq = frozen_kf_seq_;
+    const auto saved_train_views = frozen_train_views_flat_;
+    const float saved_w0 = opt_params_.weight_line_coherence_;
+    const float saved_w1 = opt_params_.weight_line_shape_ecc_;
+    const float saved_w2 = opt_params_.weight_line_shape_ori_;
+    const int saved_opacity = opt_params_.opacity_reset_interval_;
+
+    // Fixed, shared evaluation views (never trained on).
+    frozen_eval_kf_seq_.clear();
+    {
+        const std::size_t nkf = scene_->keyframes().size();
+        if (want_views > 0 && nkf > 0)
+        {
+            const std::size_t k = std::min<std::size_t>(
+                static_cast<std::size_t>(want_views), nkf);
+            for (std::size_t i = 0; i < k; ++i)
+                frozen_eval_kf_seq_.push_back((i * nkf) / k);
+        }
+    }
+
+    // Common snapshot BEFORE the shared sampling sequence is generated, so the
+    // production scheduler state can be restored exactly afterwards.
+    RecoverySnapshot common = captureRecoverySnapshot();
+    preGenerateFrozenKfSequence(steps);
+    RecoverySnapshot usage;
+    for (auto& kv : scene_->keyframes())
+    {
+        auto& pkf = kv.second;
+        if (!pkf) continue;
+        RecoveryKfState k;
+        k.remaining_times_of_use = pkf->remaining_times_of_use_;
+        k.pyramid_times_of_use = pkf->gaus_pyramid_times_of_use_;
+        k.tracking_error = pkf->tracking_error_;
+        k.done_inactive_densify = pkf->done_inactive_geo_densify_;
+        usage.kfs[kv.first] = k;
+    }
+
+    const long long n_all = gaussians_->xyz_.size(0);
+    const long long n_line = (gaussians_->is_line_.defined() &&
+                              gaussians_->is_line_.numel() > 0)
+        ? gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>() : 0;
+    const std::string param_fp0 = gaussians_->paramFingerprint();
+    const std::string adam_fp0 = gaussians_->adamFingerprint();
+    {
+        std::ofstream st(root / "common_state.txt");
+        st << "head=" << "gba-recovery-v1\n"
+           << "event_evt=" << evt << "\n"
+           << "gaussians=" << n_all << "\n"
+           << "line_gaussians=" << n_line << "\n"
+           << "kfs=" << scene_->keyframes().size() << "\n"
+           << "iteration=" << iteration_ << "\n"
+           << "frozen_opt_steps=" << frozen_opt_steps_ << "\n"
+           << "active_sh=" << gaussians_->active_sh_degree_ << "\n"
+           << "default_sh=" << default_sh_ << "\n"
+           << "param_fp=" << param_fp0 << "\n"
+           << "adam_fp=" << adam_fp0 << "\n"
+           << "steps=" << steps << "\n"
+           << "eval_views=" << frozen_eval_kf_seq_.size() << "\n"
+           << "raster_backend_env="
+           << (std::getenv("PHOTO_SLAM_RASTER_BACKEND")
+                   ? std::getenv("PHOTO_SLAM_RASTER_BACKEND") : "unset")
+           << "\n";
+    }
+    {
+        std::ofstream ev(root / ("event_evt" + std::to_string(evt) + ".txt"));
+        ev << "# immutable GBA event: kf_id, before/after/delta 4x4 row-major\n";
+        for (std::size_t i = 0; i < after_poses.size(); ++i)
+        {
+            const unsigned long kfid = after_poses[i].first;
+            const Sophus::SE3f& after = after_poses[i].second;
+            const Sophus::SE3f before = after * world_deltas[i].second;
+            ev << kfid << '\n';
+            for (int r = 0; r < 4; ++r)
+                for (int c = 0; c < 4; ++c)
+                    ev << before.matrix()(r, c) << (c == 3 ? '\n' : ' ');
+            for (int r = 0; r < 4; ++r)
+                for (int c = 0; c < 4; ++c)
+                    ev << after.matrix()(r, c) << (c == 3 ? '\n' : ' ');
+            for (int r = 0; r < 4; ++r)
+                for (int c = 0; c < 4; ++c)
+                    ev << world_deltas[i].second.matrix()(r, c)
+                       << (c == 3 ? '\n' : ' ');
+        }
+    }
+    {
+        std::ofstream ef(root / "eval_views.txt");
+        ef << "# fixed evaluation keyframes (map order index)\n";
+        for (auto v : frozen_eval_kf_seq_) ef << v << '\n';
+        std::ofstream sf(root / "kf_sequence.txt");
+        sf << "# shared training sequence\n";
+        for (auto v : frozen_kf_seq_) sf << v << '\n';
+    }
+
+    // Experiment switches: fixed count, no structural loss, no opacity reset.
+    frozen_fixed_count_ = true;
+    frozen_kf_replay_ = true;
+    opt_params_.weight_line_coherence_ = 0.0f;
+    opt_params_.weight_line_shape_ecc_ = 0.0f;
+    opt_params_.weight_line_shape_ori_ = 0.0f;
+    opt_params_.opacity_reset_interval_ = 0;
+    SetRasterBackend(2);   // C
+
+    const int check_steps = std::min(10, steps);
+    std::vector<long long> check_eval = {0, check_steps};
+    std::cerr << "[GbaRecovery] repeat check: " << check_steps << " steps x2"
+              << std::endl;
+    auto repA = runRecoveryArm("RepeatA", common, usage, after_poses,
+                               world_deltas, evt, false, check_steps, check_eval,
+                               root / "RepeatA");
+    auto endA = captureRecoverySnapshot();
+    auto repB = runRecoveryArm("RepeatB", common, usage, after_poses,
+                               world_deltas, evt, false, check_steps, check_eval,
+                               root / "RepeatB");
+    auto endB = captureRecoverySnapshot();
+
+    auto maxDiff = [](const torch::Tensor& a, const torch::Tensor& b) -> double {
+        if (!a.defined() || !b.defined() || a.sizes() != b.sizes()) return -1.0;
+        return (a.to(torch::kCPU).to(torch::kFloat) -
+                b.to(torch::kCPU).to(torch::kFloat)).abs().max().item<double>();
+    };
+    const double d_xyz = maxDiff(endA.xyz, endB.xyz);
+    const double d_rot = maxDiff(endA.rotation, endB.rotation);
+    const double d_scale = maxDiff(endA.scaling, endB.scaling);
+    const double d_op = maxDiff(endA.opacity, endB.opacity);
+    const double d_dc = maxDiff(endA.features_dc, endB.features_dc);
+    const double d_rest = maxDiff(endA.features_rest, endB.features_rest);
+    double max_param_diff = std::max({d_xyz, d_rot, d_scale, d_op, d_dc, d_rest});
+    std::cerr << "[GbaRecovery] repeat tensor diffs: xyz=" << d_xyz
+              << " rot=" << d_rot << " scale=" << d_scale
+              << " opacity=" << d_op << " dc=" << d_dc
+              << " rest=" << d_rest << std::endl;
+    double max_adam_diff = 0.0;
+    for (std::size_t i = 0; i < endA.adam.size() && i < endB.adam.size(); ++i)
+    {
+        max_adam_diff = std::max(max_adam_diff,
+                                 maxDiff(endA.adam[i].exp_avg, endB.adam[i].exp_avg));
+        max_adam_diff = std::max(max_adam_diff,
+                                 maxDiff(endA.adam[i].exp_avg_sq, endB.adam[i].exp_avg_sq));
+    }
+    auto qualityClose = [](const std::map<long long, std::pair<double, double>>& a,
+                           const std::map<long long, std::pair<double, double>>& b) {
+        if (a.size() != b.size()) return false;
+        for (const auto& kv : a) {
+            auto it = b.find(kv.first);
+            if (it == b.end()) return false;
+            if (std::abs(kv.second.first - it->second.first) > 1e-4) return false;
+            if (std::abs(kv.second.second - it->second.second) > 1e-5) return false;
+        }
+        return true;
+    };
+    // Restore fidelity is proven at the START of the arm: identical parameter
+    // and Adam fingerprints, identical step-0 render, identical schedule and
+    // training-view sequence. Post-step tensor differences are reported but are
+    // not a restore failure: CUDA rasteriser atomics do not guarantee a
+    // bit-identical backward reduction order.
+    const bool step0_ok =
+        repA.param_fp0 == repB.param_fp0 &&
+        repA.adam_fp0 == repB.adam_fp0 &&
+        repA.schedule_fp == repB.schedule_fp &&
+        qualityClose(repA.eval_quality, repB.eval_quality);
+    const bool repeat_match = repA.ok && repB.ok && step0_ok;
+    {
+        std::ofstream rf(root / "repeat_check.csv");
+        rf << "check,param_fp0,adam_fp0,schedule_fp,param_fp_end,adam_fp_end,"
+              "psnr0,ssim0,psnrN,ssimN,steps,ok\n";
+        auto row = [&](const char* n, const RecoveryArmResult& x) {
+            const auto q0 = x.eval_quality.count(0) ? x.eval_quality.at(0)
+                                                    : std::make_pair(-1.0, -1.0);
+            const auto qn = x.eval_quality.count(check_steps)
+                ? x.eval_quality.at(check_steps) : std::make_pair(-1.0, -1.0);
+            rf << n << ',' << x.param_fp0 << ',' << x.adam_fp0 << ','
+               << x.schedule_fp << ',' << x.param_fp << ',' << x.adam_fp
+               << ',' << q0.first << ',' << q0.second << ',' << qn.first
+               << ',' << qn.second << ',' << x.steps << ',' << (x.ok ? 1 : 0)
+               << '\n';
+        };
+        row("A", repA);
+        row("B", repB);
+        rf << "step0_param_exact," << (repA.param_fp0 == repB.param_fp0 ? 1 : 0)
+           << '\n';
+        rf << "step0_adam_exact," << (repA.adam_fp0 == repB.adam_fp0 ? 1 : 0)
+           << '\n';
+        rf << "schedule_exact," << (repA.schedule_fp == repB.schedule_fp ? 1 : 0)
+           << '\n';
+        for (const auto& kv : repA.step_param_fp)
+        {
+            auto it = repB.step_param_fp.find(kv.first);
+            rf << "step" << kv.first << "_param_exact,"
+               << (it != repB.step_param_fp.end() && it->second == kv.second
+                       ? 1 : 0)
+               << '\n';
+        }
+        rf << "quality_tol," << (qualityClose(repA.eval_quality, repB.eval_quality) ? 1 : 0)
+           << '\n';
+        rf << "post_step_param_max_abs_diff," << max_param_diff << '\n';
+        rf << "post_step_adam_max_abs_diff," << max_adam_diff << '\n';
+        rf << "match," << (repeat_match ? 1 : 0) << '\n';
+    }
+    std::cerr << "[GbaRecovery] repeat check "
+              << (repeat_match ? "PASS" : "FAIL")
+              << " step0_param=" << (repA.param_fp0 == repB.param_fp0 ? 1 : 0)
+              << " step0_adam=" << (repA.adam_fp0 == repB.adam_fp0 ? 1 : 0)
+              << " schedule=" << (repA.schedule_fp == repB.schedule_fp ? 1 : 0)
+              << " quality=" << (qualityClose(repA.eval_quality, repB.eval_quality) ? 1 : 0)
+              << " post_step_param_diff=" << max_param_diff
+              << " post_step_adam_diff=" << max_adam_diff << std::endl;
+
+    if (!repeat_match)
+    {
+        std::cerr << "[GbaRecovery] repeat mismatch -> full arms skipped"
+                  << std::endl;
+    }
+    else
+    {
+        auto po1 = runRecoveryArm("PoseOnly", common, usage, after_poses,
+                                  world_deltas, evt, false, steps, eval_steps,
+                                  root / "PoseOnly");
+        auto pm1 = runRecoveryArm("PoseAndMap", common, usage, after_poses,
+                                  world_deltas, evt, true, steps, eval_steps,
+                                  root / "PoseAndMap");
+        auto pm2 = runRecoveryArm("PoseAndMap_r2", common, usage, after_poses,
+                                  world_deltas, evt, true, steps, eval_steps,
+                                  root / "PoseAndMap_r2");
+        auto po2 = runRecoveryArm("PoseOnly_r2", common, usage, after_poses,
+                                  world_deltas, evt, false, steps, eval_steps,
+                                  root / "PoseOnly_r2");
+
+        std::ofstream sum(root / "summary.csv");
+        sum << "arm,order,evt,steps,updated_rows,max_translation,"
+               "mean_translation,sync_seconds,train_seconds,total_seconds,"
+               "gaussians,line_gaussians,param_fp,adam_fp,"
+               "step,psnr,ssim\n";
+        auto write_arm = [&](const char* arm, int order,
+                             const RecoveryArmResult& x) {
+            for (const auto& q : x.eval_quality)
+                sum << arm << ',' << order << ',' << evt << ',' << x.steps << ','
+                    << x.updated_rows << ',' << x.max_translation << ','
+                    << x.mean_translation << ',' << x.sync_seconds << ','
+                    << x.train_seconds << ','
+                    << (x.sync_seconds + x.train_seconds) << ',' << x.gaussians
+                    << ',' << x.line_gaussians << ',' << x.param_fp << ','
+                    << x.adam_fp << ',' << q.first << ',' << q.second.first
+                    << ',' << q.second.second << '\n';
+        };
+        write_arm("PoseOnly", 1, po1);
+        write_arm("PoseAndMap", 1, pm1);
+        write_arm("PoseAndMap_r2", 2, pm2);
+        write_arm("PoseOnly_r2", 2, po2);
+        sum.flush();
+        std::cerr << "[GbaRecovery] arms finished; summary="
+                  << (root / "summary.csv").string() << std::endl;
+    }
+
+    // Restore the production state (pre-event, pre-sampling change).
+    restoreRecoverySnapshot(common);
+    frozen_fixed_count_ = saved_fixed;
+    frozen_kf_replay_ = saved_replay;
+    frozen_kf_step_ = saved_kf_step;
+    frozen_eval_kf_seq_ = saved_eval_seq;
+    frozen_kf_seq_ = saved_kf_seq;
+    frozen_train_views_flat_ = saved_train_views;
+    opt_params_.weight_line_coherence_ = saved_w0;
+    opt_params_.weight_line_shape_ecc_ = saved_w1;
+    opt_params_.weight_line_shape_ori_ = saved_w2;
+    opt_params_.opacity_reset_interval_ = saved_opacity;
+    result_dir_ = saved_result_dir;
+}
+
 void GaussianMapperLine::combineMappingOperations()
 {
     // Get Mapping Operations
@@ -4597,7 +5237,6 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             // geom-sync-v3: APPLY the GBA correction to existing Gaussians.
             // The callback is a pure correction: it must never seed, densify,
             // clone, split or prune. The row count is asserted below.
-            const auto t_start = std::chrono::steady_clock::now();
             const unsigned long evt = opr.eventId();
             const unsigned long prev_evt = gaussians_
                 ? gaussians_->lastAppliedGbaEvent() : last_applied_gba_event_;
@@ -4648,11 +5287,14 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             int n_in_scene = 0, n_scene_missing = 0;
             double max_pose_mismatch = 0.0;
             std::vector<std::pair<unsigned long, Sophus::SE3f>> deltas;
+            std::vector<std::pair<unsigned long, Sophus::SE3f>> after_poses;
             deltas.reserve(opr.globalBAPoses().size());
+            after_poses.reserve(opr.globalBAPoses().size());
             for (const auto& e : opr.globalBAPoses())
             {
                 // G maps OLD world -> NEW world for rows anchored at e.kf_id.
                 deltas.emplace_back(e.kf_id, e.Tcw_after.inverse() * e.Tcw_before);
+                after_poses.emplace_back(e.kf_id, e.Tcw_after);
                 std::shared_ptr<GaussianKeyframeLine> pkf =
                     scene_->getKeyframe(e.kf_id);
                 if (!pkf)
@@ -4670,6 +5312,15 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     d.translation().norm() + d.so3().log().norm());
             }
 
+            // gba-recovery-v1: env-gated controlled experiment. It captures
+            // the pre-event state, runs its two arms, then restores that state
+            // so the production correction below is unchanged. No-op when
+            // PHOTO_SLAM_GBA_RECOVERY is unset.
+            runGbaRecoveryExperiment(deltas, after_poses, evt);
+
+            // Production sync timing starts AFTER the optional experiment, so
+            // the reported correction cost is not inflated by the offline arms.
+            const auto t_start = std::chrono::steady_clock::now();
             GaussianModelLine::GbaCorrectionStats stats;
             {
                 std::unique_lock<std::mutex> lock_render(mutex_render_);
@@ -4695,23 +5346,63 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         count_before, " -> ", count_after);
             last_applied_gba_event_ = evt;
 
+            // Explain unassigned/missing counts instead of guessing anchors.
+            long long ref_in_event = 0, ref_scene_not_event = 0;
+            long long ref_absent_scene = 0, ref_unassigned = 0;
+            long long ref_newer_than_event = 0;
+            unsigned long max_event_kf = 0;
+            {
+                std::unordered_set<unsigned long> event_ids;
+                for (const auto& e : opr.globalBAPoses())
+                {
+                    event_ids.insert(e.kf_id);
+                    max_event_kf = std::max(max_event_kf, e.kf_id);
+                }
+                torch::Tensor ids = gaussians_->refKfIds();
+                if (ids.defined() && ids.numel() > 0)
+                {
+                    torch::Tensor cpu_ids = ids.to(torch::kCPU).contiguous();
+                    auto acc = cpu_ids.accessor<std::int64_t, 1>();
+                    for (int64_t i = 0; i < cpu_ids.size(0); ++i)
+                    {
+                        const long long id = acc[i];
+                        if (id < 0) { ++ref_unassigned; continue; }
+                        const unsigned long uid = static_cast<unsigned long>(id);
+                        if (event_ids.count(uid)) { ++ref_in_event; continue; }
+                        auto pkf = scene_->getKeyframe(static_cast<std::size_t>(id));
+                        if (pkf) ++ref_scene_not_event;
+                        else      ++ref_absent_scene;
+                        if (uid > max_event_kf) ++ref_newer_than_event;
+                    }
+                }
+            }
+            const double mean_translation = stats.moved_rows > 0
+                ? stats.translation_sum / static_cast<double>(stats.moved_rows)
+                : 0.0;
+
             const auto t_end = std::chrono::steady_clock::now();
             const double sync_ms =
                 std::chrono::duration<double, std::milli>(t_end - t_start).count();
             printf("[GBA-Apply] evt=%lu map=%lu kfs=%zu in_scene=%d "
-                   "deltas=%zu moved=%lld line_moved=%lld stale=%lld "
-                   "unassigned=%lld missing_event=%lld groups=%lld "
+                   "deltas=%zu moved=%lld nonzero_moved=%lld line_moved=%lld "
+                   "stale=%lld unassigned=%lld missing_event=%lld groups=%lld "
                    "scene_missing=%d pose_mismatch_max=%.4f "
+                   "translation_mean=%.5f translation_max=%.5f "
+                   "ref_in_event=%lld ref_scene_not_event=%lld "
+                   "ref_absent_scene=%lld ref_unassigned=%lld "
+                   "ref_newer_than_event=%lld "
                    "count_before=%lld count_after=%lld "
                    "created_during_event=%lld lm_map_points_created=%lld "
                    "sync_ms=%.1f APPLIED\n",
                    evt, opr.mapGen(), opr.globalBAPoses().size(), n_in_scene,
-                   deltas.size(), stats.moved_rows, stats.line_rows_moved,
-                   stats.stale_rows, stats.unassigned_rows,
-                   stats.missing_event_rows, stats.groups_applied,
-                   n_scene_missing, max_pose_mismatch, count_before,
-                   count_after, created_during_event, lm_created_rows_total_,
-                   sync_ms);
+                   deltas.size(), stats.moved_rows, stats.nonzero_moved_rows,
+                   stats.line_rows_moved, stats.stale_rows,
+                   stats.unassigned_rows, stats.missing_event_rows,
+                   stats.groups_applied, n_scene_missing, max_pose_mismatch,
+                   mean_translation, stats.max_translation, ref_in_event,
+                   ref_scene_not_event, ref_absent_scene, ref_unassigned,
+                   ref_newer_than_event, count_before, count_after,
+                   created_during_event, lm_created_rows_total_, sync_ms);
             fflush(stdout);
         }
         break;
