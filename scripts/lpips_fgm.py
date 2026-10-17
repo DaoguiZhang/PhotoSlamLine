@@ -110,7 +110,8 @@ def main(argv):
 
     results = {}
     for lbl in labels:
-        for tag in ("B", "C", "E", "F", "G", "B0", "B1", "J", "K", "Q0", "Q25", "Q50", "Q100"):
+        for tag in ("B", "C", "E", "F", "G", "B0", "B1", "J", "K", "Q0", "Q25",
+                    "Q50", "Q100", "RA", "RC"):
             tag_dir = os.path.join(ROOT, lbl, tag)
             if not os.path.isdir(tag_dir):
                 continue
