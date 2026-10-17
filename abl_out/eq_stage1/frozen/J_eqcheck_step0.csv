@@ -1,0 +1,6 @@
+expression,max_abs_delta_loss,max_rel_delta_grad,verdict
+position,0,0,PASS
+ecc,0,0,PASS
+ori,0,0,PASS
+all_struct,0,0,PASS
+exp_subset_substitution,0,0,PASS

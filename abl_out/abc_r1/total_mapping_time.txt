@@ -1,0 +1,3 @@
+Total_Time_Seconds: 137.494
+Total_Time_Minutes: 2.29157
+Total_Iterations: 19751

@@ -1,0 +1,13 @@
+quantity,min,p10,p50,p90,max,mean,std
+scale_parallel,nan,nan,nan,nan,nan,nan,nan
+scale_perp_mean,nan,nan,nan,nan,nan,nan,nan
+aspect_ratio,nan,nan,nan,nan,nan,nan,nan
+scale_axis1,nan,nan,nan,nan,nan,nan,nan
+scale_axis2,nan,nan,nan,nan,nan,nan,nan
+opacity_line,nan,nan,nan,nan,nan,nan,nan
+opacity_line_sum,,0,,,
+opacity_all_sum,,347.6109314,,,
+frac_line_opacity_lt_0.01,,-nan,,,
+frac_line_opacity_lt_0.05,,-nan,,,
+frac_line_aspect_lt_2,,-nan,,,
+xyz_grad_accum_line,nan,nan,nan,nan,nan,nan,nan

@@ -1,0 +1,4 @@
+condition,completed_optimizer_steps,raw_iteration,cum_mapping_seconds,cum_eval_seconds,eval_seconds,eval_psnr,eval_ssim,eval_l1,struct_ori,struct_shape,params_unchanged,iteration_unchanged,params_finite,total_gaussians,line_gaussians,default_sh,pyr_remaining_uses
+B0,0,0,0,0.26109,0.26109,12.84914124,0.2553931912,0.1955775395,0,0.1919986457,1,1,1,2006,168,0,3300
+B0,50,50,0.087606,0.550739,0.289649,14.14790535,0.4063210553,0.1681469157,7.612883201e-05,0.1989055127,1,1,1,2006,168,0,3250
+B0,100,100,0.186311,0.837573,0.286834,14.97892964,0.5169623811,0.150887792,0.0001599863317,0.2069550008,1,1,1,2006,168,0,3200

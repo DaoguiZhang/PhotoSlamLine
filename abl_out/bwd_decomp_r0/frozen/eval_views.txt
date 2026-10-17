@@ -1,0 +1,25 @@
+# fixed evaluation keyframes (index into keyframe map order)
+0
+5
+10
+15
+20
+25
+30
+35
+40
+45
+50
+55
+61
+66
+71
+76
+81
+86
+91
+96
+101
+106
+111
+116

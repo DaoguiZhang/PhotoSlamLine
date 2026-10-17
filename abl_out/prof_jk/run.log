@@ -1,0 +1,1425 @@
+CUDA available! Training on GPU.
+
+ORB-SLAM3 Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+ORB-SLAM2 Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+This program comes with ABSOLUTELY NO WARRANTY;
+This is free software, and you are welcome to redistribute it
+under certain conditions. See LICENSE.txt.
+
+Input sensor was set to: RGB-D
+Loading settings from /workspace/code/PSL-perf/cfg/ORB_SLAM3/RGB-D/Replica/office0.yaml
+	-Loaded camera 1
+Camera.newHeight optional parameter does not exist...
+Camera.newWidth optional parameter does not exist...
+	-Loaded image info
+	-Loaded RGB-D calibration
+	-Loaded ORB settings
+	-Loaded LSD sampling settings
+Viewer.imageViewScale optional parameter does not exist...
+	-Loaded viewer settings
+System.LoadAtlasFromFile optional parameter does not exist...
+System.SaveAtlasToFile optional parameter does not exist...
+	-Loaded Atlas settings
+System.thFarPoints optional parameter does not exist...
+	-Loaded misc parameters
+----------------------------------
+SLAM settings: 
+	-Camera 1 parameters (Pinhole): [ 600 600 599.5 339.5 ]
+	-Camera 1 distortion parameters: [  0.000238406 -0.000314798 -7.39231e-05 -2.7716e-05 0 ]
+	-Original image size: [ 1200 , 680 ]
+	-Current image size: [ 1200 , 680 ]
+	-Sequence FPS: 30
+	-RGB-D depth map factor: 6553.5
+	-Features per image: 1600
+	-ORB scale factor: 1.2
+	-ORB number of scales: 8
+	-Initial FAST threshold: 20
+	-Min FAST threshold: 7
+	-Line sampling step: 0.15
+	-Line view weight: 2
+	-Line sigma: 3
+	-Line Top-K: 3
+
+
+Loading ORB Vocabulary. This could take a while...
+Vocabulary loaded!
+
+Initialization of Atlas from scratch 
+Creation of new map with id: 0
+Creation of new map with last KF id: 0
+Seq. Name: 
+-------------------newParameterLoader--------------------------
+
+LSD Extractor Parameters(to do next): 
+	-Sampling step: 0.15
+	-View weight: 2
+	-Sigma: 3
+	-Top-K: 3
+There are 1 cameras in the atlas
+Camera 0 is pinhole
+[LineMode] PHOTO_SLAM_LINE_MODE=2 (0=point-only, 1=line-frontend-only, 2=full point-line) | PO_LINE=1 LBA_LINE=1 | LBA_W=1 LBA_TAU=9 LBA_DELTA=2.44765 LBA_SIGMA_PX=1 | DIAG_LINE_EDGES=0 DIAG_MONO_INIT=0
+[Gaussian Mapper]CUDA available! Training on GPU.
+[Gaussian Mapper]Reading parameters from "/workspace/code/PSL-perf/cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml"
+
+-------
+Start processing sequence ...
+Images in the sequence: 2000
+
+[DEBUG] Thread: GaussianMapperLine thread started.
+Frame id: 0
+First KF:0; Map init KF:0
+------------- !mpCamera2: mCurrentFrame.N --------------- 1580
+New Map created with 1560 points
+New Map created with 75 lines...
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 0
+ created_map_line_num: 75
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 75 -> 75
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 1
+[MapLineCulling] KF1 | Bad:0 | LowRatio:5 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 70
+[LocalMapping Fuse] Candidates: 70 | Fused: 24 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 2
+============= [LIVE SNAKE RADAR] =============
+  - Frame ID: 2
+  - Matches Vector Size: 77
+  - Non-Null Pointers: 37
+  - Bad Lines Flagged: 0
+===============================================
+[ExportMapPointsWithCameraAxesOBJKeyFrame] Exported 1595 map points and camera axes to 2_Keyframe_MapPoints_before.obj
+[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported 37 map lines and camera axes to 2_Keyframe_Maplines_before.obj
+[ExportMapKeyFrameCameraPose] Export successful to 2_Keyframe_Camera_before.txt
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1768, 68, 3617
+[ExportMapPointsWithCameraAxesOBJKeyFrame] Exported 1595 map points and camera axes to 2_Keyframe_MapPoints_after.obj
+[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported 37 map lines and camera axes to 2_Keyframe_Maplines_after.obj
+[ExportMapKeyFrameCameraPose] Export successful to 2_Keyframe_Camera_after.txt
+[MapLineCulling] KF2 | Bad:3 | LowRatio:2 | LowObs:17 | Graduated(Saved):0
+ created_map_line_num: 48
+[LocalMapping Fuse] Candidates: 48 | Fused: 19 | KF Lines: 77 -> 77
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 3
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1573, 46, 4126
+[MapLineCulling] KF3 | Bad:2 | LowRatio:5 | LowObs:0 | Graduated(Saved):41
+ created_map_line_num: 12
+[LocalMapping Fuse] Candidates: 53 | Fused: 17 | KF Lines: 88 -> 88
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 4
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1740, 51, 5197
+[MapLineCulling] KF4 | Bad:2 | LowRatio:7 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 40
+[LocalMapping Fuse] Candidates: 81 | Fused: 17 | KF Lines: 72 -> 72
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 5
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1828, 73, 6072
+[MapLineCulling] KF5 | Bad:8 | LowRatio:14 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 34
+[LocalMapping Fuse] Candidates: 73 | Fused: 11 | KF Lines: 71 -> 71
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 6
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1890, 72, 6829
+[MapLineCulling] KF6 | Bad:1 | LowRatio:8 | LowObs:0 | Graduated(Saved):3
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 29
+[LocalMapping Fuse] Candidates: 69 | Fused: 13 | KF Lines: 73 -> 73
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 7
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1999, 67, 7566
+[MapLineCulling] KF7 | Bad:2 | LowRatio:4 | LowObs:0 | Graduated(Saved):13
+ created_map_line_num: 11
+[LocalMapping Fuse] Candidates: 64 | Fused: 13 | KF Lines: 88 -> 88
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 8
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2212, 63, 8319
+[MapLineCulling] KF8 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):7
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 63 | Fused: 8 | KF Lines: 87 -> 87
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 9
+[Gaussian Mapper] Voxel Grid Initialized. Total occupied cells: 74
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2475, 63, 9053
+[MapLineCulling] KF9 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 63 | Fused: 5 | KF Lines: 112 -> 112
+---------------LoopClosing bFindedRegion false-------------------------- 
+
+[DEBUG createFromPcd] Checking Line Initialization:
+  Line 0: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 1: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 2: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  > If Ratio > 1.0 and Rot != [1,0,0,0], initialization is GOOD.
+
+[DEBUG] Checkpoint 10: Setup done. Starting first training iteration...
+Frame id: 100
+  > new_rotation list size: 2
+  > first tensor in rot list: [998, 4]
+  > Final new_rotation shape: [1098, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 10
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2784, 63, 9677
+[MapLineCulling] KF10 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 3 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1882, 4]
+  > Final new_rotation shape: [1956, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [2536, 4]
+  > Final new_rotation shape: [2628, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 11
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2860, 4]
+  > Final new_rotation shape: [2994, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2775, 63, 10006
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 1 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3670, 4]
+  > Final new_rotation shape: [3830, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 12
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2810, 63, 10564
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4060, 4]
+  > Final new_rotation shape: [4182, 4]
+Frame id: 200
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 13
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2413, 24, 8710
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 83 -> 83
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4074, 4]
+  > Final new_rotation shape: [4286, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 14
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2626, 24, 9613
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 40 | Fused: 0 | KF Lines: 77 -> 77
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 15
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2553, 19, 9360
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 24 | Fused: 0 | KF Lines: 56 -> 56
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4342, 4]
+  > Final new_rotation shape: [4604, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 16
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2555, 10, 8850
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 19 | Fused: 0 | KF Lines: 46 -> 46
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 17
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2735, 10, 9670
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 10 | Fused: 0 | KF Lines: 46 -> 46
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3596, 4]
+  > Final new_rotation shape: [3904, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 18
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2943, 10, 10582
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 10 | Fused: 0 | KF Lines: 38 -> 38
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 19
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2923, 1, 10243
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 10 | Fused: 0 | KF Lines: 31 -> 31
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5114, 4]
+  > Final new_rotation shape: [5360, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 20
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3115, 1, 11143
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 29 -> 29
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 21
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3299, 1, 11997
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 28 -> 28
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5568, 4]
+  > Final new_rotation shape: [5792, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 22
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3522, 1, 12886
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 33 -> 33
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 23
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3881, 1, 13830
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 29 -> 29
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 300
+  > new_rotation list size: 2
+  > first tensor in rot list: [6188, 4]
+  > Final new_rotation shape: [6458, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 24
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4122, 1, 14577
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5480, 4]
+  > Final new_rotation shape: [5744, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 25
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4328, 1, 15237
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 33 -> 33
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5694, 4]
+  > Final new_rotation shape: [6036, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 26
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4514, 1, 15873
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 37 -> 37
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5746, 4]
+  > Final new_rotation shape: [6128, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 27
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4467, 0, 14970
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 62 -> 62
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [7424, 4]
+  > Final new_rotation shape: [7682, 4]
+Frame id: 400
+  > new_rotation list size: 2
+  > first tensor in rot list: [5676, 4]
+  > Final new_rotation shape: [5992, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [5416, 4]
+  > Final new_rotation shape: [5712, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 28
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4010, 0, 13506
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 63 -> 63
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 29
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [5254, 4]
+  > Final new_rotation shape: [5532, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4087, 0, 13858
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 39 -> 39
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 30
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4091, 0, 14574
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 31 -> 31
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5894, 4]
+  > Final new_rotation shape: [6124, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 31
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4097, 0, 15274
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 31 -> 31
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 500
+  > new_rotation list size: 2
+  > first tensor in rot list: [4816, 4]
+  > Final new_rotation shape: [5050, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 32
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3815, 0, 14750
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 33
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3267, 0, 12959
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 36 -> 36
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5018, 4]
+  > Final new_rotation shape: [5182, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 34
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3343, 0, 13694
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 35 -> 35
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [1674, 4]
+  > Final new_rotation shape: [1674, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 35
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3401, 0, 14518
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 25 -> 25
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4788, 4]
+  > Final new_rotation shape: [4996, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 36
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3374, 0, 15195
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 29 -> 29
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 37
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [5038, 4]
+  > Final new_rotation shape: [5240, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3358, 0, 15821
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 24 -> 24
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 600
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 38
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3423, 0, 16565
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 26 -> 26
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4776, 4]
+  > Final new_rotation shape: [4994, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 39
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3299, 0, 16455
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 40
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3354, 0, 17016
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 31 -> 31
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5166, 4]
+  > Final new_rotation shape: [5378, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 41
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3541, 0, 17755
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 26 -> 26
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 42
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3717, 0, 18556
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 20 -> 20
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [6270, 4]
+  > Final new_rotation shape: [6450, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 43
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3985, 0, 19343
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5304, 4]
+  > Final new_rotation shape: [5444, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 44
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4280, 0, 19984
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 36 -> 36
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 45
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [3736, 4]
+  > Final new_rotation shape: [3854, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4181, 0, 18762
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 46
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 700
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4051, 0, 18481
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 47
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3895, 0, 17958
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 21 -> 21
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4354, 4]
+  > Final new_rotation shape: [4570, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 48
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [3896, 4]
+  > Final new_rotation shape: [4000, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4314, 0, 18767
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 18 -> 18
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3432, 4]
+  > Final new_rotation shape: [3526, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 49
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4102, 0, 18527
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 80 -> 80
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4288, 4]
+  > Final new_rotation shape: [4412, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 50
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3897, 0, 17495
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 98 -> 98
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 800
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 51
+  > new_rotation list size: 2
+  > first tensor in rot list: [3482, 4]
+  > Final new_rotation shape: [3586, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3990, 0, 16926
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 101 -> 101
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 52
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4281, 0, 17689
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [6420, 4]
+  > Final new_rotation shape: [6602, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [4400, 4]
+  > Final new_rotation shape: [4508, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 53
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4470, 0, 18403
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 71 -> 71
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4708, 4]
+  > Final new_rotation shape: [4930, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [4190, 4]
+  > Final new_rotation shape: [4292, 4]
+Frame id: 900
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 54
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7680, 63, 34671
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 97 -> 97
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4000, 4]
+  > Final new_rotation shape: [4050, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [3480, 4]
+  > Final new_rotation shape: [3550, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [3142, 4]
+  > Final new_rotation shape: [3212, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 55
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8439, 63, 39126
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 52 -> 52
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4464, 4]
+  > Final new_rotation shape: [4496, 4]
+Frame id: 1000
+  > new_rotation list size: 2
+  > first tensor in rot list: [2728, 4]
+  > Final new_rotation shape: [2786, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [2026, 4]
+  > Final new_rotation shape: [2068, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 56
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7309, 63, 34015
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 4 | KF Lines: 74 -> 74
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4914, 4]
+  > Final new_rotation shape: [4996, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 57
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7191, 62, 34491
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 62 | Fused: 4 | KF Lines: 91 -> 91
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3362, 4]
+  > Final new_rotation shape: [3486, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 58
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7043, 62, 33948
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 62 | Fused: 4 | KF Lines: 85 -> 85
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 59
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [3316, 4]
+  > Final new_rotation shape: [3460, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7069, 62, 34589
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 62 | Fused: 4 | KF Lines: 85 -> 85
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1100
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 60
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7259, 61, 35498
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 61 | Fused: 2 | KF Lines: 78 -> 78
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 61
+  > new_rotation list size: 2
+  > first tensor in rot list: [2214, 4]
+  > Final new_rotation shape: [2312, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7467, 61, 36432
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 61 | Fused: 1 | KF Lines: 69 -> 69
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 62
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6884, 61, 32210
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 62 | Fused: 2 | KF Lines: 84 -> 84
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 63
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [6726, 4]
+  > Final new_rotation shape: [6824, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6887, 62, 32621
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 64 | Fused: 3 | KF Lines: 90 -> 90
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 3 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 64
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6751, 63, 32555
+[MapLineCulling] KF64 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 65 | Fused: 2 | KF Lines: 93 -> 93
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 65
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6767, 65, 33284
+[MapLineCulling] KF65 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 64 | Fused: 3 | KF Lines: 107 -> 107
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [6454, 4]
+  > Final new_rotation shape: [6618, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 66
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6737, 64, 33927
+[MapLineCulling] KF66 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 64 | Fused: 6 | KF Lines: 144 -> 144
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 67
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [4678, 4]
+  > Final new_rotation shape: [4858, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6753, 64, 34640
+[MapLineCulling] KF67 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 64 | Fused: 6 | KF Lines: 141 -> 141
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 68
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [3394, 4]
+  > Final new_rotation shape: [3470, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6703, 64, 35179
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 64 | Fused: 6 | KF Lines: 120 -> 120
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 69
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6711, 64, 35926
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 64 | Fused: 6 | KF Lines: 124 -> 124
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 70
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [5580, 4]
+  > Final new_rotation shape: [5816, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6632, 63, 36071
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 64 | Fused: 6 | KF Lines: 127 -> 127
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1200
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 71
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6714, 64, 36827
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 64 | Fused: 5 | KF Lines: 117 -> 117
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3812, 4]
+  > Final new_rotation shape: [3898, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 72
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6725, 64, 37369
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 64 | Fused: 6 | KF Lines: 115 -> 115
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [4432, 4]
+  > Final new_rotation shape: [4528, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 73
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2146, 4]
+  > Final new_rotation shape: [2198, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6892, 63, 39140
+[MapLineCulling] KF73 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 4 | KF Lines: 121 -> 121
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 74
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2694, 4]
+  > Final new_rotation shape: [2780, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6929, 63, 39716
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 3 | KF Lines: 133 -> 133
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 75
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2312, 4]
+  > Final new_rotation shape: [2358, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6703, 63, 39258
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 4 | KF Lines: 110 -> 110
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 76
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1300
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6743, 63, 40105
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 3 | KF Lines: 99 -> 99
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 77
+  > new_rotation list size: 2
+  > first tensor in rot list: [4960, 4]
+  > Final new_rotation shape: [5050, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6939, 63, 41751
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 3 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 78
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6857, 63, 41657
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 4 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [5214, 4]
+  > Final new_rotation shape: [5576, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 79
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6827, 63, 41833
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 87 -> 87
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 80
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2818, 4]
+  > Final new_rotation shape: [2912, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7168, 63, 43538
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 5 | KF Lines: 99 -> 99
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [2608, 4]
+  > Final new_rotation shape: [2672, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 81
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8167, 63, 49985
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 6 | KF Lines: 94 -> 94
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 82
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2820, 4]
+  > Final new_rotation shape: [2896, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8534, 63, 52034
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 101 -> 101
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 83
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2112, 4]
+  > Final new_rotation shape: [2162, 4]
+Frame id: 1400
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8570, 63, 52715
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 4 | KF Lines: 101 -> 101
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 84
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1886, 4]
+  > Final new_rotation shape: [1922, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8839, 63, 54837
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 85
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1782, 4]
+  > Final new_rotation shape: [1814, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8713, 63, 54115
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 90 -> 90
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 86
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1544, 4]
+  > Final new_rotation shape: [1560, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8911, 63, 55086
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 102 -> 102
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 87
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [2396, 4]
+  > Final new_rotation shape: [2428, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8858, 63, 54991
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 4 | KF Lines: 94 -> 94
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 88
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8912, 63, 55737
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 4 | KF Lines: 90 -> 90
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1764, 4]
+  > Final new_rotation shape: [1824, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 89
+Frame id: 1500
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8696, 62, 54574
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 3 | KF Lines: 90 -> 90
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3570, 4]
+  > Final new_rotation shape: [3584, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 90
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8447, 62, 53750
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 3 | KF Lines: 71 -> 71
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3410, 4]
+  > Final new_rotation shape: [3428, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [1774, 4]
+  > Final new_rotation shape: [1786, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 91
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8305, 62, 54003
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 62 | Fused: 3 | KF Lines: 34 -> 34
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [2694, 4]
+  > Final new_rotation shape: [2770, 4]
+Frame id: 1600
+  > new_rotation list size: 2
+  > first tensor in rot list: [996, 4]
+  > Final new_rotation shape: [1006, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 92
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [668, 4]
+  > Final new_rotation shape: [678, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8206, 61, 52991
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 61 | Fused: 1 | KF Lines: 22 -> 22
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [870, 4]
+  > Final new_rotation shape: [882, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 93
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7567, 59, 50072
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 61 | Fused: 1 | KF Lines: 8 -> 8
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1282, 4]
+  > Final new_rotation shape: [1292, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 94
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1700
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6340, 28, 44690
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 61 | Fused: 1 | KF Lines: 5 -> 5
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 95
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5128, 29, 36617
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 52 | Fused: 0 | KF Lines: 2 -> 2
+Edge drawing Error: lines not found
+Line Detection not finished
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 96
+---------------LoopClosing bFindedRegion false-------------------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4806, 29, 35690
+Edge drawing Error: lines not found
+Line Detection not finished
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 61 | Fused: 0 | KF Lines: 0 -> 0
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 97
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Edge drawing Error: lines not found
+Line Detection not finished
+  > new_rotation list size: 2
+  > first tensor in rot list: [4516, 4]
+  > Final new_rotation shape: [4530, 4]
+Edge drawing Error: lines not found
+Line Detection not finished
+Edge drawing Error: lines not found
+Line Detection not finished
+Edge drawing Error: lines not found
+Line Detection not finished
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4690, 29, 35260
+Edge drawing Error: lines not found
+Line Detection not finished
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 98
+---------------LoopClosing bFindedRegion false-------------------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Edge drawing Error: lines not found
+Line Detection not finished
+Edge drawing Error: lines not found
+Line Detection not finished
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4480, 29, 34583
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 99
+---------------LoopClosing bFindedRegion false-------------------------- 
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 100
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4814, 37, 37451
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 40 | Fused: 0 | KF Lines: 4 -> 4
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 101
+---------------LoopClosing bFindedRegion false-------------------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [900, 4]
+  > Final new_rotation shape: [900, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3845, 38, 33225
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 40 | Fused: 0 | KF Lines: 8 -> 8
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 102
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7002, 62, 48435
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 62 | Fused: 1 | KF Lines: 39 -> 39
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [3630, 4]
+  > Final new_rotation shape: [3698, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [1512, 4]
+  > Final new_rotation shape: [1528, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 103
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1800
+  > new_rotation list size: 2
+  > first tensor in rot list: [874, 4]
+  > Final new_rotation shape: [880, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7672, 63, 51366
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 1 | KF Lines: 62 -> 62
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1272, 4]
+  > Final new_rotation shape: [1298, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 104
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8183, 63, 55794
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 64 -> 64
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 105
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1800, 4]
+  > Final new_rotation shape: [1854, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8774, 63, 59450
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 1 | KF Lines: 61 -> 61
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 106
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1858, 4]
+  > Final new_rotation shape: [1880, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8863, 63, 60251
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 65 -> 65
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 107
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8947, 63, 60925
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 1 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 108
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [3510, 4]
+  > Final new_rotation shape: [3550, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9143, 63, 62641
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 109
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1900
+  > new_rotation list size: 2
+  > first tensor in rot list: [2006, 4]
+  > Final new_rotation shape: [2030, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9247, 63, 63344
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 110
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1604, 4]
+  > Final new_rotation shape: [1640, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9171, 63, 63193
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 100 -> 100
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 111
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1730, 4]
+  > Final new_rotation shape: [1768, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9170, 63, 63299
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 63 | Fused: 0 | KF Lines: 103 -> 103
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 112
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9191, 45, 64654
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 64 | Fused: 1 | KF Lines: 98 -> 98
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 113
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [3850, 4]
+  > Final new_rotation shape: [3934, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8888, 38, 63443
+[MapLineCulling] KF113 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 62 | Fused: 0 | KF Lines: 95 -> 95
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 114
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1328, 4]
+  > Final new_rotation shape: [1372, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9232, 37, 66315
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 45 | Fused: 0 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [2330, 4]
+  > Final new_rotation shape: [2378, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 115
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [734, 4]
+  > Final new_rotation shape: [746, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9676, 37, 68880
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 37 | Fused: 0 | KF Lines: 88 -> 88
+---------------LoopClosing bFindedRegion false-------------------------- 
+Sequence processing finished. Waiting for backend to sync...
+Shutdown
+[FrozenABL] frozen scene: kfs=116 map_points=1754 line_samples=197 cameras_extent=0.234971 steps=5000 conditions=2
+
+ TIME STATS in ms (mean$\pm$std)
+OpenCV version: 4.10.0
+---------------------------
+Tracking
+
+ORB Extraction: 14.483$\pm$2.5384
+Pose Prediction: 3.3586$\pm$1.0097
+LM Track: 4.2684$\pm$1.3544
+New KF decision: 0.071301$\pm$0.091862
+Total Tracking: 10.053$\pm$8.207
+
+
+
+Local Mapping
+
+KF Insertion: 6.7193$\pm$2.9397
+MP Culling: 0.29714$\pm$0.12036
+MP Creation: 12.984$\pm$6.4115
+LBA: 217.8$\pm$146.87
+KF Culling: 6.9471$\pm$5.6985
+Total Local Mapping: 241.09$\pm$163.35
+---------------------------
+
+LBA complexity (mean$\pm$std)
+LBA Edges: 30851$\pm$18387
+LBA KF optimized: 31.283$\pm$19.763
+LBA KF fixed: 25.522$\pm$17.512
+LBA MP: 5577.3$\pm$2355.6
+
+LBA executions: 113
+LBA aborts: 2
+---------------------------
+
+Map complexity
+KFs in map: 116
+MPs in map: 12722
+---------------------------
+
+Place Recognition (mean$\pm$std)
+Database Query: 1.0133$\pm$0.68226
+SE3 estimation: 8.7924$\pm$6.2687
+Total Place Recognition: 9.1297$\pm$6.9452
+
+
+Loop Closing (mean$\pm$std)
+Loop Fusion: 0$\pm$0
+Essential Graph: 0$\pm$0
+Total Loop Closing: 0$\pm$0
+
+Num exec: 0
+Number of KFs: 0$\pm$0
+
+Map Merging (mean$\pm$std)
+Merge Maps: 0$\pm$0
+Welding BA: 0$\pm$0
+Optimization Ess.: 0$\pm$0
+Total Map Merging: 0$\pm$0
+
+Num exec: 0
+Number of KFs: 0$\pm$0
+Number of MPs: 0$\pm$0
+
+Full GBA (mean$\pm$std)
+GBA: 0$\pm$0
+Map Update: 0$\pm$0
+Total Full GBA: 0$\pm$0
+
+Num exec: 0
+Num abort: 0
+Number of KFs: 0$\pm$0
+Number of MPs: 0$\pm$0
+[FrozenABL] input_hash=8d4e28a917856961 image_hash=c1cbebef7abd7d7c
+[FrozenABL] fixed_count=1 eval_views=8 eval_points=0 5000 
+[FrozenABL] pre-generated kf sampling sequence: 5000 steps (seed 777)
+[FrozenABL] kf_sequence steps=5000 hash=ea3006d39de8b6d4
+
+[DEBUG createFromPcd] Checking Line Initialization:
+  Line 0: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 1: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 2: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  > If Ratio > 1.0 and Rot != [1,0,0,0], initialization is GOOD.
+
+[FrozenABL] init checkpoint=/workspace/code/PSL-perf/abl_out/prof_jk/frozen/init_checkpoint.pt (freshly built) fingerprint=fb391e4b5528e0a6_n1951_nline197 gaussians=1951 line_gaussians=197
+[FrozenABL] condition order=JK
+
+[FrozenABL] ===== condition J =====
+
+[DEBUG createFromPcd] Checking Line Initialization:
+  Line 0: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 1: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 2: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  > If Ratio > 1.0 and Rot != [1,0,0,0], initialization is GOOD.
+
+[FGM][J] diag step=0 aspect p50=1.75 opacity_line mean=0.1 opacity_line_sum=19.7 frac_opacity_lt0.05=0 frac_aspect_lt2=1
+[FrozenABL][J] eval step=0 psnr=12.5988 ssim=0.23713 l1=0.200711 struct_ori=0 struct_shape=0.225141 map_s=0 eval_s=0.263571 params_unchanged=1 iteration_unchanged=1
+[FrozenABL][J] opt_steps 2000 / 5000
+[FrozenABL][J] opt_steps 4000 / 5000
+[FGM][J] diag step=5000 aspect p50=543.366 opacity_line mean=0.0262479 opacity_line_sum=5.17083 frac_opacity_lt0.05=0.939086 frac_aspect_lt2=0
+[FrozenABL][J] eval step=5000 psnr=20.2317 ssim=0.800564 l1=0.0838073 struct_ori=0.00363172 struct_shape=0.00112437 map_s=30.7981 eval_s=0.261879 params_unchanged=1 iteration_unchanged=1
+[FGM][J] per-section profile:
+[GpuProfiler] online (incremental mapping) (n=100 iters)
+    forward(render):   0.408125 ms/iter
+    loss_fwd(L1+SSIM+aniso+line): 0.934524 ms/iter
+    backward:          4.67309 ms/iter
+    dens_stats(maxR+gradAccum, 每步): 0.0017536 ms/iter
+    optimizer:         0.0796419 ms/iter
+    ---- sum(parts)=6.09713  total(start->opt)=6.09713 ms/iter
+[GpuProfiler] refine (final refinement) (n=0 iters)
+    forward(render):   0 ms/iter
+    loss_fwd(L1+SSIM+aniso+line): 0 ms/iter
+    backward:          0 ms/iter
+    dens_stats(maxR+gradAccum, 每步): 0 ms/iter
+    optimizer:         0 ms/iter
+    ---- sum(parts)=0  total(start->opt)=0 ms/iter
+[GaussianModelLine] No sparse points cached; skipping input.ply save to "/workspace/code/PSL-perf/abl_out/prof_jk/J/5000_shutdown/ply/input.ply"
+[FrozenABL][J] psnr=20.7449 ssim=0.814081 gaussians=1951 point=1754 line=197 opt_steps=5000 seconds=31.43 nan=0 grad_finite=1 exit=0
+
+[FrozenABL] ===== condition K =====
+
+[DEBUG createFromPcd] Checking Line Initialization:
+  Line 0: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 1: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  Line 2: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.706418, 0...]
+  > If Ratio > 1.0 and Rot != [1,0,0,0], initialization is GOOD.
+
+[FGM][K] diag step=0 aspect p50=1.75 opacity_line mean=0.1 opacity_line_sum=19.7 frac_opacity_lt0.05=0 frac_aspect_lt2=1
+[FrozenABL][K] eval step=0 psnr=12.5988 ssim=0.23713 l1=0.200711 struct_ori=0 struct_shape=0.225141 map_s=0 eval_s=0.254243 params_unchanged=1 iteration_unchanged=1
+[FrozenABL][K] opt_steps 2000 / 5000
+[FrozenABL][K] opt_steps 4000 / 5000
+[FGM][K] diag step=5000 aspect p50=542.801 opacity_line mean=0.0264058 opacity_line_sum=5.20195 frac_opacity_lt0.05=0.944162 frac_aspect_lt2=0
+[FrozenABL][K] eval step=5000 psnr=20.1012 ssim=0.799572 l1=0.0861204 struct_ori=0.0035248 struct_shape=0.00119022 map_s=29.4234 eval_s=0.256017 params_unchanged=1 iteration_unchanged=1
+[FGM][K] per-section profile:
+[GpuProfiler] online (incremental mapping) (n=100 iters)
+    forward(render):   0.407521 ms/iter
+    loss_fwd(L1+SSIM+aniso+line): 0.695298 ms/iter
+    backward:          4.63232 ms/iter
+    dens_stats(maxR+gradAccum, 每步): 0.00115712 ms/iter
+    optimizer:         0.350857 ms/iter
+    ---- sum(parts)=6.08716  total(start->opt)=6.08716 ms/iter
+[GpuProfiler] refine (final refinement) (n=0 iters)
+    forward(render):   0 ms/iter
+    loss_fwd(L1+SSIM+aniso+line): 0 ms/iter
+    backward:          0 ms/iter
+    dens_stats(maxR+gradAccum, 每步): 0 ms/iter
+    optimizer:         0 ms/iter
+    ---- sum(parts)=0  total(start->opt)=0 ms/iter
+[GaussianModelLine] No sparse points cached; skipping input.ply save to "/workspace/code/PSL-perf/abl_out/prof_jk/K/5000_shutdown/ply/input.ply"
+[FrozenABL][K] psnr=20.7703 ssim=0.813854 gaussians=1951 point=1754 line=197 opt_steps=5000 seconds=30.052 nan=0 grad_finite=1 exit=0
+[FrozenABL] all conditions finished; summary: /workspace/code/PSL-perf/abl_out/prof_jk/frozen/summary_JK.csv
+All threads finished. Saving results...
+=====================================================
+[System] Total Operation Time: 139.18 seconds (2.3196 minutes).
+=====================================================
+All threads finished. Saving results...
+
+Saving camera trajectory to /workspace/code/PSL-perf/abl_out/prof_jk/CameraTrajectory_TUM.txt ...
+[System] SaveTrajectoryTUM: atlas holds 1 map(s)
+[System] SaveTrajectoryTUM:   map 0 has 116 keyframe(s)  [current]
+[System] SaveTrajectoryTUM: exported map=0 refKFs=116 written=2000 skipped_lost=0 skipped_other_map=0 skipped_no_refkf=0 (of 2000 frame entries)
+[System] SaveTrajectoryTUM: frame entries by reference-KF map: map0=2000 mapTotal=2000
+
+Saving keyframe trajectory to /workspace/code/PSL-perf/abl_out/prof_jk/KeyFrameTrajectory_TUM.txt ...
+[System] SaveKeyFrameTrajectoryTUM: atlas holds 1 map(s)
+[System] SaveKeyFrameTrajectoryTUM:   map 0 has 116 keyframe(s)  [current]
+[System] SaveKeyFrameTrajectoryTUM: exported map=0 refKFs=116
+
+Saving trajectory to /workspace/code/PSL-perf/abl_out/prof_jk/CameraTrajectory_EuRoC.txt ...
+[System] SaveTrajectoryEuRoC: atlas holds 1 map(s)
+[System] SaveTrajectoryEuRoC:   map 0 has 116 keyframe(s)  [current]
+
+End of saving trajectory to /workspace/code/PSL-perf/abl_out/prof_jk/CameraTrajectory_EuRoC.txt ...
+
+Saving keyframe trajectory to /workspace/code/PSL-perf/abl_out/prof_jk/KeyFrameTrajectory_EuRoC.txt ...
+
+Saving camera trajectory to /workspace/code/PSL-perf/abl_out/prof_jk/CameraTrajectory_KITTI.txt ...
+[System] SaveTrajectoryKITTI: atlas holds 1 map(s)
+[System] SaveTrajectoryKITTI:   map 0 has 116 keyframe(s)  [current]
+[System] SaveTrajectoryKITTI: exported map=0 refKFs=116 written=2000 skipped_other_map=0 (of 2000 frame entries)
+
+===================================================
+[System] 正在导出全局点线 3D 模型至: /workspace/code/PSL-perf/abl_out/prof_jk/Global_Final_Map
+[System] 准备写入: 12722 个地图点, 66 条地图线.
+[ExportMapPointsToOBJ] Exported 12722 valid points to /workspace/code/PSL-perf/abl_out/prof_jk/Global_Final_Map_Points.obj
+[ExportMapLinesToOBJ] Exported 66 lines (132 vertices) to /workspace/code/PSL-perf/abl_out/prof_jk/Global_Final_Map_Lines.obj
+[System] 全局地图导出完成！
+===================================================
+EXIT=0

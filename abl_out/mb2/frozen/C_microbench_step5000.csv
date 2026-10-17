@@ -1,0 +1,12 @@
+variant,zero_grad_ms,fwd_only_ms,fwd_bwd_ms,derived_fwd_ms,derived_bwd_ms
+render_only,1.4135e-05,0.774838,0.774838,0.774823,0
+photo,1.4135e-05,1.57521,11.3931,1.57519,9.81786
+photo_aniso,1.4135e-05,1.608,10.4194,1.60799,8.81144
+photo_aniso_position,1.4135e-05,1.61948,11.0724,1.61947,9.45296
+photo_aniso_ecc,1.4135e-05,1.62395,10.3435,1.62393,8.71952
+photo_aniso_ori,1.4135e-05,1.64248,11.2822,1.64247,9.63967
+photo_aniso_all_struct_fast,1.4135e-05,1.66523,10.8814,1.66522,9.21612
+photo_aniso_all_struct_ref,1.4135e-05,2.00396,12.344,2.00394,10.3401
+struct_only_fast,1.4135e-05,1.6924,2.32704,1.69239,0.634642
+struct_only_ref,1.4135e-05,1.99141,3.30923,1.99139,1.31783
+optimizer_step,0,0.113327,0.113327,0.113327,0

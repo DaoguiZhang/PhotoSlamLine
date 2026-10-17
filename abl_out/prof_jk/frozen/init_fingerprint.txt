@@ -1,0 +1,7 @@
+fingerprint fb391e4b5528e0a6_n1951_nline197
+gaussians 1951
+line_gaussians 197
+checkpoint /workspace/code/PSL-perf/abl_out/prof_jk/frozen/init_checkpoint.pt
+input_hash 8d4e28a917856961
+image_hash c1cbebef7abd7d7c
+kf_seq_hash ea3006d39de8b6d4

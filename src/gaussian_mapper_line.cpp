@@ -26,11 +26,13 @@
 #include <functional>
 #include <limits>
 #include <algorithm>
-#include <sstream>
-#include <opencv2/imgcodecs.hpp>
+#include <sstream>#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include "LineMode.h"
+
+// defined in cuda_rasterizer/backward.cu
+void SetRasterBackend(int b);
 
 namespace {
 // Line structural-loss is computed every N iterations. Default 1 (every step):
@@ -2524,14 +2526,19 @@ void GaussianMapperLine::runFrozenAblation()
                     c.use_line_gaussians = true;  c.line_loss = true;
                     c.directional_densify = false;
                     c.w_position = 0.0f; c.w_ecc = -1.0f; c.w_orient = 0.0f;
-                } else if (base == 'R' && item.size() > 1 && (item.substr(1) == "100" || item.substr(1) == "50")) {
-                    // mapper-budget-v2-hash: the ONE algorithmic variable.
-                    // Both arms identical except the inactive-geo acceptance
-                    // fraction. Line structural loss OFF, no directional densify,
-                    // no line-Gaussian subsetting.
+                } else if (base == 'R' && item.size() > 1 &&
+                           (item.substr(1) == "100" || item.substr(1) == "50" ||
+                            item.substr(1) == "A" || item.substr(1) == "C")) {
+                    // mapper-budget-v2-hash (R100/R50) and raster-perf-v5 (RA/RC).
+                    // All of these: line structural loss OFF, no directional
+                    // densify, no line-Gaussian subsetting. RA and RC differ ONLY
+                    // in the rasteriser backward backend.
                     c.use_line_gaussians = true;  c.line_loss = false;
                     c.directional_densify = false;
-                    c.inactive_keep = (item.substr(1) == "100") ? 1.0f : 0.5f;
+                    const std::string sfx = item.substr(1);
+                    if (sfx == "A")      c.raster_backend = 0;
+                    else if (sfx == "C") c.raster_backend = 2;
+                    else                 c.inactive_keep = (sfx == "100") ? 1.0f : 0.5f;
                 } else if (base == 'Q') {
                     // Line-density conditions: ordinary Gaussians untouched,
                     // structural loss OFF, only the number of line Gaussians
@@ -2928,6 +2935,8 @@ void GaussianMapperLine::runFrozenAblation()
             std::filesystem::create_directories(result_dir_);
             // mapper-budget-v2-hash: per-condition budget + its own audit files.
             budgetSetCondition(c.inactive_keep, result_dir_.string());
+            // raster-perf-v5: pin the rasteriser backward backend for this arm.
+            if (c.raster_backend >= 0) SetRasterBackend(c.raster_backend);
 
             // Train wall time covers exactly the optimizer steps (boundaries
             // synchronised so pending CUDA work is not billed to metrics).

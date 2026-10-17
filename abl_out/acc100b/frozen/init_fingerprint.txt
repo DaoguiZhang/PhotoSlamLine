@@ -1,0 +1,7 @@
+fingerprint a9179314e4aa1e29_n1964_nline177
+gaussians 1964
+line_gaussians 177
+checkpoint /workspace/code/PSL-perf/abl_out/acc100b/frozen/init_checkpoint.pt
+input_hash 170dc86de92f0edd
+image_hash 7d44d5bf2ea69f73
+kf_seq_hash e9b12a8f889f84da

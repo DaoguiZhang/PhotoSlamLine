@@ -932,6 +932,143 @@ renderCUDA_conv(
 	}
 }
 
+// ---------------------------------------------------------------------------
+// raster-perf-v5: GOLDEN reference for the reduction, not a performance
+// candidate. It computes the same per-contribution values as backend B but
+// accumulates them into DOUBLE precision, where the error of summing a few
+// thousand terms of comparable magnitude is ~1e-13 relative - far below fp32's
+// ~1e-7. That makes it an independent high-precision reference for the question
+// "does backend C add up the same set of contributions?", which the reference
+// itself cannot answer because its own atomic order varies between runs.
+//
+// Its contribution formulas are a textual copy of the converged kernel, so it
+// shares any error in the FORMULAS with B/C; it is independent only of the
+// REDUCTION, which is exactly the property under test here.
+// ---------------------------------------------------------------------------
+template <uint32_t C>
+__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
+renderCUDA_golden(
+	const uint2* __restrict__ ranges,
+	const uint32_t* __restrict__ point_list,
+	int W, int H,
+	const float* __restrict__ bg_color,
+	const float2* __restrict__ points_xy_image,
+	const float4* __restrict__ conic_opacity,
+	const float* __restrict__ colors,
+	const float* __restrict__ final_Ts,
+	const uint32_t* __restrict__ n_contrib,
+	const float* __restrict__ dL_dpixels,
+	double* __restrict__ g_mx, double* __restrict__ g_my,
+	double* __restrict__ g_cx, double* __restrict__ g_cy, double* __restrict__ g_cw,
+	double* __restrict__ g_op, double* __restrict__ g_col)
+{
+	auto block = cg::this_thread_block();
+	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	const uint32_t pix_id = W * pix.y + pix.x;
+	const float2 pixf = { (float)pix.x, (float)pix.y };
+
+	const bool inside = pix.x < W&& pix.y < H;
+	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
+	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
+	int toDo = range.y - range.x;
+
+	__shared__ int collected_id[BLOCK_SIZE];
+	__shared__ float2 collected_xy[BLOCK_SIZE];
+	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_colors[C * BLOCK_SIZE];
+
+	const float T_final = inside ? final_Ts[pix_id] : 0;
+	float T = T_final;
+	uint32_t contributor = toDo;
+	const int last_contributor = inside ? n_contrib[pix_id] : 0;
+
+	float accum_rec[C] = { 0 };
+	float dL_dpixel[C] = { 0 };
+	if (inside)
+		for (int i = 0; i < C; i++)
+			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+	float last_alpha = 0;
+	float last_color[C] = { 0 };
+	const float ddelx_dx = 0.5 * W;
+	const float ddely_dy = 0.5 * H;
+	const bool outside = !inside;
+
+	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
+	{
+		block.sync();
+		const int progress = i * BLOCK_SIZE + block.thread_rank();
+		if (range.x + progress < range.y)
+		{
+			const int coll_id = point_list[range.y - progress - 1];
+			collected_id[block.thread_rank()] = coll_id;
+			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
+			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			for (int k = 0; k < C; k++)
+				collected_colors[k * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + k];
+		}
+		block.sync();
+
+		for (int j = 0; j < min(BLOCK_SIZE, toDo); j++)
+		{
+			contributor--;
+			const bool valid = !outside && (contributor < last_contributor);
+			if (!valid) continue;   // a plain skip is fine here: the target is double atomics
+			const float2 xy = collected_xy[j];
+			const float2 d = { xy.x - pixf.x, xy.y - pixf.y };
+			const float4 con_o = collected_conic_opacity[j];
+			const float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			if (power > 0.0f) continue;
+			const float G = expf(power);
+			const float alpha = min(0.99f, con_o.w * G);
+			if (alpha < 1.0f / 255.0f) continue;
+
+			T = T / (1.f - alpha);
+			const float dchannel_dcolor = alpha * T;
+			float dL_dalpha = 0.0f;
+			const int gid = collected_id[j];
+			for (int k = 0; k < C; k++)
+			{
+				const float c = collected_colors[k * BLOCK_SIZE + j];
+				accum_rec[k] = last_alpha * last_color[k] + (1.f - last_alpha) * accum_rec[k];
+				last_color[k] = c;
+				const float dL_dchannel = dL_dpixel[k];
+				dL_dalpha += (c - accum_rec[k]) * dL_dchannel;
+				atomicAdd(&g_col[gid * C + k], (double)(dchannel_dcolor * dL_dchannel));
+			}
+			dL_dalpha *= T;
+			last_alpha = alpha;
+			float bg_dot_dpixel = 0;
+			for (int k = 0; k < C; k++) bg_dot_dpixel += bg_color[k] * dL_dpixel[k];
+			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+
+			const float dL_dG = con_o.w * dL_dalpha;
+			const float gdx = G * d.x;
+			const float gdy = G * d.y;
+			const float dG_ddelx = -gdx * con_o.x - gdy * con_o.y;
+			const float dG_ddely = -gdy * con_o.z - gdx * con_o.y;
+			atomicAdd(&g_mx[gid], (double)(dL_dG * dG_ddelx * ddelx_dx));
+			atomicAdd(&g_my[gid], (double)(dL_dG * dG_ddely * ddely_dy));
+			atomicAdd(&g_cx[gid], (double)(-0.5f * gdx * d.x * dL_dG));
+			atomicAdd(&g_cy[gid], (double)(-0.5f * gdx * d.y * dL_dG));
+			atomicAdd(&g_cw[gid], (double)(-0.5f * gdy * d.y * dL_dG));
+			atomicAdd(&g_op[gid], (double)(G * dL_dalpha));
+		}
+	}
+}
+
+// raster-perf-v5: the backend can be pinned per condition by the mapper, so one
+// frozen process can compare A and C on the SAME scene, init and schedule. -1 =
+// not pinned -> derive once from PHOTO_SLAM_RASTER_BACKEND (default A).
+int g_raster_backend = -1;
+void SetRasterBackend(int b) {
+	g_raster_backend = b;
+	printf("[RasterBackendPin] condition pinned to %s\n",
+	       b == 0 ? "A" : (b == 1 ? "B" : "C"));
+	fflush(stdout);
+}
+
 void BACKWARD::render(
 	const dim3 grid, const dim3 block,
 	const uint2* ranges,
@@ -958,7 +1095,8 @@ void BACKWARD::render(
 	// Each backend is its own instantiation, so selecting B or C adds no
 	// device-side branch and no extra register pressure to the reference.
 	// ---------------------------------------------------------------------
-	static const int backend = []() {
+	if (g_raster_backend < 0)
+	{
 		const char* e = std::getenv("PHOTO_SLAM_RASTER_BACKEND");
 		int b = 0;
 		if (e != nullptr)
@@ -971,8 +1109,9 @@ void BACKWARD::render(
 		              : (b == 1 ? "B converged control flow (atomicAdd)"
 		                        : "C converged + 5-stage warp tree"));
 		fflush(stdout);
-		return b;
-	}();
+		g_raster_backend = b;
+	}
+	const int backend = g_raster_backend;
 
 	auto launch = [&](int b) {
 		if (b == 1)
@@ -1083,6 +1222,27 @@ void BACKWARD::render(
 				TIME_LAUNCH(2, C_mean, C_conic, C_op, C_col, msC);
 				#undef TIME_LAUNCH
 
+				// ---- FP64 golden reference, independent of the reduction ----
+				double *g_mx = nullptr, *g_my = nullptr, *g_cx = nullptr,
+				       *g_cy = nullptr, *g_cw = nullptr, *g_op = nullptr, *g_col = nullptr;
+				cudaMalloc(&g_mx, P * sizeof(double)); cudaMalloc(&g_my, P * sizeof(double));
+				cudaMalloc(&g_cx, P * sizeof(double)); cudaMalloc(&g_cy, P * sizeof(double));
+				cudaMalloc(&g_cw, P * sizeof(double)); cudaMalloc(&g_op, P * sizeof(double));
+				cudaMalloc(&g_col, P * NUM_CHANNELS * sizeof(double));
+				const bool have_gold = g_mx && g_my && g_cx && g_cy && g_cw && g_op && g_col;
+				if (have_gold)
+				{
+					cudaMemset(g_mx, 0, P * sizeof(double)); cudaMemset(g_my, 0, P * sizeof(double));
+					cudaMemset(g_cx, 0, P * sizeof(double)); cudaMemset(g_cy, 0, P * sizeof(double));
+					cudaMemset(g_cw, 0, P * sizeof(double)); cudaMemset(g_op, 0, P * sizeof(double));
+					cudaMemset(g_col, 0, P * NUM_CHANNELS * sizeof(double));
+					renderCUDA_golden<NUM_CHANNELS> << <grid, block >> >(
+						ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+						final_Ts, n_contrib, dL_dpixels,
+						g_mx, g_my, g_cx, g_cy, g_cw, g_op, g_col);
+					cudaDeviceSynchronize();
+				}
+
 				// ---- per-group noise floor, measured BEFORE any judgement ----
 				// The reference is NOT deterministic: its atomicAdd order varies
 				// between launches, so A vs A already differs. Each group must
@@ -1135,6 +1295,65 @@ void BACKWARD::render(
 				for (int g = 0; g < 4; ++g) judge(g, "C-A", Cg[g]);
 				printf("  C vs B  (tree only, same control flow):\n");
 				for (int g = 0; g < 4; ++g) judge(g, "C-B", Cg[g]);
+
+				// ---- independent FP64 reference: A, B and C against golden ----
+				// This is the criterion that does NOT depend on the reference's own
+				// scatter. The fp64 sum of a few thousand comparable terms has a
+				// relative error ~1e-13, so a candidate whose deviation from golden is
+				// at fp32 rounding level is adding up the same contributions.
+				if (have_gold)
+				{
+					const size_t tot = n_mean + n_conic + n_op + n_col;
+					std::vector<float> hA(tot), hB(tot), hC(tot);
+					cudaMemcpy(hA.data(), bA, tot * sizeof(float), cudaMemcpyDeviceToHost);
+					cudaMemcpy(hB.data(), bB, tot * sizeof(float), cudaMemcpyDeviceToHost);
+					cudaMemcpy(hC.data(), bC, tot * sizeof(float), cudaMemcpyDeviceToHost);
+					std::vector<double> dMx(P), dMy(P), dCx(P), dCy(P), dCw(P), dOp(P), dCol(P * NUM_CHANNELS);
+					cudaMemcpy(dMx.data(), g_mx, P * sizeof(double), cudaMemcpyDeviceToHost);
+					cudaMemcpy(dMy.data(), g_my, P * sizeof(double), cudaMemcpyDeviceToHost);
+					cudaMemcpy(dCx.data(), g_cx, P * sizeof(double), cudaMemcpyDeviceToHost);
+					cudaMemcpy(dCy.data(), g_cy, P * sizeof(double), cudaMemcpyDeviceToHost);
+					cudaMemcpy(dCw.data(), g_cw, P * sizeof(double), cudaMemcpyDeviceToHost);
+					cudaMemcpy(dOp.data(), g_op, P * sizeof(double), cudaMemcpyDeviceToHost);
+					cudaMemcpy(dCol.data(), g_col, P * NUM_CHANNELS * sizeof(double), cudaMemcpyDeviceToHost);
+
+					const size_t off_mean = 0, off_conic = n_mean,
+					             off_op = n_mean + n_conic, off_col = off_op + n_op;
+					printf("  vs FP64 golden (fp32 rounding of a comparable-magnitude sum is ~1e-7):\n");
+					auto report = [&](const char* bk, const std::vector<float>& h) {
+						double ma, num, den;
+						auto acc = [&](size_t off, int ncomp, int comp, const double* g, size_t n) {
+							double m = 0, nn = 0, dd = 0;
+							for (size_t i = 0; i < n; ++i) {
+								const double d = std::fabs((double)h[off + i * ncomp + comp] - g[i]);
+								if (d > m) m = d;
+								nn += d * d; dd += g[i] * g[i];
+							}
+							ma = std::max(ma, m); num += nn; den += dd;
+						};
+						ma = 0; num = 0; den = 0;
+						acc(off_mean, 3, 0, dMx.data(), P); acc(off_mean, 3, 1, dMy.data(), P);
+						printf("    %s mean2D  max_abs=%.4e relL2=%.4e\n", bk, ma,
+						       std::sqrt(num) / (std::sqrt(den) + 1e-30));
+						ma = 0; num = 0; den = 0;
+						acc(off_conic, 4, 0, dCx.data(), P); acc(off_conic, 4, 1, dCy.data(), P);
+						acc(off_conic, 4, 3, dCw.data(), P);
+						printf("    %s conic2D max_abs=%.4e relL2=%.4e\n", bk, ma,
+						       std::sqrt(num) / (std::sqrt(den) + 1e-30));
+						ma = 0; num = 0; den = 0;
+						acc(off_op, 1, 0, dOp.data(), P);
+						printf("    %s opacity max_abs=%.4e relL2=%.4e\n", bk, ma,
+						       std::sqrt(num) / (std::sqrt(den) + 1e-30));
+						ma = 0; num = 0; den = 0;
+						acc(off_col, 1, 0, dCol.data(), P * NUM_CHANNELS);
+						printf("    %s colors  max_abs=%.4e relL2=%.4e\n", bk, ma,
+						       std::sqrt(num) / (std::sqrt(den) + 1e-30));
+					};
+					report("A", hA); report("B", hB); report("C", hC);
+					cudaFree(g_mx); cudaFree(g_my); cudaFree(g_cx); cudaFree(g_cy);
+					cudaFree(g_cw); cudaFree(g_op); cudaFree(g_col);
+					fflush(stdout);
+				}
 
 				// ---- alternating multi-block timing, warm-up + median/dist ----
 				const int WARM = 3, BLOCKS = 9;

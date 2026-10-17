@@ -1,0 +1,2 @@
+condition,use_line_gaussians,line_loss,directional_densify,psnr,ssim,gaussians_init,gaussians_final,gaussians_point,gaussians_line,opt_steps,refine_seconds,nan,grad_finite,exit,fixed_count,init_fingerprint,init_restore,init_fp_match,count_violation,eval_count,eval_params_stable,mapping_seconds,w_position_eff,w_ecc_eff,w_orient_eff,use_ref_struct_loss,input_hash,image_hash,kf_seq_hash
+C,1,1,0,20.9443,0.813689,1976,1976,1801,175,5000,97.796,0,1,0,1,84957a34119de784_n1976_nline175,9,1,0,2,1,27.0606,0.001,0.002,0.005,0,eb99bc0dc5854f51,0017d64c0889eb10,e61ab93ef1dd2772

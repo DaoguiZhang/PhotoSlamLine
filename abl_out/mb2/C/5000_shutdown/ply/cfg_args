@@ -1,0 +1,1 @@
+Namespace(eval=False, images='images', model_path='', resolution=-1, sh_degree=3, source_path='', white_background=False, )

@@ -1,0 +1,5 @@
+iteration 9000
+default_sh 3
+total_training_time_ms 55648
+n_gaussians 183328
+device cuda

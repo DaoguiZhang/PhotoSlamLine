@@ -1,0 +1,5 @@
+condition,use_line_gaussians,line_loss,directional_densify,psnr,ssim,gaussians_init,gaussians_final,gaussians_point,gaussians_line,opt_steps,refine_seconds,nan,grad_finite,exit,fixed_count,init_fingerprint,init_restore,init_fp_match,count_violation,eval_count,eval_params_stable,mapping_seconds,w_position_eff,w_ecc_eff,w_orient_eff,use_ref_struct_loss,input_hash,image_hash,kf_seq_hash
+J,1,1,0,20.8866,0.8164,1953,1953,1754,199,5000,40.178,0,1,0,1,698c7f3229d88cd3_n1953_nline199,9,1,0,8,1,33.9981,0.001,0.002,0.005,1,21a47bd691dddad9,26db1df45310aa86,4f1eafe8505a1237
+K,1,1,0,20.864,0.815749,1953,1953,1754,199,5000,35.313,0,1,0,1,698c7f3229d88cd3_n1953_nline199,9,1,0,8,1,29.2872,0.001,0.002,0.005,0,21a47bd691dddad9,26db1df45310aa86,4f1eafe8505a1237
+B0,1,0,0,20.5691,0.811265,1953,1953,1754,199,5000,29.423,0,1,0,1,698c7f3229d88cd3_n1953_nline199,9,1,0,8,1,23.5888,0,0,0,0,21a47bd691dddad9,26db1df45310aa86,4f1eafe8505a1237
+B1,1,0,0,20.5388,0.810753,1953,1953,1754,199,5000,30.986,0,1,0,1,698c7f3229d88cd3_n1953_nline199,9,1,0,8,1,25.0162,0,0,0,0,21a47bd691dddad9,26db1df45310aa86,4f1eafe8505a1237

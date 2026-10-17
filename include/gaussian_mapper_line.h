@@ -323,8 +323,11 @@ public:
         // mapper-budget-v2-hash: fraction of the inactive-geo candidate pool the
         // arm accepts. 1.0 = R100 (accept all), 0.5 = R50 (deterministic hash
         // half of the SAME pool). This is the ONLY difference between the arms.
-        float inactive_keep = 1.0f;
-    };
+        // raster-perf-v5: pin the rasteriser backward backend per condition so one
+        // frozen process can compare A and C on the same scene/init/schedule.
+        // -1 = do not pin (use PHOTO_SLAM_RASTER_BACKEND, default A).
+        int raster_backend = -1;
+        float inactive_keep = 1.0f;    };
     std::vector<FrozenAblationCondition> frozen_conditions_;
     std::filesystem::path frozen_ablation_dir_;
     int frozen_ablation_steps_ = 0;

@@ -1,0 +1,10 @@
+events 561
+add_ordinary 177480
+add_line 3
+clone 18901
+split 176142
+prune_removed 177205
+reset_opacity 0
+net_from_audit 195321
+peak_total 204477
+current_total 197232
