@@ -147,3 +147,16 @@ grep SyncContract abl_out/synctest_gpu/run.log
 下一步（里程碑 1 收尾）应在 `tests/` 下新建一个独立夹具：构造 N=8 的
 `GaussianModelLine`，标记 3 行为 line，调用 `scaledTransformVisiblePointsOfKeyframe`
 两次（选中/未选中），逐项断言协方差朝向、尺度不变、未选中行逐位不变、线缓存版本号变化。
+
+---
+
+# 续二：轻量 GBA 事件通道（本次提交）
+
+实现（编译通过）：
+- `Atlas.h`：`GlobalBA = 4`；只携带 `(kf_id, new_Tcw)` 的 `mvGlobalBAPoses`、`mnEventId`、`mnMapGen`。
+- `LoopClosing.cc`：GBA 写回完成后、`InformNewBigChange()` 之前发布；采集**写回后的最终位姿**（含树传播更正的关键帧）；`mapGen = Map::GetId()`；两个 GBA 线程都插入。
+- `gaussian_mapper_line.cpp`：`case GlobalBA` **只消费并记录**，打印 `evt/map/kfs/in_scene/prev_evt/ACCEPTED|DUPLICATE_REJECTED`，不施加形变。
+
+**未取得运行覆盖**：首次真实运行用错入口（`bin/replica_rgbd` 要求 Replica 的 `results/` 布局），
+在 TUM 数据集上以 `filesystem_error` 退出（exit 134）。因此"发布→消费→版本检查"尚无运行证据，
+不做任何通过声明。正确入口为 `bin/tum_rgbd`；详见 `HANDOFF_geom_sync.md`。

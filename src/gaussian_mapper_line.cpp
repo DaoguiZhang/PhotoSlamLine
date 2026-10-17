@@ -4158,6 +4158,31 @@ void GaussianMapperLine::combineMappingOperations()
         }
         break;
 
+        case ORB_SLAM3::MappingOperation::OprType::GlobalBA:
+        {
+            // geom-sync-v2 里程碑 3: CONSUME AND RECORD ONLY.
+            // The deformation is deliberately NOT applied here yet: applying a
+            // non-rigid GBA correction correctly requires the per-Gaussian
+            // deformation anchor (ref_kf_id_), which does not exist yet. This
+            // stage proves the notification chain and the version checks.
+            static unsigned long s_last_gba_evt = 0;
+            static unsigned long s_applied = 0, s_dup = 0;
+            const unsigned long evt = opr.eventId();
+            const bool dup = (evt <= s_last_gba_evt);
+            if (dup) { ++s_dup; } else { s_last_gba_evt = evt; ++s_applied; }
+            int n_in_scene = 0;
+            for (const auto& e : opr.globalBAPoses())
+                if (scene_->getKeyframe(e.first)) ++n_in_scene;
+            printf("[SyncEvent] GlobalBA evt=%lu map=%lu kfs=%zu in_scene=%d "
+                   "prev_evt=%lu %s accepted=%lu duplicate=%lu\n",
+                   evt, opr.mapGen(), opr.globalBAPoses().size(), n_in_scene,
+                   dup ? s_last_gba_evt : (evt == 0 ? 0 : evt - 1),
+                   dup ? "DUPLICATE_REJECTED" : "ACCEPTED",
+                   s_applied, s_dup);
+            fflush(stdout);
+        }
+        break;
+
         case ORB_SLAM3::MappingOperation::OprType::ScaleRefinement:
         {
             std::cerr << "[Gaussian Mapper]Scale refinement Detected. Transforming all kfs and points..."
@@ -4552,6 +4577,31 @@ void GaussianMapperLine::combineMappingOperations_withLine()
         }
         break;
 
+        case ORB_SLAM3::MappingOperation::OprType::GlobalBA:
+        {
+            // geom-sync-v2 里程碑 3: CONSUME AND RECORD ONLY.
+            // The deformation is deliberately NOT applied here yet: applying a
+            // non-rigid GBA correction correctly requires the per-Gaussian
+            // deformation anchor (ref_kf_id_), which does not exist yet. This
+            // stage proves the notification chain and the version checks.
+            static unsigned long s_last_gba_evt = 0;
+            static unsigned long s_applied = 0, s_dup = 0;
+            const unsigned long evt = opr.eventId();
+            const bool dup = (evt <= s_last_gba_evt);
+            if (dup) { ++s_dup; } else { s_last_gba_evt = evt; ++s_applied; }
+            int n_in_scene = 0;
+            for (const auto& e : opr.globalBAPoses())
+                if (scene_->getKeyframe(e.first)) ++n_in_scene;
+            printf("[SyncEvent] GlobalBA evt=%lu map=%lu kfs=%zu in_scene=%d "
+                   "prev_evt=%lu %s accepted=%lu duplicate=%lu\n",
+                   evt, opr.mapGen(), opr.globalBAPoses().size(), n_in_scene,
+                   dup ? s_last_gba_evt : (evt == 0 ? 0 : evt - 1),
+                   dup ? "DUPLICATE_REJECTED" : "ACCEPTED",
+                   s_applied, s_dup);
+            fflush(stdout);
+        }
+        break;
+
         case ORB_SLAM3::MappingOperation::OprType::ScaleRefinement:
         {
             std::cerr << "[Gaussian Mapper] Scale refinement Detected." << std::endl;
@@ -4847,6 +4897,31 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
             // Mark this iteration
             loop_closure_iteration_ = true;
+        }
+        break;
+
+        case ORB_SLAM3::MappingOperation::OprType::GlobalBA:
+        {
+            // geom-sync-v2 里程碑 3: CONSUME AND RECORD ONLY.
+            // The deformation is deliberately NOT applied here yet: applying a
+            // non-rigid GBA correction correctly requires the per-Gaussian
+            // deformation anchor (ref_kf_id_), which does not exist yet. This
+            // stage proves the notification chain and the version checks.
+            static unsigned long s_last_gba_evt = 0;
+            static unsigned long s_applied = 0, s_dup = 0;
+            const unsigned long evt = opr.eventId();
+            const bool dup = (evt <= s_last_gba_evt);
+            if (dup) { ++s_dup; } else { s_last_gba_evt = evt; ++s_applied; }
+            int n_in_scene = 0;
+            for (const auto& e : opr.globalBAPoses())
+                if (scene_->getKeyframe(e.first)) ++n_in_scene;
+            printf("[SyncEvent] GlobalBA evt=%lu map=%lu kfs=%zu in_scene=%d "
+                   "prev_evt=%lu %s accepted=%lu duplicate=%lu\n",
+                   evt, opr.mapGen(), opr.globalBAPoses().size(), n_in_scene,
+                   dup ? s_last_gba_evt : (evt == 0 ? 0 : evt - 1),
+                   dup ? "DUPLICATE_REJECTED" : "ACCEPTED",
+                   s_applied, s_dup);
+            fflush(stdout);
         }
         break;
 

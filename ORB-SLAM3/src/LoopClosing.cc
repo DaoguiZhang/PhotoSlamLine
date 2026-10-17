@@ -4659,6 +4659,25 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
                 }
             }
 
+            // geom-sync-v2 里程碑 3: publish the completed GBA write-back as an
+            // immutable event. Every keyframe pose has already been replaced
+            // (including those corrected via spanning-tree propagation), so the
+            // snapshots below are the FINAL corrected poses, not the optimizer's
+            // direct set.
+            {
+                MappingOperation gba_opr(MappingOperation::OprType::GlobalBA);
+                static std::atomic<unsigned long> s_gba_event{0};
+                gba_opr.setEventId(++s_gba_event);
+                gba_opr.setMapGen(pActiveMap->GetId());
+                std::vector<KeyFrame*> allkfs = pActiveMap->GetAllKeyFrames();
+                gba_opr.reserveGlobalBAPoses(allkfs.size());
+                for (std::size_t i = 0; i < allkfs.size(); ++i) {
+                    KeyFrame* pk = allkfs[i];
+                    if (pk == nullptr || pk->isBad()) continue;
+                    gba_opr.addGlobalBAPose(pk->mnId, pk->GetPose());
+                }
+                mpAtlas->pushMappingOperation(gba_opr);
+            }
             pActiveMap->InformNewBigChange();
             pActiveMap->IncreaseChangeIndex();
 
@@ -4948,6 +4967,25 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
             if(IsLineLoopDiag())
                 std::cout << "[LineLoop] GBA writeback done: linesUpdated=" << nLinesGBA << std::endl;
 
+            // geom-sync-v2 里程碑 3: publish the completed GBA write-back as an
+            // immutable event. Every keyframe pose has already been replaced
+            // (including those corrected via spanning-tree propagation), so the
+            // snapshots below are the FINAL corrected poses, not the optimizer's
+            // direct set.
+            {
+                MappingOperation gba_opr(MappingOperation::OprType::GlobalBA);
+                static std::atomic<unsigned long> s_gba_event{0};
+                gba_opr.setEventId(++s_gba_event);
+                gba_opr.setMapGen(pActiveMap->GetId());
+                std::vector<KeyFrame*> allkfs = pActiveMap->GetAllKeyFrames();
+                gba_opr.reserveGlobalBAPoses(allkfs.size());
+                for (std::size_t i = 0; i < allkfs.size(); ++i) {
+                    KeyFrame* pk = allkfs[i];
+                    if (pk == nullptr || pk->isBad()) continue;
+                    gba_opr.addGlobalBAPose(pk->mnId, pk->GetPose());
+                }
+                mpAtlas->pushMappingOperation(gba_opr);
+            }
             pActiveMap->InformNewBigChange();
             pActiveMap->IncreaseChangeIndex();
 

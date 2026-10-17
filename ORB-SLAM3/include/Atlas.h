@@ -57,7 +57,9 @@ public:
     enum OprType{
         LocalMappingBA = 1,
         LoopClosingBA = 2,
-        ScaleRefinement = 3
+        ScaleRefinement = 3,
+        // geom-sync-v2: post-loop global BA correction (poses only, immutable).
+        GlobalBA = 4
     };
 
 private:
@@ -74,7 +76,10 @@ private:
           msInsertedLineIds(opr.msInsertedLineIds),
           meOperationType(opr.meOperationType),
           mfScale(opr.mfScale),
-          mT(opr.mT)
+          mT(opr.mT),
+          mvGlobalBAPoses(opr.mvGlobalBAPoses),
+          mnEventId(opr.mnEventId),
+          mnMapGen(opr.mnMapGen)
     {}
 
 public:
@@ -113,6 +118,27 @@ public:
     {}
 
 public:
+    // ---- geom-sync-v2: lightweight GBA correction event -------------------
+    // Poses only: no images, no keypoint payload, so publishing this for a whole
+    // map is cheap (addKeyFrame() would clone imgLeftRGB per keyframe).
+    // Semantics: GlobalBA carries (kf_id, new_Tcw) snapshots taken AFTER the GBA
+    // write-back, plus the atlas map id as the generation marker. Consumers must
+    // treat the payload as immutable and must not re-read KeyFrame.
+    std::vector<std::pair<unsigned long, Sophus::SE3f>> mvGlobalBAPoses;
+    unsigned long mnEventId = 0;
+    unsigned long mnMapGen = 0;
+
+    void reserveGlobalBAPoses(const std::size_t n) { mvGlobalBAPoses.reserve(n); }
+    void addGlobalBAPose(unsigned long kfid, const Sophus::SE3f& Tcw) {
+        mvGlobalBAPoses.emplace_back(kfid, Tcw);
+    }
+    const std::vector<std::pair<unsigned long, Sophus::SE3f>>&
+    globalBAPoses() const { return mvGlobalBAPoses; }
+    void setEventId(unsigned long v) { mnEventId = v; }
+    unsigned long eventId() const { return mnEventId; }
+    void setMapGen(unsigned long v) { mnMapGen = v; }
+    unsigned long mapGen() const { return mnMapGen; }
+
     void reserveKeyFrames(const std::size_t nKFs)
     {
         mvAssociatedKeyFrames.reserve(nKFs);
