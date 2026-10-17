@@ -70,8 +70,10 @@ private:
         const std::lock_guard<std::mutex> &)
         : mvAssociatedKeyFrames(std::move(opr.mvAssociatedKeyFrames)),
           mvAssociatedMapPoints(std::move(opr.mvAssociatedMapPoints)),
+          mvAssociatedMapPointRefKfIds(std::move(opr.mvAssociatedMapPointRefKfIds)),
           mvAssociatedMapLines(std::move(opr.mvAssociatedMapLines)),
           mvAssociatedLineSampledPoints(std::move(opr.mvAssociatedLineSampledPoints)),
+          mvAssociatedLineSampledPointRefKfIds(std::move(opr.mvAssociatedLineSampledPointRefKfIds)),
           mvAssociatedMapLineIds(std::move(opr.mvAssociatedMapLineIds)),
           msInsertedLineIds(opr.msInsertedLineIds),
           meOperationType(opr.meOperationType),
@@ -121,19 +123,30 @@ public:
     // ---- geom-sync-v2: lightweight GBA correction event -------------------
     // Poses only: no images, no keypoint payload, so publishing this for a whole
     // map is cheap (addKeyFrame() would clone imgLeftRGB per keyframe).
-    // Semantics: GlobalBA carries (kf_id, new_Tcw) snapshots taken AFTER the GBA
-    // write-back, plus the atlas map id as the generation marker. Consumers must
-    // treat the payload as immutable and must not re-read KeyFrame.
-    std::vector<std::pair<unsigned long, Sophus::SE3f>> mvGlobalBAPoses;
+    // Semantics: GlobalBA carries (kf_id, Tcw_before, Tcw_after). `before` is
+    // the pose captured immediately before the GBA write-back (KeyFrame::
+    // mTcwBefGBA for corrected keyframes, current pose otherwise); `after` is
+    // the final pose after write-back. Consumers must treat the payload as
+    // immutable and must not re-read KeyFrame.
+    struct GlobalBAPose
+    {
+        unsigned long kf_id;
+        Sophus::SE3f Tcw_before;
+        Sophus::SE3f Tcw_after;
+        GlobalBAPose(unsigned long id, const Sophus::SE3f& before,
+                     const Sophus::SE3f& after)
+            : kf_id(id), Tcw_before(before), Tcw_after(after) {}
+    };
+    std::vector<GlobalBAPose> mvGlobalBAPoses;
     unsigned long mnEventId = 0;
     unsigned long mnMapGen = 0;
 
     void reserveGlobalBAPoses(const std::size_t n) { mvGlobalBAPoses.reserve(n); }
-    void addGlobalBAPose(unsigned long kfid, const Sophus::SE3f& Tcw) {
-        mvGlobalBAPoses.emplace_back(kfid, Tcw);
+    void addGlobalBAPose(unsigned long kfid, const Sophus::SE3f& Tcw_before,
+                         const Sophus::SE3f& Tcw_after) {
+        mvGlobalBAPoses.emplace_back(kfid, Tcw_before, Tcw_after);
     }
-    const std::vector<std::pair<unsigned long, Sophus::SE3f>>&
-    globalBAPoses() const { return mvGlobalBAPoses; }
+    const std::vector<GlobalBAPose>& globalBAPoses() const { return mvGlobalBAPoses; }
     void setEventId(unsigned long v) { mnEventId = v; }
     unsigned long eventId() const { return mnEventId; }
     void setMapGen(unsigned long v) { mnMapGen = v; }
@@ -185,6 +198,7 @@ public:
         int length = nMPs * 3;
         std::get<0>(mvAssociatedMapPoints).reserve(length);
         std::get<1>(mvAssociatedMapPoints).reserve(length);
+        mvAssociatedMapPointRefKfIds.reserve(nMPs);
     }
 
     void reserveMapLines(const std::size_t nMLs) // added for MapLine
@@ -207,6 +221,12 @@ public:
         std::get<1>(mvAssociatedMapPoints).emplace_back(color.x());
         std::get<1>(mvAssociatedMapPoints).emplace_back(color.y());
         std::get<1>(mvAssociatedMapPoints).emplace_back(color.z());
+        // Deformation anchor: the keyframe this MapPoint was triangulated in.
+        // -1 means "unknown" and is reported as a missing association by the
+        // consumer instead of being guessed.
+        KeyFrame* pRefKF = pMP->GetReferenceKeyFrame();
+        mvAssociatedMapPointRefKfIds.emplace_back(
+            pRefKF ? static_cast<long long>(pRefKF->mnId) : -1LL);
     }
 
     void addMapLine(MapLine* pML) 
@@ -258,6 +278,10 @@ public:
         // 如果 dir 出现 NaN (例如点重合)，做个保护
         if (!std::isfinite(dir.x())) dir = Eigen::Vector3f::UnitX();
 
+        KeyFrame* pRefKF = pML->GetReferenceKeyFrame();
+        const long long ref_kf_id =
+            pRefKF ? static_cast<long long>(pRefKF->mnId) : -1LL;
+
         for(size_t i=0; i<sampled_pts.size(); ++i) {
             // Pos
             std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].x());
@@ -280,6 +304,9 @@ public:
             std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.x());
             std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.y());
             std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.z());
+            // One deformation anchor per sampled point, aligned with the
+            // position triples above.
+            mvAssociatedLineSampledPointRefKfIds.emplace_back(ref_kf_id);
         }
     }
 
@@ -321,6 +348,10 @@ public:
 
         // 计算线方向 (用于 Gaussian 旋转初始化)
         Eigen::Vector3f dir = (pt2 - pt1).normalized();
+        if (!std::isfinite(dir.x())) dir = Eigen::Vector3f::UnitX();
+        KeyFrame* pRefKF = pML->GetReferenceKeyFrame();
+        const long long ref_kf_id =
+            pRefKF ? static_cast<long long>(pRefKF->mnId) : -1LL;
         for(size_t i=0; i<sampled_pts.size(); ++i) {
             // Pos
             std::get<0>(mvAssociatedLineSampledPoints).emplace_back(sampled_pts[i].x());
@@ -334,6 +365,8 @@ public:
             std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.x());
             std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.y());
             std::get<2>(mvAssociatedLineSampledPoints).emplace_back(dir.z());
+            // One deformation anchor per sampled point.
+            mvAssociatedLineSampledPointRefKfIds.emplace_back(ref_kf_id);
         }
     }
     #endif
@@ -341,6 +374,14 @@ public:
     // Getter for Sampled Points (Pos, Color, Direction)
     std::tuple<std::vector<float>, std::vector<float>, std::vector<float>>& associatedLineSampledPoints() { 
         return mvAssociatedLineSampledPoints; 
+    }
+
+    // Deformation anchors, one per position triple; -1 = unknown.
+    std::vector<long long>& associatedMapPointRefKfIds() {
+        return mvAssociatedMapPointRefKfIds;
+    }
+    std::vector<long long>& associatedLineSampledPointRefKfIds() {
+        return mvAssociatedLineSampledPointRefKfIds;
     }
 
     // Getter for Map Points (Pos, Color)
@@ -369,6 +410,8 @@ protected:
     // Data
     std::tuple<std::vector<float/*pos*/>,
                std::vector<float/*color*/>> mvAssociatedMapPoints;
+    // One ref keyframe id per MapPoint (parallel to the position triples).
+    std::vector<long long> mvAssociatedMapPointRefKfIds;
 
     // [新增] 用于存储 MapLine ID，以便接收端知道是更新哪个线段
     std::vector<unsigned long> mvAssociatedMapLineIds; 
@@ -382,6 +425,8 @@ protected:
     
     // [Pos, Color, Direction] - 纯数据存储，解耦 MapLine 对象
     std::tuple<std::vector<float>, std::vector<float>, std::vector<float>> mvAssociatedLineSampledPoints;
+    // One ref keyframe id per sampled line point (parallel to the triples).
+    std::vector<long long> mvAssociatedLineSampledPointRefKfIds;
 
     std::vector<std::tuple<
         unsigned long/*Id*/,

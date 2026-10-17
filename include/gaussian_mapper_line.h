@@ -397,7 +397,8 @@ public:
     // surface coverage. Original candidate order is preserved for insertion.
     void budgetInit();
     void budgetSetCondition(float keep_frac, const std::string& dir);
-    bool applyInactiveBudget(torch::Tensor& pts, torch::Tensor& cols);
+    bool applyInactiveBudget(torch::Tensor& pts, torch::Tensor& cols,
+                             torch::Tensor* ref_kf_ids = nullptr);
     void budgetSummary();
     // Replay driver: feeds the inactive-geo entry one frozen keyframe at a time,
     // in ascending id order, at a fixed optimizer-step period, so the SAME
@@ -502,6 +503,14 @@ protected:
     int max_depth_cached_ = 1;
     torch::Tensor depth_cache_points_;
     torch::Tensor depth_cache_colors_;
+    // Per-cached-point deformation anchor, appended in lockstep with the caches
+    // above and filtered by the same inactive budget mask.
+    torch::Tensor depth_cache_ref_kf_ids_;
+
+    // geom-sync-v3: last GlobalBA event actually applied to the Gaussians.
+    // Used for duplicate/stale rejection and for stamping new rows.
+    unsigned long last_applied_gba_event_ = 0;
+    long long lm_created_rows_total_ = 0;  // ordinary LocalMapping additions
 
     unsigned long min_num_initial_map_kfs_;
     torch::Tensor background_;

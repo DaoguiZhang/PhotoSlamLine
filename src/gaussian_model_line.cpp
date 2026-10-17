@@ -433,6 +433,7 @@ void GaussianModelLine::createFromPcd(
 {
     this->spatial_lr_scale_ = spatial_lr_scale;
     int num_points = static_cast<int>(pcd.size());
+    std::vector<long long> initial_ref_kf_ids(static_cast<std::size_t>(num_points), -1LL);
     
     // 1. 初始化 GPU 张量
     torch::Tensor fused_point_cloud = torch::zeros(
@@ -466,6 +467,7 @@ void GaussianModelLine::createFromPcd(
         color.index({point_idx, 1}) = point.color_(1);
         color.index({point_idx, 2}) = point.color_(2);
         line_acc[point_idx] = (point.source_ == PointSourceType::LINE_SAMPLED); 
+        initial_ref_kf_ids[static_cast<std::size_t>(point_idx)] = point.ref_kf_id_;
         ++pcd_it;
     }
 
@@ -586,6 +588,19 @@ void GaussianModelLine::createFromPcd(
 
     this->point_ids_ = torch::arange(0, num_points, 
         torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+
+    // Deformation anchor per Gaussian (see Point3D::ref_kf_id_).
+    this->ref_kf_id_ = torch::from_blob(
+        reinterpret_cast<std::int64_t*>(initial_ref_kf_ids.data()), {num_points},
+        torch::TensorOptions().dtype(torch::kLong)).clone().to(device_type_);
+    this->coord_event_id_ = torch::zeros(
+        {num_points}, torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+    this->last_applied_gba_event_ = 0;
+    long long n_missing_ref = 0;
+    for (long long v : initial_ref_kf_ids) if (v < 0) ++n_missing_ref;
+    if (n_missing_ref > 0)
+        std::cerr << "[RefKf] initial map: " << n_missing_ref << "/" << num_points
+                  << " Gaussians have no reference keyframe (reported, not guessed)\n";
 
     // Debug Buffers
     this->debug_hit_count_ =
@@ -903,11 +918,19 @@ void GaussianModelLine::increasePcd(
 
     auto new_xyz_init = new_xyz.clone().detach();
 
+    // Per-row deformation anchor (Point3D carries it from the producer).
+    std::vector<long long> ref_ids(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i)
+        ref_ids[static_cast<std::size_t>(i)] = new_points[i].ref_kf_id_;
+    torch::Tensor new_ref_kf_ids = torch::from_blob(
+        reinterpret_cast<std::int64_t*>(ref_ids.data()), {N},
+        torch::TensorOptions().dtype(torch::kLong)).clone().to(device_type_);
+
     // 5. Call Postfix (Safe Version)
     densificationPostfixWithLineAwareness(
         new_xyz, new_features_dc, new_features_rest, new_opacity, 
         new_scaling, new_rotation, new_exist_since_iter, 
-        new_is_line, new_line_dir_w, new_xyz_init
+        new_is_line, new_line_dir_w, new_xyz_init, new_ref_kf_ids
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
@@ -1064,7 +1087,9 @@ void GaussianModelLine::increasePcd(
 }
 #endif
 
-void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float> colors, const int iteration)
+void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float> colors,
+                                   const int iteration,
+                                   const torch::Tensor& ref_kf_ids)
 {
     // auto time1 = std::chrono::steady_clock::now();
     assert(points.size() == colors.size());
@@ -1189,6 +1214,20 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
 
     // 在 increasePcd 内部
     auto new_xyz_init = new_xyz.clone().detach();
+    torch::Tensor new_ref_kf_ids;
+    if (ref_kf_ids.defined())
+    {
+        new_ref_kf_ids = ref_kf_ids.to(device_type_).to(torch::kLong).flatten();
+        TORCH_CHECK(new_ref_kf_ids.size(0) == num_new_points,
+                    "increasePcd: ref_kf_ids has ", new_ref_kf_ids.size(0),
+                    " rows, expected ", num_new_points);
+    }
+    else
+    {
+        new_ref_kf_ids = torch::full(
+            {num_new_points}, -1LL,
+            torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+    }
 
     // =========================================================
     // 【替换】调用结构感知的 Postfix
@@ -1203,14 +1242,16 @@ void GaussianModelLine::increasePcd(std::vector<float> points, std::vector<float
         new_exist_since_iter,
         new_is_line,       // 传入
         new_line_dir_w,    // 传入
-        new_xyz_init       // 传入
+        new_xyz_init,      // 传入
+        new_ref_kf_ids
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
 }
 
 
-void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tensor& new_colors, const int iteration)
+void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tensor& new_colors,
+                                   const int iteration, const torch::Tensor& ref_kf_ids)
 {
 // auto time1 = std::chrono::steady_clock::now();
     auto num_new_points = new_point_cloud.size(0);
@@ -1311,6 +1352,20 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
     // =================================================================================
     // 【替换】使用带 Line Awareness 的 Postfix
     // =================================================================================
+    torch::Tensor new_ref_kf_ids;
+    if (ref_kf_ids.defined())
+    {
+        new_ref_kf_ids = ref_kf_ids.to(device_type_).to(torch::kLong).flatten();
+        TORCH_CHECK(new_ref_kf_ids.size(0) == num_new_points,
+                    "increasePcd: ref_kf_ids has ", new_ref_kf_ids.size(0),
+                    " rows, expected ", num_new_points);
+    }
+    else
+    {
+        new_ref_kf_ids = torch::full(
+            {num_new_points}, -1LL,
+            torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+    }
     densificationPostfixWithLineAwareness(
         new_xyz,
         new_features_dc,
@@ -1321,7 +1376,8 @@ void GaussianModelLine::increasePcd(torch::Tensor& new_point_cloud, torch::Tenso
         new_exist_since_iter,
         new_is_line,       // Add
         new_line_dir_w,    // Add
-        new_xyz_init       // Add
+        new_xyz_init,      // Add
+        new_ref_kf_ids
     );
 
     c10::cuda::CUDACachingAllocator::emptyCache();
@@ -1341,10 +1397,20 @@ void GaussianModelLine::applyScaledTransformation(
     torch::Tensor T_tensor =
         tensor_utils::EigenMatrix2TorchTensor(T.matrix(), device_type_).transpose(0, 1);
     transformPoints(this->xyz_, T_tensor);
-    // 在 applyScaledTransformation 中同步变换线方向(由于 line_dir_w_ 目前在你的代码里是 requires_grad(false)，如果线本身的位置发生了旋转，line_dir_w_ 就失效了)
-    torch::Tensor R_tensor = T_tensor.slice(0, 0, 3).slice(1, 0, 3); // 提取旋转部分
+    // geom-sync-v1: T_tensor is M^T (EigenMatrix2TorchTensor + transpose), so
+    // slice-based indexing must transpose back first. The previous code used
+    // R^T and rotated line_dir_w_ by the inverse rotation.
+    torch::Tensor M = T_tensor.transpose(0, 1).contiguous();
+    torch::Tensor R = M.slice(0, 0, 3).slice(1, 0, 3);              // true R
+    torch::Tensor t = M.slice(0, 0, 3).slice(1, 3, 4).transpose(0, 1); // [1,3]
     invalidateLineCache();   // cache version bump (assignment below)
-    this->line_dir_w_ = torch::matmul(R_tensor, this->line_dir_w_.transpose(0,1)).transpose(0,1);
+    this->line_dir_w_ = torch::matmul(this->line_dir_w_, R.transpose(0, 1));
+    // The line anchor is a world point on the line: anchor' = s R anchor + t.
+    if (this->xyz_init_.defined() && this->xyz_init_.size(0) == this->xyz_.size(0)) {
+        this->xyz_init_ = torch::matmul(this->xyz_init_, R.transpose(0, 1)) * s
+                          + t.expand({this->xyz_init_.size(0), 3});
+        invalidateLineCache();
+    }
 
 // torch::Tensor scales;
 // torch::Tensor point_cloud_copy = this->xyz_.clone();
@@ -1373,6 +1439,181 @@ void GaussianModelLine::scaledTransformationPostfix(
 }
 
 // ---------------------------------------------------------------------------
+// geom-sync-v3: reference-keyframe anchored GBA correction.
+//
+// Every Gaussian carries ref_kf_id_ (the keyframe whose pose was current when
+// the row was created) and coord_event_id_ (the last GBA event id whose
+// coordinates the row already contains). An event supplies, per keyframe,
+//     G = Tcw_after^-1 * Tcw_before
+// which maps OLD world coordinates to NEW ones. Only rows anchored at that
+// keyframe and created before this event are moved, so a replayed/queued event
+// cannot move points that were already born in corrected coordinates.
+//
+// This routine is a PURE CORRECTION: it never creates or removes a row.
+// ---------------------------------------------------------------------------
+void GaussianModelLine::ensureGbaMetadata()
+{
+    const int64_t N = xyz_.defined() ? xyz_.size(0) : 0;
+    const auto lo = torch::TensorOptions().dtype(torch::kLong).device(device_type_);
+    if (!ref_kf_id_.defined() || ref_kf_id_.numel() != N)
+    {
+        ref_kf_id_ = torch::full({N}, -1LL, lo);
+        std::cerr << "[RefKf] ref_kf_id_ missing/size-mismatched; "
+                  << "reported as unknown for all " << N << " rows\n";
+    }
+    else
+    {
+        ref_kf_id_ = ref_kf_id_.to(device_type_).to(torch::kLong).contiguous();
+    }
+    if (!coord_event_id_.defined() || coord_event_id_.numel() != N)
+        coord_event_id_ = torch::zeros({N}, lo);
+    else
+        coord_event_id_ = coord_event_id_.to(device_type_).to(torch::kLong).contiguous();
+}
+
+GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+    const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+    unsigned long event_id)
+{
+    GbaCorrectionStats st;
+    if (!xyz_.defined() || xyz_.size(0) == 0)
+        return st;
+
+    torch::NoGradGuard no_grad;
+    ensureGbaMetadata();
+    const int64_t N = xyz_.size(0);
+    const auto bo = torch::TensorOptions().dtype(torch::kBool).device(device_type_);
+    const auto lo = torch::TensorOptions().dtype(torch::kLong).device(device_type_);
+    const auto fo = torch::TensorOptions().dtype(torch::kFloat32).device(device_type_);
+
+    if (!xyz_init_.defined() || xyz_init_.size(0) != N)
+        xyz_init_ = xyz_.detach().clone();
+    const bool have_line = is_line_.defined() && is_line_.size(0) == N &&
+                           line_dir_w_.defined() && line_dir_w_.size(0) == N;
+
+    torch::Tensor covered = torch::zeros({N}, bo);
+
+    for (const auto& kv : world_deltas)
+    {
+        const long long kfid = static_cast<long long>(kv.first);
+        const Sophus::SE3f& G = kv.second;
+
+        torch::Tensor mask = ref_kf_id_.eq(kfid);
+        covered = torch::logical_or(covered, mask);
+
+        torch::Tensor stale = torch::logical_and(
+            mask, coord_event_id_.ge(static_cast<long long>(event_id)));
+        st.stale_rows += static_cast<long long>(stale.sum().item<std::int64_t>());
+
+        torch::Tensor active = torch::logical_and(
+            mask, coord_event_id_.lt(static_cast<long long>(event_id)));
+        const long long n = static_cast<long long>(active.sum().item<std::int64_t>());
+        if (n == 0)
+            continue;
+
+        Eigen::Matrix3f Rm = G.rotationMatrix();
+        Eigen::Vector3f tm = G.translation();
+        Eigen::Quaternionf qG(Rm);
+        const Eigen::Vector4f qc = qG.coeffs(); // x, y, z, w
+        // Eigen is column-major: from_blob would expose R^T to row-major torch
+        // indexing, so transpose once to obtain the true R.
+        torch::Tensor R = torch::from_blob(
+            Rm.data(), {3, 3}, torch::TensorOptions().dtype(torch::kFloat32))
+            .clone().transpose(0, 1).contiguous().to(device_type_);
+        torch::Tensor t = torch::from_blob(
+            tm.data(), {1, 3}, torch::TensorOptions().dtype(torch::kFloat32))
+            .clone().to(device_type_);
+        torch::Tensor sel = torch::nonzero(active).flatten();
+
+        // Centres and world anchors: p' = R p + t.
+        auto rigid_move = [&](torch::Tensor& dst) {
+            torch::Tensor moved = torch::matmul(dst, R.transpose(0, 1)) + t;
+            dst.index_copy_(0, sel, moved.index_select(0, sel));
+        };
+        rigid_move(xyz_);
+        rigid_move(xyz_init_);
+
+        // Gaussian orientation: q' = q_G * q (row-vector/layout w,x,y,z).
+        {
+            torch::Tensor q = rotation_;
+            torch::Tensor w2 = q.index({torch::indexing::Slice(), 0});
+            torch::Tensor x2 = q.index({torch::indexing::Slice(), 1});
+            torch::Tensor y2 = q.index({torch::indexing::Slice(), 2});
+            torch::Tensor z2 = q.index({torch::indexing::Slice(), 3});
+            const float w1 = qc[3], x1 = qc[0], y1 = qc[1], z1 = qc[2];
+            torch::Tensor nw = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2;
+            torch::Tensor nx = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2;
+            torch::Tensor ny = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2;
+            torch::Tensor nz = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2;
+            torch::Tensor qn = torch::stack({nw, nx, ny, nz}, 1);
+            qn = qn / torch::sqrt(torch::sum(qn * qn, 1, true).clamp_min(1e-16f));
+            rotation_.index_copy_(0, sel, qn.index_select(0, sel));
+        }
+
+        // World line direction: d' = R d (rotation only, no translation).
+        if (have_line)
+        {
+            torch::Tensor line_active = torch::logical_and(active, is_line_);
+            const long long nl =
+                static_cast<long long>(line_active.sum().item<std::int64_t>());
+            if (nl > 0)
+            {
+                torch::Tensor lsel = torch::nonzero(line_active).flatten();
+                torch::Tensor rotated =
+                    torch::matmul(line_dir_w_, R.transpose(0, 1));
+                line_dir_w_.index_copy_(
+                    0, lsel, rotated.index_select(0, lsel));
+                st.line_rows_moved += nl;
+            }
+        }
+
+        // Adam policy: the xyz first moment is a world-space vector and is
+        // rotated with the geometry. The second moment is an axis-wise positive
+        // quantity; it is left unchanged (documented approximation). Other
+        // parameter groups are unaffected.
+        if (optimizer_)
+        {
+            auto& xyz_param = optimizer_->param_groups()[0].params()[0];
+            auto key = xyz_param.unsafeGetTensorImpl();
+            auto it = optimizer_->state().find(key);
+            if (it != optimizer_->state().end())
+            {
+                auto& adam =
+                    static_cast<torch::optim::AdamParamState&>(*it->second);
+                if (adam.exp_avg().defined() && adam.exp_avg().size(0) == N)
+                {
+                    torch::Tensor ea = adam.exp_avg();
+                    torch::Tensor rot = torch::matmul(ea, R.transpose(0, 1));
+                    ea.index_copy_(0, sel, rot.index_select(0, sel));
+                    adam.exp_avg(ea);
+                }
+            }
+        }
+
+        coord_event_id_.index_fill_(
+            0, sel, static_cast<long long>(event_id));
+        st.moved_rows += n;
+        ++st.groups_applied;
+    }
+
+    // In-place content changes: bump the line cache explicitly.
+    invalidateLineCache();
+
+    st.unassigned_rows =
+        static_cast<long long>(ref_kf_id_.lt(0).sum().item<std::int64_t>());
+    torch::Tensor missing = torch::logical_and(
+        torch::logical_not(covered),
+        torch::logical_and(ref_kf_id_.ge(0),
+                           coord_event_id_.lt(static_cast<long long>(event_id))));
+    st.missing_event_rows =
+        static_cast<long long>(missing.sum().item<std::int64_t>());
+
+    if (event_id > last_applied_gba_event_)
+        last_applied_gba_event_ = event_id;
+    return st;
+}
+
+// ---------------------------------------------------------------------------
 // geom-sync-v1 一: CPU reference test for the rigid-correction contract.
 //
 // Purpose: prove, numerically, that the transform entry recovers the TRUE R and
@@ -1382,6 +1623,170 @@ void GaussianModelLine::scaledTransformationPostfix(
 //
 // Pure CPU; independent of the CUDA kernel and of any real loop closure.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// geom-sync-v3: model-level contract for applyGbaCorrections().
+//
+// Builds a 4-row model on CPU (2 rows anchored at kf 10, 1 at kf 11, 1 with no
+// anchor) and checks: rigid centre/anchor/rotation map, line direction, scale
+// invariance, covariance transformation, unselected rows unchanged, cache
+// refresh, duplicate/stale rejection and sequential composition.
+// ---------------------------------------------------------------------------
+static bool runGbaApplyContractTest()
+{
+    using namespace torch::indexing;
+    auto fo = torch::TensorOptions().dtype(torch::kFloat32);
+
+    GaussianModelLine m(3);
+    m.device_type_ = torch::kCPU;
+
+    const float c45 = std::cos(3.14159265358979f / 4.f);
+    const float s45 = std::sin(3.14159265358979f / 4.f);
+    m.xyz_ = torch::tensor({
+        {0.5f, 0.0f, 3.0f},
+        {1.0f, 2.0f, 3.0f},
+        {0.0f, 1.0f, 2.0f},
+        {2.0f, 2.0f, 2.0f}}, fo).requires_grad_();
+    m.xyz_init_ = m.xyz_.detach().clone();
+    m.xyz_init_.index_put_({1, 0}, 0.5f);   // anchor at p1 - 0.5 * dir
+    m.is_line_ = torch::tensor(
+        {false, true, false, false},
+        torch::TensorOptions().dtype(torch::kBool));
+    m.line_dir_w_ = torch::tensor({
+        {1.f, 0.f, 0.f}, {1.f, 0.f, 0.f},
+        {1.f, 0.f, 0.f}, {1.f, 0.f, 0.f}}, fo);
+    m.scaling_ = torch::log(torch::tensor({
+        {0.10f, 0.20f, 0.30f},
+        {0.40f, 0.50f, 0.60f},
+        {0.20f, 0.20f, 0.20f},
+        {0.30f, 0.30f, 0.30f}}, fo)).requires_grad_();
+    m.rotation_ = torch::tensor({
+        {1.f, 0.f, 0.f, 0.f},
+        {c45, 0.f, 0.f, s45},   // 90 deg about Z
+        {1.f, 0.f, 0.f, 0.f},
+        {1.f, 0.f, 0.f, 0.f}}, fo).requires_grad_();
+    m.features_dc_ = torch::zeros({4, 1, 3}, fo).requires_grad_();
+    m.features_rest_ = torch::zeros({4, 0, 3}, fo).requires_grad_();
+    m.opacity_ = torch::zeros({4, 1}, fo).requires_grad_();
+    m.exist_since_iter_ = torch::zeros(
+        {4}, torch::TensorOptions().dtype(torch::kInt32));
+    m.point_ids_ = torch::arange(
+        0, 4, torch::TensorOptions().dtype(torch::kLong));
+    m.ref_kf_id_ = torch::tensor(
+        {10, 10, 11, -1}, torch::TensorOptions().dtype(torch::kLong));
+    m.coord_event_id_ = torch::zeros(
+        {4}, torch::TensorOptions().dtype(torch::kLong));
+    m.last_applied_gba_event_ = 0;
+    m.rebuildParamVectors();
+    GaussianOptimizationParamsLine args;
+    m.trainingSetup(args);
+
+    // Pre-correction covariance of row 1 (line) and its rotation.
+    Eigen::Vector3f s1(0.40f, 0.50f, 0.60f);
+    Eigen::Matrix3f S1 = s1.array().square().matrix().asDiagonal();
+    Eigen::Quaternionf q1(c45, 0.f, 0.f, s45);   // w,x,y,z
+    Eigen::Matrix3f Rg1 = q1.toRotationMatrix();
+    Eigen::Matrix3f Sigma1 = Rg1 * S1 * Rg1.transpose();
+
+    const float c = std::cos(3.14159265358979f / 2.f);
+    const float sn = std::sin(3.14159265358979f / 2.f);
+    Eigen::Matrix3f Rz;
+    Rz << c, -sn, 0.f, sn, c, 0.f, 0.f, 0.f, 1.f;
+    Eigen::Vector3f tG(0.2f, 0.4f, -0.1f);
+    const Sophus::SE3f G1(Rz, tG);
+
+    std::vector<std::pair<unsigned long, Sophus::SE3f>> d1{{10u, G1}};
+    auto st1 = m.applyGbaCorrections(d1, 1);
+
+    auto get = [&](const torch::Tensor& t, int i, int j) {
+        return t.index({i, j}).item<float>();
+    };
+    auto vec = [&](const torch::Tensor& t, int i) {
+        return Eigen::Vector3f(get(t, i, 0), get(t, i, 1), get(t, i, 2));
+    };
+
+    // Row 0 centre: p' = R p + t.
+    Eigen::Vector3f p0(0.5f, 0.0f, 3.0f);
+    Eigen::Vector3f p0e = Rz * p0 + tG;
+    bool centre_ok = (vec(m.xyz_, 0) - p0e).norm() < 1e-5f;
+    printf("[GbaContract][diag] row0=(%.4f,%.4f,%.4f) expected=(%.4f,%.4f,%.4f) "
+           "G_t=(%.4f,%.4f,%.4f) G_R00=%.4f G_R01=%.4f\n",
+           vec(m.xyz_, 0).x(), vec(m.xyz_, 0).y(), vec(m.xyz_, 0).z(),
+           p0e.x(), p0e.y(), p0e.z(), G1.translation().x(),
+           G1.translation().y(), G1.translation().z(),
+           G1.rotationMatrix()(0, 0), G1.rotationMatrix()(0, 1));
+
+    // Row 1 line direction and anchor.
+    Eigen::Vector3f d1e = Rz * Eigen::Vector3f(1.f, 0.f, 0.f);
+    bool dir_ok = (vec(m.line_dir_w_, 1) - d1e).norm() < 1e-5f;
+    Eigen::Vector3f a1(0.5f, 2.0f, 3.0f);   // xyz_init_[1]
+    Eigen::Vector3f a1e = Rz * a1 + tG;
+    bool anchor_ok = (vec(m.xyz_init_, 1) - a1e).norm() < 1e-5f;
+    // Line residual: (centre - anchor) stays parallel to the new direction.
+    Eigen::Vector3f residual = vec(m.xyz_, 1) - vec(m.xyz_init_, 1);
+    bool residual_ok = residual.cross(d1e).norm() < 1e-4f;
+
+    // Unselected / missing / unassigned rows unchanged.
+    bool rows_unchanged =
+        (vec(m.xyz_, 2) - Eigen::Vector3f(0.f, 1.f, 2.f)).norm() < 1e-6f &&
+        (vec(m.xyz_, 3) - Eigen::Vector3f(2.f, 2.f, 2.f)).norm() < 1e-6f;
+
+    // Scale untouched, covariance = R_G Sigma R_G^T for the line row.
+    Eigen::Vector3f s1a(get(m.scaling_, 1, 0), get(m.scaling_, 1, 1),
+                        get(m.scaling_, 1, 2));
+    // scaling_ stores log-scale.
+    bool scale_ok = (s1a - Eigen::Vector3f(s1.array().log())).norm() < 1e-6f;
+    Eigen::Quaternionf q1a(get(m.rotation_, 1, 0), get(m.rotation_, 1, 1),
+                           get(m.rotation_, 1, 2), get(m.rotation_, 1, 3));
+    q1a.normalize();
+    Eigen::Vector3f s1a_act = s1a.array().exp();
+    Eigen::Matrix3f Sigma1a =
+        q1a.toRotationMatrix() * s1a_act.array().square().matrix().asDiagonal() *
+        q1a.toRotationMatrix().transpose();
+    Eigen::Matrix3f Sigma1e = Rz * Sigma1 * Rz.transpose();
+    bool cov_ok = (Sigma1a - Sigma1e).norm() < 1e-5f;
+
+    // Line cache must expose the corrected anchor/direction.
+    m.refreshLineCache();
+    bool cache_ok = true;
+    {
+        auto line_anchor = m.line_anchor_cached_.index({0});
+        auto line_dir = m.line_dir_cached_.index({0});
+        cache_ok = (vec(line_anchor.unsqueeze(0), 0) - a1e).norm() < 1e-5f &&
+                   (vec(line_dir.unsqueeze(0), 0) - d1e).norm() < 1e-5f;
+    }
+
+    const bool counts_ok =
+        st1.moved_rows == 2 && st1.groups_applied == 1 &&
+        st1.unassigned_rows == 1 && st1.missing_event_rows == 1 &&
+        st1.stale_rows == 0;
+
+    // Replaying the same event must not move anything.
+    auto st_dup = m.applyGbaCorrections(d1, 1);
+    bool dup_ok = st_dup.moved_rows == 0 && st_dup.stale_rows == 2;
+
+    // A second event composes: p'' = G2 * G1 * p.
+    const Sophus::SE3f G2(Eigen::Matrix3f::Identity(),
+                          Eigen::Vector3f(0.1f, 0.f, 0.f));
+    std::vector<std::pair<unsigned long, Sophus::SE3f>> d2{{10u, G2}};
+    auto st2 = m.applyGbaCorrections(d2, 2);
+    Eigen::Vector3f p0ee = G2 * p0e;
+    bool order_ok = st2.moved_rows == 2 &&
+                    (vec(m.xyz_, 0) - p0ee).norm() < 1e-5f &&
+                    m.lastAppliedGbaEvent() == 2;
+
+    const bool pass = centre_ok && dir_ok && anchor_ok && residual_ok &&
+                      rows_unchanged && scale_ok && cov_ok && cache_ok &&
+                      counts_ok && dup_ok && order_ok;
+    printf("[GbaContract] centre=%d dir=%d anchor=%d residual=%d rows=%d "
+           "scale=%d covariance=%d cache=%d counts=%d duplicate=%d order=%d "
+           ": %s\n",
+           centre_ok, dir_ok, anchor_ok, residual_ok, rows_unchanged, scale_ok,
+           cov_ok, cache_ok, counts_ok, dup_ok, order_ok,
+           pass ? "PASS" : "FAIL");
+    fflush(stdout);
+    return pass;
+}
+
 bool runRigidCorrectionContractTest()
 {
     auto cpu = torch::TensorOptions().dtype(torch::kFloat);
@@ -1498,11 +1903,14 @@ bool runRigidCorrectionContractTest()
         printf("[SyncContract] GPU centre SKIPPED (no CUDA device)\n");
     }
 
+    const bool gba_apply_pass = runGbaApplyContractTest();
     const bool pass = (worst_rec < 1e-5f) && (worst_dir < 1e-5f) &&
-                      (worst_anchor < 1e-5f) && (!gpu_ran || worst_gpu < 1e-4f);
+                      (worst_anchor < 1e-5f) && (!gpu_ran || worst_gpu < 1e-4f) &&
+                      gba_apply_pass;
     printf("[SyncContract] worst recover=%.2e direction=%.2e anchor=%.2e "
-           "gpu_centre=%.2e | old expression error=%.2e | %s\n",
+           "gpu_centre=%.2e | old expression error=%.2e | gba_apply=%s | %s\n",
            worst_rec, worst_dir, worst_anchor, worst_gpu, old_dir,
+           gba_apply_pass ? "PASS" : "FAIL",
            pass ? "PASS (new entry)" : "FAIL (new entry)");
     fflush(stdout);
     return pass;
@@ -1779,6 +2187,7 @@ torch::Tensor GaussianModelLine::replaceTensorToOptimizer(torch::Tensor& tensor,
 
 void GaussianModelLine::prunePoints(torch::Tensor& mask)
 {
+    ensureGbaMetadata();   // size must match the pre-prune xyz_
     auto valid_points_mask = ~mask;
 
     // _prune_optimizer
@@ -1833,12 +2242,16 @@ void GaussianModelLine::prunePoints(torch::Tensor& mask)
 
     this->denom_ = this->denom_.index({valid_points_mask});
     this->max_radii2D_ = this->max_radii2D_.index({valid_points_mask});
+
+    this->ref_kf_id_ = this->ref_kf_id_.index({valid_points_mask});
+    this->coord_event_id_ = this->coord_event_id_.index({valid_points_mask});
 }
 
 void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
 {
     using namespace torch::indexing;
 
+    ensureGbaMetadata();   // size must match the pre-prune xyz_
     auto valid_points_mask = ~mask;
 
     // =====================================================
@@ -1928,6 +2341,11 @@ void GaussianModelLine::prunePointsWithLineAwareness(torch::Tensor& mask)
 
     this->max_radii2D_ =
         this->max_radii2D_.index({valid_points_mask});
+
+    this->ref_kf_id_ =
+        this->ref_kf_id_.index({valid_points_mask});
+    this->coord_event_id_ =
+        this->coord_event_id_.index({valid_points_mask});
 }
 
 
@@ -2127,7 +2545,8 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     torch::Tensor& new_exist_since_iter,
     torch::Tensor& new_is_line,
     torch::Tensor& new_line_dir_w,
-    torch::Tensor& new_xyz_init  // 🌟 新增参数：新点的参考位置
+    torch::Tensor& new_xyz_init, // 🌟 新增参数：新点的参考位置
+    const torch::Tensor& new_ref_kf_ids
 )
 {
     // ================= [DEBUG PROBE: 强制打印到错误流] =================
@@ -2141,6 +2560,9 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     // 解决 "Expected size 4 but got size N" 问题
     // =========================================================
     int64_t N = new_xyz.size(0); // 以 XYZ 的点数为基准
+    // Must run BEFORE xyz_ is extended: at this point xyz_.size(0) is the old
+    // row count that ref_kf_id_ / coord_event_id_ must match.
+    ensureGbaMetadata();
 
     // 🌟 核心防御代码：确保所有影子属性维度对齐
     //TORCH_CHECK(new_is_line.size(0) == n_new, "Mismatch in new_is_line");
@@ -2282,9 +2704,31 @@ void GaussianModelLine::densificationPostfixWithLineAwareness(
     this->line_dir_w_ = torch::cat({this->line_dir_w_, new_line_dir_w.to(device_type_)}, 0);
     this->exist_since_iter_ = torch::cat({this->exist_since_iter_, new_exist_since_iter.to(device_type_)}, 0);
 
+    // ---- deformation metadata (geom-sync-v3) ----------------------------
+    const auto lo = torch::TensorOptions().dtype(torch::kLong).device(device_type_);
+    torch::Tensor add_ref;
+    if (new_ref_kf_ids.defined())
+    {
+        add_ref = new_ref_kf_ids.to(device_type_).to(torch::kLong).flatten();
+        TORCH_CHECK(add_ref.size(0) == N,
+                    "new_ref_kf_ids has ", add_ref.size(0),
+                    " rows, expected ", N);
+    }
+    else
+    {
+        add_ref = torch::full({N}, -1LL, lo);
+    }
+    this->ref_kf_id_ = torch::cat({this->ref_kf_id_, add_ref}, 0);
+    this->coord_event_id_ = torch::cat(
+        {this->coord_event_id_,
+         torch::full({N}, static_cast<long long>(last_applied_gba_event_), lo)},
+        0);
+
     // 🌟 拼接后再次确认全局同步
     TORCH_CHECK(this->xyz_.size(0) == this->xyz_init_.size(0), "Global xyz and xyz_init out of sync!");
     TORCH_CHECK(this->xyz_.size(0) == this->is_line_.size(0), "Global xyz and is_line out of sync!");
+    TORCH_CHECK(this->xyz_.size(0) == this->ref_kf_id_.size(0), "Global xyz and ref_kf_id out of sync!");
+    TORCH_CHECK(this->xyz_.size(0) == this->coord_event_id_.size(0), "Global xyz and coord_event_id out of sync!");
 
     // =====================================================
     // D. Reset auxiliary buffers (size must match new total)
@@ -3290,6 +3734,9 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     // 逻辑同上
     auto xyz_init_sel = this->xyz_init_.index({selected_mask});
     auto new_xyz_init = xyz_init_sel.index({combined_indices});
+    ensureGbaMetadata();
+    auto new_ref_kf_ids =
+        this->ref_kf_id_.index({selected_mask}).index({combined_indices});
 
     // 3. [增加维度终检] 防止 Postfix 因为维度不一致而 crash
     TORCH_CHECK(new_xyz.size(0) == new_xyz_init.size(0), "new_xyz and new_xyz_init size mismatch!");
@@ -3300,7 +3747,7 @@ void GaussianModelLine::densifyAndSplitWithLineAwareness(
     this->densificationPostfixWithLineAwareness(
         new_xyz, new_features_dc, new_features_rest, new_opacity,
         new_scaling, new_rotation, new_exist_iter,
-        new_is_line, new_line_dir_w, new_xyz_init
+        new_is_line, new_line_dir_w, new_xyz_init, new_ref_kf_ids
     );
 
     // =========================================================================
@@ -3450,6 +3897,9 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     // 在该函数内部获取被选中点的初始位置
     auto xyz_init_sel = this->xyz_init_.index({selected_mask});
     auto new_xyz_init = xyz_init_sel.index({combined_indices}); // 对应生成的 new_xyz
+    ensureGbaMetadata();
+    auto new_ref_kf_ids =
+        this->ref_kf_id_.index({selected_mask}).index({combined_indices});
 
     // ================= [DEBUG PROBE 3] =================
     // std::cerr << "[DEBUG FLOW] Inside densifyAndClone. Prepared tensors:" << std::endl;
@@ -3462,7 +3912,7 @@ void GaussianModelLine::densifyAndCloneWithLineAwareness(
     this->densificationPostfixWithLineAwareness(
         new_xyz, new_features_dc, new_features_rest, new_opacity,
         new_scaling, new_rotation, new_exist_iter,
-        new_is_line, new_line_dir_w, new_xyz_init
+        new_is_line, new_line_dir_w, new_xyz_init, new_ref_kf_ids
     );
 }
 
@@ -4557,6 +5007,17 @@ void GaussianModelLine::loadPly(std::filesystem::path ply_path)
         rot_vector.data(), {num_points, 4},
         torch::TensorOptions().dtype(torch::kFloat32)).to(device_type_);
 
+    // A PLY carries no anchor metadata: report every row as unknown instead of
+    // inventing an association.
+    this->ref_kf_id_ = torch::full(
+        {num_points}, -1LL,
+        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+    this->coord_event_id_ = torch::zeros(
+        {num_points},
+        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+    std::cerr << "[RefKf] loadPly: all " << num_points
+              << " rows have unknown reference keyframes\n";
+
     GAUSSIAN_MODEL_TENSORS_TO_VEC_LINE
 
     this->active_sh_degree_ = this->max_sh_degree_;
@@ -4587,6 +5048,7 @@ void fgmHashTensor(const torch::Tensor& t, std::uint64_t& h)
 
 void GaussianModelLine::saveInitCheckpoint(const std::filesystem::path& path)
 {
+    ensureGbaMetadata();
     // Order is part of the format: do not reorder without bumping the reader.
     std::vector<torch::Tensor> ts = {
         xyz_.detach().to(torch::kCPU).contiguous(),
@@ -4598,6 +5060,8 @@ void GaussianModelLine::saveInitCheckpoint(const std::filesystem::path& path)
         is_line_.detach().to(torch::kCPU).contiguous(),
         line_dir_w_.detach().to(torch::kCPU).contiguous(),
         xyz_init_.detach().to(torch::kCPU).contiguous(),
+        ref_kf_id_.detach().to(torch::kCPU).contiguous(),
+        coord_event_id_.detach().to(torch::kCPU).contiguous(),
     };
     std::filesystem::create_directories(path.parent_path());
     torch::save(ts, path.string());
@@ -4613,8 +5077,10 @@ std::size_t GaussianModelLine::restoreInitCheckpoint(const std::filesystem::path
                   << " : " << e.what() << std::endl;
         return 0;
     }
-    if (ts.size() != 9) {
-        std::cerr << "[FGM] restoreInitCheckpoint: expected 9 groups, got "
+    // 9 = legacy format; 10/11 add the ref-keyframe and coordinate-version
+    // tensors. Accept all three so old checkpoints stay readable.
+    if (ts.size() < 9) {
+        std::cerr << "[FGM] restoreInitCheckpoint: expected >=9 groups, got "
                   << ts.size() << std::endl;
         return 0;
     }
@@ -4641,6 +5107,17 @@ std::size_t GaussianModelLine::restoreInitCheckpoint(const std::filesystem::path
     invalidateLineCache();   // in-place copy_(): pointer does not change
     put(xyz_init_, ts[8], "xyz_init");
     invalidateLineCache();   // in-place copy_(): pointer does not change
+    if (ts.size() > 9 && ts[9].numel() == xyz_.size(0)) {
+        ensureGbaMetadata();
+        put(ref_kf_id_, ts[9], "ref_kf_id");
+    } else {
+        ensureGbaMetadata();
+        ref_kf_id_.fill_(-1);
+    }
+    if (ts.size() > 10 && ts[10].numel() == xyz_.size(0)) {
+        ensureGbaMetadata();
+        put(coord_event_id_, ts[10], "coord_event_id");
+    }
     return ts.size();
 }
 
@@ -5029,6 +5506,7 @@ void GaussianModelLine::keepSubset(const torch::Tensor& keep_mask)
     auto m = keep_mask.to(xyz_.device()).to(torch::kBool).flatten();
     TORCH_CHECK(m.size(0) == xyz_.size(0),
                 "keepSubset: mask/parameter size mismatch");
+    ensureGbaMetadata();   // size must still equal the pre-subset xyz_
     auto sel = [&](torch::Tensor& t) {
         if (t.defined() && t.size(0) == m.size(0))
             t = t.index_select(0, torch::nonzero(m).flatten()).contiguous();
@@ -5052,6 +5530,8 @@ void GaussianModelLine::keepSubset(const torch::Tensor& keep_mask)
     sel(exist_since_iter_);
     sel(xyz_gradient_accum_);
     sel(denom_);
+    sel(ref_kf_id_);
+    sel(coord_event_id_);
     invalidateLineCache();          // topology changed
     rebuildParamVectors();
 }
@@ -5119,6 +5599,7 @@ void GaussianModelLine::creationLogAppend(const std::string& kind,
 // archive (loadable from Python as well).
 void GaussianModelLine::saveFullSnapshot(const std::string& path)
 {
+    ensureGbaMetadata();
     const auto cpu = [](const torch::Tensor& t) {
         return t.defined() ? t.detach().to(torch::kCPU).contiguous() : torch::Tensor();
     };
@@ -5127,6 +5608,7 @@ void GaussianModelLine::saveFullSnapshot(const std::string& path)
         cpu(opacity_), cpu(rotation_), cpu(is_line_), cpu(line_dir_w_),
         cpu(xyz_init_), cpu(max_radii2D_), cpu(xyz_gradient_accum_),
         cpu(denom_), cpu(exist_since_iter_), cpu(point_ids_),
+        cpu(ref_kf_id_), cpu(coord_event_id_),
     };
     std::filesystem::path p(path);
     if (p.has_parent_path()) std::filesystem::create_directories(p.parent_path());
@@ -5166,6 +5648,9 @@ std::size_t GaussianModelLine::loadFullSnapshot(const std::string& path)
     if (ts.size() > 11) { denom_ = ts[11].to(device_type_); }
     if (ts.size() > 12) { exist_since_iter_ = ts[12].to(device_type_); }
     if (ts.size() > 13) { point_ids_ = ts[13].to(device_type_); }
+    if (ts.size() > 14) { ref_kf_id_ = ts[14].to(device_type_).to(torch::kLong); }
+    if (ts.size() > 15) { coord_event_id_ = ts[15].to(device_type_).to(torch::kLong); }
+    ensureGbaMetadata();
     invalidateLineCache();
     rebuildParamVectors();
     return static_cast<std::size_t>(xyz_.size(0));

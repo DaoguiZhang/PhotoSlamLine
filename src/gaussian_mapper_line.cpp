@@ -571,6 +571,10 @@ void GaussianMapperLine::run()
                     point3D.color_(0) = color(0);
                     point3D.color_(1) = color(1);
                     point3D.color_(2) = color(2);
+                    // Deformation anchor: the MapPoint's reference keyframe.
+                    ORB_SLAM3::KeyFrame* pRefKF = pMP->GetReferenceKeyFrame();
+                    point3D.ref_kf_id_ =
+                        pRefKF ? static_cast<long long>(pRefKF->mnId) : -1LL;
                     scene_->cachePoint3D(pMP->mnId, point3D);
                 }
                 //Sample Point 3d from vpMPLs
@@ -642,6 +646,10 @@ void GaussianMapperLine::run()
                         // 【核心修正】必须设置方向和采样步长等元数据
                         point3D.line_dir_ = line_dir;       // 传入方向，用于初始化 Rotation
                         point3D.sample_step_ = sample_step; // 传入步长，用于初始化 Scale_parallel
+                        // Deformation anchor of the source MapLine.
+                        ORB_SLAM3::KeyFrame* pRefKF = pML->GetReferenceKeyFrame();
+                        point3D.ref_kf_id_ =
+                            pRefKF ? static_cast<long long>(pRefKF->mnId) : -1LL;
                         // 如果 MapLine 能提供 ref_depth 或 ref_focal 更好，否则使用默认值
                         // point3D.ref_depth_z_ = ...;
                         // point3D.ref_focal_ = ...;
@@ -1852,7 +1860,8 @@ void GaussianMapperLine::budgetInit()
               << " dir=" << budget_dir_ << std::endl;
 }
 
-bool GaussianMapperLine::applyInactiveBudget(torch::Tensor& pts, torch::Tensor& cols)
+bool GaussianMapperLine::applyInactiveBudget(torch::Tensor& pts, torch::Tensor& cols,
+                                           torch::Tensor* ref_kf_ids)
 {
     budgetInit();
     const long long N = pts.defined() ? pts.size(0) : 0;
@@ -1914,6 +1923,8 @@ bool GaussianMapperLine::applyInactiveBudget(torch::Tensor& pts, torch::Tensor& 
     auto mdev = mask.to(pts.device());
     pts = pts.index({mdev}).contiguous();
     if (cols.defined()) cols = cols.index({mdev}).contiguous();
+    if (ref_kf_ids && ref_kf_ids->defined() && ref_kf_ids->size(0) == N)
+        *ref_kf_ids = ref_kf_ids->to(mdev.device()).index({mdev}).contiguous();
     return true;                                      // tensors filtered
 }
 
@@ -4160,25 +4171,10 @@ void GaussianMapperLine::combineMappingOperations()
 
         case ORB_SLAM3::MappingOperation::OprType::GlobalBA:
         {
-            // geom-sync-v2 里程碑 3: CONSUME AND RECORD ONLY.
-            // The deformation is deliberately NOT applied here yet: applying a
-            // non-rigid GBA correction correctly requires the per-Gaussian
-            // deformation anchor (ref_kf_id_), which does not exist yet. This
-            // stage proves the notification chain and the version checks.
-            static unsigned long s_last_gba_evt = 0;
-            static unsigned long s_applied = 0, s_dup = 0;
-            const unsigned long evt = opr.eventId();
-            const bool dup = (evt <= s_last_gba_evt);
-            if (dup) { ++s_dup; } else { s_last_gba_evt = evt; ++s_applied; }
-            int n_in_scene = 0;
-            for (const auto& e : opr.globalBAPoses())
-                if (scene_->getKeyframe(e.first)) ++n_in_scene;
-            printf("[SyncEvent] GlobalBA evt=%lu map=%lu kfs=%zu in_scene=%d "
-                   "prev_evt=%lu %s accepted=%lu duplicate=%lu\n",
-                   evt, opr.mapGen(), opr.globalBAPoses().size(), n_in_scene,
-                   dup ? s_last_gba_evt : (evt == 0 ? 0 : evt - 1),
-                   dup ? "DUPLICATE_REJECTED" : "ACCEPTED",
-                   s_applied, s_dup);
+            // The point-only mapper never owns line/ref-keyframe metadata, so
+            // it must not attempt a deformation. Log and reject.
+            printf("[GBA-Apply] evt=%lu map=%lu REJECTED "
+                   "reason=point_only_mapper\n", opr.eventId(), opr.mapGen());
             fflush(stdout);
         }
         break;
@@ -4288,8 +4284,22 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             if (initial_mapped_ && points.size() >= 30) {
                 torch::NoGradGuard no_grad;
                 std::unique_lock<std::mutex> lock_render(mutex_render_);
+                // Deformation anchors, parallel to the position triples. A size
+                // mismatch is reported as unknown (-1) rather than guessed.
+                const int64_t n_pts = static_cast<int64_t>(points.size() / 3);
+                const auto& ref_ids = opr.associatedMapPointRefKfIds();
+                torch::Tensor ref_tensor;
+                if (static_cast<int64_t>(ref_ids.size()) == n_pts) {
+                    ref_tensor = torch::from_blob(
+                        reinterpret_cast<std::int64_t*>(
+                            const_cast<long long*>(ref_ids.data())), {n_pts},
+                        torch::TensorOptions().dtype(torch::kLong))
+                        .clone().to(device_type_);
+                }
+                const int64_t n_before = gaussians_->xyz_.size(0);
                 // 这里的 increasePcd 会把 is_line 设为 false
-                gaussians_->increasePcd(points, colors, getIteration());
+                gaussians_->increasePcd(points, colors, getIteration(), ref_tensor);
+                lm_created_rows_total_ += gaussians_->xyz_.size(0) - n_before;
             }
 
             // =========================================================
@@ -4371,6 +4381,11 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         // Sample Step (可以使用默认值，或者如果在 Atlas 中存了也可以读取)
                         //p.sample_step_ = 0.1f; // 需与 LocalMapping 中的采样步长一致
                         p.sample_step_ = opt_params_.line_sample_step_;
+                        // Deformation anchor of the source MapLine's reference KF.
+                        const auto& line_ref_ids =
+                            opr.associatedLineSampledPointRefKfIds();
+                        p.ref_kf_id_ = (i < line_ref_ids.size())
+                            ? line_ref_ids[i] : -1LL;
 
                         new_line_sample_points.push_back(p);
 
@@ -4579,25 +4594,124 @@ void GaussianMapperLine::combineMappingOperations_withLine()
 
         case ORB_SLAM3::MappingOperation::OprType::GlobalBA:
         {
-            // geom-sync-v2 里程碑 3: CONSUME AND RECORD ONLY.
-            // The deformation is deliberately NOT applied here yet: applying a
-            // non-rigid GBA correction correctly requires the per-Gaussian
-            // deformation anchor (ref_kf_id_), which does not exist yet. This
-            // stage proves the notification chain and the version checks.
-            static unsigned long s_last_gba_evt = 0;
-            static unsigned long s_applied = 0, s_dup = 0;
+            // geom-sync-v3: APPLY the GBA correction to existing Gaussians.
+            // The callback is a pure correction: it must never seed, densify,
+            // clone, split or prune. The row count is asserted below.
+            const auto t_start = std::chrono::steady_clock::now();
             const unsigned long evt = opr.eventId();
-            const bool dup = (evt <= s_last_gba_evt);
-            if (dup) { ++s_dup; } else { s_last_gba_evt = evt; ++s_applied; }
-            int n_in_scene = 0;
+            const unsigned long prev_evt = gaussians_
+                ? gaussians_->lastAppliedGbaEvent() : last_applied_gba_event_;
+            const long long count_before =
+                gaussians_ ? gaussians_->xyz_.size(0) : 0;
+
+            ORB_SLAM3::Map* pCurrentMap =
+                pSLAM_->getAtlas()->GetCurrentMap();
+            const unsigned long cur_map_gen =
+                pCurrentMap ? static_cast<unsigned long>(pCurrentMap->GetId())
+                            : opr.mapGen();
+
+            if (evt == 0 || evt <= prev_evt)
+            {
+                printf("[GBA-Apply] evt=%lu map=%lu prev_evt=%lu REJECTED "
+                       "reason=stale_or_duplicate count=%lld\n",
+                       evt, opr.mapGen(), prev_evt, count_before);
+                fflush(stdout);
+                break;
+            }
+            if (opr.mapGen() != cur_map_gen)
+            {
+                printf("[GBA-Apply] evt=%lu map=%lu current_map=%lu REJECTED "
+                       "reason=map_generation count=%lld\n",
+                       evt, opr.mapGen(), cur_map_gen, count_before);
+                fflush(stdout);
+                break;
+            }
+            if (!initial_mapped_ || !gaussians_)
+            {
+                printf("[GBA-Apply] evt=%lu map=%lu REJECTED "
+                       "reason=model_not_initialised\n", evt, opr.mapGen());
+                fflush(stdout);
+                break;
+            }
+            if (sensor_type_ != RGBDLINE)
+            {
+                // Scoped limitation: this path implements the RGB-D SE(3)
+                // correction only. Mono Sim(3)/local-BA/newer SH stay on their
+                // existing paths.
+                printf("[GBA-Apply] evt=%lu map=%lu REJECTED "
+                       "reason=se3_rgbd_only sensor=%d\n", evt, opr.mapGen(),
+                       static_cast<int>(sensor_type_));
+                fflush(stdout);
+                break;
+            }
+
+            int n_in_scene = 0, n_scene_missing = 0;
+            double max_pose_mismatch = 0.0;
+            std::vector<std::pair<unsigned long, Sophus::SE3f>> deltas;
+            deltas.reserve(opr.globalBAPoses().size());
             for (const auto& e : opr.globalBAPoses())
-                if (scene_->getKeyframe(e.first)) ++n_in_scene;
-            printf("[SyncEvent] GlobalBA evt=%lu map=%lu kfs=%zu in_scene=%d "
-                   "prev_evt=%lu %s accepted=%lu duplicate=%lu\n",
+            {
+                // G maps OLD world -> NEW world for rows anchored at e.kf_id.
+                deltas.emplace_back(e.kf_id, e.Tcw_after.inverse() * e.Tcw_before);
+                std::shared_ptr<GaussianKeyframeLine> pkf =
+                    scene_->getKeyframe(e.kf_id);
+                if (!pkf)
+                {
+                    ++n_scene_missing;
+                    continue;
+                }
+                ++n_in_scene;
+                // The event's `before` must be the pose the scene still has.
+                // A large mismatch is reported; the event snapshot stays
+                // authoritative because it is immutable.
+                Sophus::SE3f d = pkf->getPosef().inverse() * e.Tcw_before;
+                max_pose_mismatch = std::max<double>(
+                    max_pose_mismatch,
+                    d.translation().norm() + d.so3().log().norm());
+            }
+
+            GaussianModelLine::GbaCorrectionStats stats;
+            {
+                std::unique_lock<std::mutex> lock_render(mutex_render_);
+                stats = gaussians_->applyGbaCorrections(deltas, evt);
+            }
+
+            // Scene keyframes adopt the final GBA poses (training views).
+            for (const auto& e : opr.globalBAPoses())
+            {
+                std::shared_ptr<GaussianKeyframeLine> pkf =
+                    scene_->getKeyframe(e.kf_id);
+                if (!pkf) continue;
+                pkf->setPose(
+                    e.Tcw_after.unit_quaternion().cast<double>(),
+                    e.Tcw_after.translation().cast<double>());
+                pkf->computeTransformTensors();
+            }
+
+            const long long count_after = gaussians_->xyz_.size(0);
+            const long long created_during_event = count_after - count_before;
+            TORCH_CHECK(count_after == count_before,
+                        "[GBA-Apply] correction changed the Gaussian count: ",
+                        count_before, " -> ", count_after);
+            last_applied_gba_event_ = evt;
+
+            const auto t_end = std::chrono::steady_clock::now();
+            const double sync_ms =
+                std::chrono::duration<double, std::milli>(t_end - t_start).count();
+            printf("[GBA-Apply] evt=%lu map=%lu kfs=%zu in_scene=%d "
+                   "deltas=%zu moved=%lld line_moved=%lld stale=%lld "
+                   "unassigned=%lld missing_event=%lld groups=%lld "
+                   "scene_missing=%d pose_mismatch_max=%.4f "
+                   "count_before=%lld count_after=%lld "
+                   "created_during_event=%lld lm_map_points_created=%lld "
+                   "sync_ms=%.1f APPLIED\n",
                    evt, opr.mapGen(), opr.globalBAPoses().size(), n_in_scene,
-                   dup ? s_last_gba_evt : (evt == 0 ? 0 : evt - 1),
-                   dup ? "DUPLICATE_REJECTED" : "ACCEPTED",
-                   s_applied, s_dup);
+                   deltas.size(), stats.moved_rows, stats.line_rows_moved,
+                   stats.stale_rows, stats.unassigned_rows,
+                   stats.missing_event_rows, stats.groups_applied,
+                   n_scene_missing, max_pose_mismatch, count_before,
+                   count_after, created_during_event, lm_created_rows_total_,
+                   sync_ms);
             fflush(stdout);
         }
         break;
@@ -5414,13 +5528,18 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
                 Twc.matrix(), device_type_).transpose(0, 1);
         transformPoints(points3D_valid, Twc_tensor);
         // Add new points to the cache
+        torch::Tensor ref_ids_valid = torch::full(
+            {points3D_valid.size(0)}, static_cast<long long>(pkf->fid_),
+            torch::TensorOptions().dtype(torch::kLong).device(device_type_));
         if (depth_cached_ == 0) {
             depth_cache_points_ = points3D_valid;
             depth_cache_colors_ = colors_valid;
+            depth_cache_ref_kf_ids_ = ref_ids_valid;
         }
         else {
             depth_cache_points_ = torch::cat({depth_cache_points_, points3D_valid}, /*dim=*/0);
             depth_cache_colors_ = torch::cat({depth_cache_colors_, colors_valid}, /*dim=*/0);
+            depth_cache_ref_kf_ids_ = torch::cat({depth_cache_ref_kf_ids_, ref_ids_valid}, /*dim=*/0);
         }
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }
@@ -5514,13 +5633,18 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
         transformPoints(points3D_valid, Twc_tensor);
 
         // Add new points to the cache
+        torch::Tensor ref_ids_valid = torch::full(
+            {points3D_valid.size(0)}, static_cast<long long>(pkf->fid_),
+            torch::TensorOptions().dtype(torch::kLong).device(device_type_));
         if (depth_cached_ == 0) {
             depth_cache_points_ = points3D_valid;
             depth_cache_colors_ = colors_valid;
+            depth_cache_ref_kf_ids_ = ref_ids_valid;
         }
         else {
             depth_cache_points_ = torch::cat({depth_cache_points_, points3D_valid}, /*dim=*/0);
             depth_cache_colors_ = torch::cat({depth_cache_colors_, colors_valid}, /*dim=*/0);
+            depth_cache_ref_kf_ids_ = torch::cat({depth_cache_ref_kf_ids_, ref_ids_valid}, /*dim=*/0);
         }
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }
@@ -5588,13 +5712,18 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
         transformPoints(points3D_valid, Twc_tensor);
 
         // Add new points to the cache
+        torch::Tensor ref_ids_valid = torch::full(
+            {points3D_valid.size(0)}, static_cast<long long>(pkf->fid_),
+            torch::TensorOptions().dtype(torch::kLong).device(device_type_));
         if (depth_cached_ == 0) {
             depth_cache_points_ = points3D_valid;
             depth_cache_colors_ = colors_valid;
+            depth_cache_ref_kf_ids_ = ref_ids_valid;
         }
         else {
             depth_cache_points_ = torch::cat({depth_cache_points_, points3D_valid}, /*dim=*/0);
             depth_cache_colors_ = torch::cat({depth_cache_colors_, colors_valid}, /*dim=*/0);
+            depth_cache_ref_kf_ids_ = torch::cat({depth_cache_ref_kf_ids_, ref_ids_valid}, /*dim=*/0);
         }
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }
@@ -5617,8 +5746,9 @@ void GaussianMapperLine::increasePcdByKeyframeInactiveGeoDensify(
         // batch through unchanged; R50 replaces it with a deterministic
         // hash-selected half of the SAME candidate pool.
         torch::Tensor pts = depth_cache_points_, cols = depth_cache_colors_;
-        applyInactiveBudget(pts, cols);
-        gaussians_->increasePcd(pts, cols, getIteration());
+        torch::Tensor refs = depth_cache_ref_kf_ids_;
+        applyInactiveBudget(pts, cols, &refs);
+        gaussians_->increasePcd(pts, cols, getIteration(), refs);
     }
 
 // auto end_timing = std::chrono::steady_clock::now();

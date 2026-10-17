@@ -98,8 +98,36 @@ public:
         std::map<point3D_id_t, Point3D> pcd,
         const float spatial_lr_scale);
     void increasePcd(const std::vector<Point3D>& new_points, const int iteration);
-    void increasePcd(std::vector<float> points, std::vector<float> colors, const int iteration);
-    void increasePcd(torch::Tensor& new_point_cloud, torch::Tensor& new_colors, const int iteration);
+    // ref_kf_ids is optional: one anchor keyframe id per new row. Empty/undefined
+    // means "unknown" (-1) and is reported, never guessed.
+    void increasePcd(std::vector<float> points, std::vector<float> colors,
+                     const int iteration,
+                     const torch::Tensor& ref_kf_ids = torch::Tensor());
+    void increasePcd(torch::Tensor& new_point_cloud, torch::Tensor& new_colors,
+                     const int iteration,
+                     const torch::Tensor& ref_kf_ids = torch::Tensor());
+
+    // ---- geom-sync-v3: apply a real LOOP/GBA correction to existing rows ----
+    // world_deltas[i] = T_after^-1 * T_before maps the OLD world frame to the
+    // NEW one for every Gaussian anchored at kf id world_deltas[i].first.
+    // Ordinary rows: centre/rotation/anchor rigidly moved. Line rows also get
+    // line_dir_w_ rotated. Scaling is untouched (SE(3), no scale). Adam: the
+    // xyz first moment is rotated, the second moment is left in place.
+    struct GbaCorrectionStats
+    {
+        long long moved_rows = 0;
+        long long line_rows_moved = 0;    // subset of moved_rows with is_line_
+        long long stale_rows = 0;         // coord_event_id_ >= event id
+        long long unassigned_rows = 0;    // ref_kf_id_ < 0
+        long long missing_event_rows = 0; // ref kf absent from the payload
+        long long groups_applied = 0;
+    };
+    GbaCorrectionStats applyGbaCorrections(
+        const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+        unsigned long event_id);
+    unsigned long lastAppliedGbaEvent() const { return last_applied_gba_event_; }
+    torch::Tensor refKfIds() const { return ref_kf_id_; }
+    torch::Tensor coordEventIds() const { return coord_event_id_; }
 
     void applyScaledTransformation(
         const float s = 1.0,
@@ -153,8 +181,14 @@ public:
         // -------- 新增：line-aware --------
         torch::Tensor& new_is_line,        // [N_new]
         torch::Tensor& new_line_dir_w,      // [N_new,3]
-        torch::Tensor& new_xyz_init         // [N_new, 3]
+        torch::Tensor& new_xyz_init,        // [N_new, 3]
+        // Optional deformation anchors [N_new] int64; empty -> -1 (unknown).
+        const torch::Tensor& new_ref_kf_ids = torch::Tensor()
     );
+
+    // Keep ref_kf_id_ / coord_event_id_ aligned with xyz_ (creates them if a
+    // legacy checkpoint or PLY path did not provide them).
+    void ensureGbaMetadata();
 
     torch::Tensor computeLineLevelPruneMaskGPU(
         const torch::Tensor& base_prune_mask,
@@ -255,6 +289,14 @@ public:
     torch::Tensor is_line_;   // [P] bool, check whether point is line sampled or not
     // 可选：每个 line Gaussian 的方向（世界系）
     torch::Tensor line_dir_w_;  // N x 3, float
+    // Deformation anchor per Gaussian (keyframe id, -1 = unknown). Not a
+    // deduplication key: clone/split inherit it and keep the topology legal.
+    torch::Tensor ref_kf_id_;     // [N] int64
+    // Coordinate version: last applied GBA event id at row creation / last
+    // correction. Guards new points created in already-corrected coordinates
+    // from a replayed old event.
+    torch::Tensor coord_event_id_; // [N] int64
+    unsigned long last_applied_gba_event_ = 0;
 
     // --- Stage-1 performance: cached line subset -----------------------------
     // Boolean-mask indexing on CUDA reads the true-count back from the device,

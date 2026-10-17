@@ -69,5 +69,9 @@ public:
 
     float sample_step_ = -1.0f;                // 线采样步长（世界坐标）
 
+    // Deformation anchor: keyframe whose pose was current when this point was
+    // created. -1 means unknown; consumers report it instead of guessing.
+    long long ref_kf_id_ = -1;
+
     double error_;
 };

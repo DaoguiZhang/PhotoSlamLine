@@ -4674,7 +4674,14 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
                 for (std::size_t i = 0; i < allkfs.size(); ++i) {
                     KeyFrame* pk = allkfs[i];
                     if (pk == nullptr || pk->isBad()) continue;
-                    gba_opr.addGlobalBAPose(pk->mnId, pk->GetPose());
+                    // before = the pose this keyframe had when GBA started.
+                    // mTcwBefGBA is written for every keyframe the write-back
+                    // visits; keyframes that were not corrected keep
+                    // mnBAGlobalForKF != nLoopKF, so before == after for them.
+                    const Sophus::SE3f after = pk->GetPose();
+                    const Sophus::SE3f before =
+                        (pk->mnBAGlobalForKF == nLoopKF) ? pk->mTcwBefGBA : after;
+                    gba_opr.addGlobalBAPose(pk->mnId, before, after);
                 }
                 mpAtlas->pushMappingOperation(gba_opr);
             }
@@ -4982,7 +4989,14 @@ void LoopClosing::RunGlobalBundleAdjustmentWithLine(Map* pActiveMap, unsigned lo
                 for (std::size_t i = 0; i < allkfs.size(); ++i) {
                     KeyFrame* pk = allkfs[i];
                     if (pk == nullptr || pk->isBad()) continue;
-                    gba_opr.addGlobalBAPose(pk->mnId, pk->GetPose());
+                    // before = the pose this keyframe had when GBA started.
+                    // mTcwBefGBA is written for every keyframe the write-back
+                    // visits; keyframes that were not corrected keep
+                    // mnBAGlobalForKF != nLoopKF, so before == after for them.
+                    const Sophus::SE3f after = pk->GetPose();
+                    const Sophus::SE3f before =
+                        (pk->mnBAGlobalForKF == nLoopKF) ? pk->mTcwBefGBA : after;
+                    gba_opr.addGlobalBAPose(pk->mnId, before, after);
                 }
                 mpAtlas->pushMappingOperation(gba_opr);
             }
