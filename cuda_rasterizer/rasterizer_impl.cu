@@ -268,6 +268,61 @@ struct RasterProf {
 };
 static RasterProf g_raster_prof;
 
+// ---------------------------------------------------------------------------
+// raster-perf-v6: rasteriser CALL COUNTERS (PHOTO_SLAM_RASTER_CALLTRACE=1).
+//
+// The open question from v5 is "how many rasteriser calls does ONE optimizer
+// update cost", because the 5000-step difference (~2.7 ms/step) is an order of
+// magnitude larger than one backward kernel launch at the same scale (~0.2 ms).
+// This answers it by counting only.
+//
+// Deliberately counters and nothing else: no CUDA events, no host
+// synchronisation, no allocation. Enabling it cannot change the shape of the
+// kernel timeline. With the gate off every site is one not-taken branch.
+// ---------------------------------------------------------------------------
+struct RasterCallTrace {
+	bool on = (std::getenv("PHOTO_SLAM_RASTER_CALLTRACE") != nullptr);
+	long long fwd_calls = 0;   // Rasterizer::forward invocations
+	long long bwd_calls = 0;   // Rasterizer::backward invocations
+	long long fwd_render = 0;  // FORWARD::render invocations
+	long long bwd_render = 0;  // BACKWARD::render invocations
+	int last_P = 0, last_W = 0, last_H = 0, last_D = 0;  // last rasteriser dims
+};
+RasterCallTrace g_rast_ct;
+
+// Dims of the most recent rasteriser call, so the trace line can state what the
+// call counts refer to (Gaussian count, resolution, SH degree).
+void RasterCallTraceDims(int* out) { out[0] = g_rast_ct.last_P; out[1] = g_rast_ct.last_W; out[2] = g_rast_ct.last_H; out[3] = g_rast_ct.last_D; }
+
+// Launch counters are free globals so forward.cu / backward.cu (separate
+// translation units) can bump them with a plain extern declaration. This is the
+// count that exposes EXTRA launches (self-check / golden), which the entry-point
+// counters above would hide.
+long long g_rast_ct_fwd_launch = 0;
+long long g_rast_ct_bwd_launch = 0;
+int g_rast_ct_on = 0;
+
+void RasterCallTraceReset()
+{
+	g_rast_ct.fwd_calls = g_rast_ct.bwd_calls = 0;
+	g_rast_ct.fwd_render = g_rast_ct.bwd_render = 0;
+	g_rast_ct_fwd_launch = g_rast_ct_bwd_launch = 0;
+}
+
+// out[0..5] = fwd_calls, bwd_calls, fwd_render, bwd_render, fwd_launch, bwd_launch
+void RasterCallTraceGet(long long* out)
+{
+	out[0] = g_rast_ct.fwd_calls;
+	out[1] = g_rast_ct.bwd_calls;
+	out[2] = g_rast_ct.fwd_render;
+	out[3] = g_rast_ct.bwd_render;
+	out[4] = g_rast_ct_fwd_launch;
+	out[5] = g_rast_ct_bwd_launch;
+}
+
+int RasterCallTraceOn() { return g_rast_ct.on ? 1 : 0; }
+
+
 int CudaRasterizer::Rasterizer::forward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
@@ -296,6 +351,12 @@ int CudaRasterizer::Rasterizer::forward(
 
 	g_raster_prof.gate(P);
 	g_raster_prof.mark(0);
+	if (g_rast_ct.on) {
+		++g_rast_ct.fwd_calls;
+		g_rast_ct_on = 1;
+		g_rast_ct.last_P = P; g_rast_ct.last_W = width; g_rast_ct.last_H = height;
+		g_rast_ct.last_D = D;
+	}
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P);
@@ -399,6 +460,7 @@ int CudaRasterizer::Rasterizer::forward(
 	g_raster_prof.mark(5);
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
+	if (g_rast_ct.on) ++g_rast_ct.fwd_render;
 	FORWARD::render(
 		tile_grid, block,
 		imgState.ranges,
@@ -450,6 +512,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_drot)
 {
 	g_raster_prof.mark(7);
+	if (g_rast_ct.on) ++g_rast_ct.bwd_calls;
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
 	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
@@ -469,6 +532,7 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
+	if (g_rast_ct.on) ++g_rast_ct.bwd_render;
 	BACKWARD::render(
 		tile_grid,
 		block,

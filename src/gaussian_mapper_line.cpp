@@ -33,6 +33,11 @@
 
 // defined in cuda_rasterizer/backward.cu
 void SetRasterBackend(int b);
+// raster-perf-v6 call-trace hooks (cuda_rasterizer/rasterizer_impl.cu)
+void RasterCallTraceReset();
+void RasterCallTraceGet(long long* out);
+void RasterCallTraceDims(int* out);
+int RasterBackendGet();
 
 namespace {
 // Line structural-loss is computed every N iterations. Default 1 (every step):
@@ -1940,6 +1945,29 @@ void GaussianMapperLine::recordTrainStep()
         budgetInit();
         if (budget_step_out_.is_open())
             budget_step_out_ << getIteration() << ",train," << budget_keep_frac_ << '\n';
+    }
+    // ------------------------------------------------------------------
+    // raster-perf-v6: per-optimizer-update rasteriser call trace.
+    // Counters only (no CUDA events, no host sync), so enabling this does not
+    // change the kernel timeline. OFF in formal performance runs.
+    // ------------------------------------------------------------------
+    static const bool trace_calls =
+        (std::getenv("PHOTO_SLAM_RASTER_CALLTRACE") != nullptr);
+    if (trace_calls)
+    {
+        long long c[6] = {0, 0, 0, 0, 0, 0};
+        int d[4] = {0, 0, 0, 0};
+        RasterCallTraceGet(c);
+        RasterCallTraceDims(d);
+        if (c[0] || c[1])
+            printf("[CallTrace] iter=%lu fwd_calls=%lld bwd_calls=%lld "
+                   "fwd_render=%lld bwd_render=%lld fwd_launch=%lld "
+                   "bwd_launch=%lld P=%d sh=%d res=%dx%d backend=%s\n",
+                   (unsigned long)getIteration(), c[0], c[1], c[2], c[3], c[4],
+                   c[5], d[0], d[3], d[1], d[2],
+                   RasterBackendGet() == 0 ? "A"
+                                           : (RasterBackendGet() == 1 ? "B" : "C"));
+        RasterCallTraceReset();
     }
     // Unified snapshot trigger: fires for step 0 / 100 / 9000 / 20000 whether the
     // step was executed by trainForOneIterationErrorGuided() or

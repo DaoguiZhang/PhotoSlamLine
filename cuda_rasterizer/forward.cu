@@ -11,6 +11,12 @@
 
 #include "forward.h"
 #include "auxiliary.h"
+
+// raster-perf-v6: launch counter, defined in rasterizer_impl.cu. Counts the
+// ACTUAL forward kernel launches so extra diagnostic launches cannot hide.
+extern long long g_rast_ct_fwd_launch;
+extern int g_rast_ct_on;
+
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
@@ -386,6 +392,7 @@ void FORWARD::render(
 	const float* bg_color,
 	float* out_color)
 {
+	if (g_rast_ct_on) ++g_rast_ct_fwd_launch;
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
 		point_list,

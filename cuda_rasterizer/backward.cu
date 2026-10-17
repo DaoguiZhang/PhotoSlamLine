@@ -1062,12 +1062,17 @@ renderCUDA_golden(
 // frozen process can compare A and C on the SAME scene, init and schedule. -1 =
 // not pinned -> derive once from PHOTO_SLAM_RASTER_BACKEND (default A).
 int g_raster_backend = -1;
-void SetRasterBackend(int b) {
-	g_raster_backend = b;
+// raster-perf-v6: launch counter, defined in rasterizer_impl.cu.
+extern long long g_rast_ct_bwd_launch;
+extern int g_rast_ct_on;
+void SetRasterBackend(int b) {	g_raster_backend = b;
 	printf("[RasterBackendPin] condition pinned to %s\n",
 	       b == 0 ? "A" : (b == 1 ? "B" : "C"));
 	fflush(stdout);
 }
+// raster-perf-v6: read the backend actually in force (pin or env), for the
+// per-optimizer-update call trace.
+int RasterBackendGet() { return g_raster_backend < 0 ? 0 : g_raster_backend; }
 
 void BACKWARD::render(
 	const dim3 grid, const dim3 block,
@@ -1114,6 +1119,7 @@ void BACKWARD::render(
 	const int backend = g_raster_backend;
 
 	auto launch = [&](int b) {
+		if (g_rast_ct_on) ++g_rast_ct_bwd_launch;
 		if (b == 1)
 			renderCUDA_conv<NUM_CHANNELS, false> << <grid, block >> >(
 				ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
