@@ -81,3 +81,19 @@ PHOTO_SLAM_GBA_RECOVERY_VIEWS=24 \
 - 限制：单事件、单序列；24 固定评价视角；无深度输出；LPIPS 需 CPU
   （`scripts/lpips_gba_recovery.py --device cpu`）；单参考 KF 刚性近似。
 - 不再扫描比例/权重，不新增模块追求正结果。
+
+## office0 四组在线对照（本轮）
+
+- 四条件：P_ref/P_fast（同仓库 `USE_LINE_GAUSSIAN=0` 纯点构建，`TrackRGBD`+`LINE_MODE=0`）
+  × A/C 后端；L_ref/L_fast（线构建，`LINE_MODE=2`，结构损失**按权重**置 0）× A/C。
+  四组共用同一 `gaussian_quad.yaml`；GBA 形变保持默认关闭。
+- 3 轮交错串行（R1 P_ref→P_fast→L_ref→L_fast；R2 反序；R3 交叉），12/12 exit 0。
+- 结果：渲染器在 L 上 mapping −32.0±3.4 s（−24.5%）、墙钟 −29.7±4.1 s（−19%），代价 PSNR −0.34±0.22 dB；
+  在 P 上无可测收益。线 vs 点：+3.1~3.2 dB / SSIM +0.014 / LPIPS −0.026，代价 2.2× 墙钟、2.4× 更新数；
+  ATE 差异 ≤0.5 mm（噪声级）。
+- 纯点基线身份：上游 `/workspace/code/Photo-SLAM`（无线符号，树哈希 `82c3cc06…`）已核实但未参与比较；
+  本轮 P 为同仓库纯点构建 `P_ro`，不称原版等价。关键：RGB-D 原先只走 `TrackRGBDWithLine`，
+  仅 `LINE_MODE=0` 不是纯点前端。
+- 报告 `reports/quad_office0_report.md`；一条命令 `ROUNDS=3 ./scripts/quad_office0.sh`；
+  产物在 `results/quad_office0/`（已 gitignore，含 `provenance.txt`/`summary.md`/`per_run.csv`）。
+- 交付形态：源码/脚本入 Git；二进制与结果独立归档，不再提交到源码 Git。

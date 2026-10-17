@@ -997,6 +997,23 @@ void GaussianMapperLine::run()
     std::cerr << "[Gaussian Mapper] Total Mapping Time: " << total_time_seconds << " s (" 
               << total_time_minutes << " mins)" << std::endl;
     std::cerr << "[Gaussian Mapper] Total Iterations: " << getIteration() << std::endl;
+    // Quad comparison telemetry: identical fields to the point build.
+    long long quad_line_gaussians = 0;
+    if (gaussians_ && gaussians_->is_line_.defined() && gaussians_->is_line_.numel() > 0)
+        quad_line_gaussians = gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>();
+    std::cerr << "[QuadMetrics] optimizer_steps=" << frozen_opt_steps_
+              << " gaussians=" << (gaussians_ ? gaussians_->xyz_.size(0) : 0)
+              << " line_gaussians=" << quad_line_gaussians
+              << " kfs=" << scene_->keyframes().size()
+              << " mapping_seconds=" << total_time_seconds << std::endl;
+    {
+        std::ofstream quad_csv(result_dir_ / "quad_metrics.txt");
+        quad_csv << "optimizer_steps=" << frozen_opt_steps_ << "\n"
+                 << "gaussians=" << (gaussians_ ? gaussians_->xyz_.size(0) : 0) << "\n"
+                 << "line_gaussians=" << quad_line_gaussians << "\n"
+                 << "kfs=" << scene_->keyframes().size() << "\n"
+                 << "mapping_seconds=" << total_time_seconds << "\n";
+    }
     std::cerr << "=====================================================" << std::endl;
 
     // (可选) 将时间写入 txt 文件，方便后续跑批量实验时写 Python 脚本自动提取

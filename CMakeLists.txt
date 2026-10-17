@@ -183,6 +183,11 @@ endmacro()
 
 add_slam_executable(replica_mono examples/replica_mono.cpp)
 add_slam_executable(replica_rgbd examples/replica_rgbd.cpp)
+# Quad comparison: the same entry source built with the point-only mapper
+# (GaussianMapper + TrackRGBD). Only the mapper/entry choice differs.
+add_slam_executable(replica_rgbd_point examples/replica_rgbd.cpp)
+target_compile_definitions(replica_rgbd_point PRIVATE USE_LINE_GAUSSIAN=0)
+set_target_properties(replica_rgbd_point PROPERTIES OUTPUT_NAME replica_rgbd_point)
 add_slam_executable(tum_mono examples/tum_mono.cpp)
 add_slam_executable(tum_rgbd examples/tum_rgbd.cpp)
 add_slam_executable(euroc_stereo examples/euroc_stereo.cpp)

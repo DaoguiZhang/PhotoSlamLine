@@ -289,6 +289,10 @@ protected:
     bool interrupt_training_;
     bool stopped_;
     int iteration_;
+    // Quad comparison telemetry (point build): real optimizer steps and the
+    // accumulated per-iteration mapping time (same boundary as the L build).
+    long long quad_opt_steps_ = 0;
+    double quad_mapping_ms_ = 0.0;
     float ema_loss_for_log_;
     bool SLAM_ended_;
     bool loop_closure_iteration_;

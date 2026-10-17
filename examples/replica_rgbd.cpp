@@ -43,7 +43,9 @@ void saveGpuPeakMemoryUsage(std::filesystem::path pathSave);
 
 void saveTrackingImagePaths(const std::vector<std::string> &tracking_image_paths, const std::string &strSavePath);
 
+#ifndef USE_LINE_GAUSSIAN
 #define USE_LINE_GAUSSIAN 1
+#endif
 
 int main(int argc, char **argv)
 {
@@ -200,9 +202,15 @@ int main(int argc, char **argv)
         {
             //set line flag
         }
-         // Pass the image to the SLAM system
-        //pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+         // Pass the image to the SLAM system.
+         // Quad comparison: the point-only build must also use the point-only
+         // tracking entry (no LSD line extraction), otherwise the condition is
+         // line-frontend + point Gaussian mapper, not a pure point baseline.
+#if USE_LINE_GAUSSIAN
         pSLAM->TrackRGBDWithLine(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+#else
+        pSLAM->TrackRGBD(imRGB, imD, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+#endif
        
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();

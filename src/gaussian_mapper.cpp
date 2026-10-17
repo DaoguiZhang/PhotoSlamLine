@@ -541,6 +541,21 @@ void GaussianMapper::run()
     savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
     writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
 
+    // Quad comparison telemetry: one parseable line, same fields as the L build.
+    std::cerr << "[QuadMetrics] optimizer_steps=" << quad_opt_steps_
+              << " gaussians=" << gaussians_->xyz_.size(0)
+              << " line_gaussians=0"
+              << " kfs=" << scene_->keyframes().size()
+              << " mapping_seconds=" << (quad_mapping_ms_ / 1000.0)
+              << std::endl;
+    std::ofstream quad_csv(result_dir_ / "quad_metrics.txt");
+    quad_csv << "optimizer_steps=" << quad_opt_steps_ << "\n"
+             << "gaussians=" << gaussians_->xyz_.size(0) << "\n"
+             << "line_gaussians=0\n"
+             << "kfs=" << scene_->keyframes().size() << "\n"
+             << "mapping_seconds=" << (quad_mapping_ms_ / 1000.0) << "\n";
+    quad_csv.flush();
+
     signalStop();
 }
 
@@ -770,8 +785,10 @@ void GaussianMapper::trainForOneIteration()
             loop_closure_iteration_ = false;
 
         // Optimizer step
+        quad_mapping_ms_ += static_cast<double>(iter_time);
         if (getIteration() < opt_params_.iterations_) {
             gaussians_->optimizer_->step();
+            ++quad_opt_steps_;
             gaussians_->optimizer_->zero_grad(true);
         }
     }
