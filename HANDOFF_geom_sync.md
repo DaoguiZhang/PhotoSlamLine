@@ -1,109 +1,61 @@
 # HANDOFF — geom-sync（参考关键帧锚定的 LOOP/GBA 地图更正）
 
-状态：**执行中断（上下文预算用尽）**，不是缺数据或技术依赖阻塞。
-HEAD：`a066e5d74d` + 本次提交。工作树干净。
+状态：**TUM 崩溃已定位并修复；GlobalBA 事件链路首次取得运行证据。**
+HEAD：本次提交（见 `git log -1`）。工作树干净。
 
-## 已实现且编译通过
+## 本轮结论：TUM fr3_long_office_household KF 2 `free(): invalid pointer`
 
-1. **变换契约**（`f02c52920d`）
-   - 修复 legacy 中 `line_dir_w_` 的逆旋转（数值证据：90° 旋转下误差 2.00）。
-   - 新增 `xyz_init_` 线锚点同步（此前完全不移动）。
-   - 自验证 `runRigidCorrectionContractTest`，`PHOTO_SLAM_SYNC_CONTRACT_TEST=1` 触发。
-   - **GPU 中心变换已实测**：identity / translation / Rz90+trans 与 CPU 参考 `max_abs=0`（容差运行前固定 1e-4）。
+- 根因：**跨 DSO 的 ODR / 类型布局不一致**，不是 GlobalBA 业务逻辑。
+  `b2e997a5d9` 给 `MappingOperation` 增加了 `mvGlobalBAPoses/mnEventId/mnMapGen`；
+  `libgaussian_mapper.so` 已按新头文件重建，但 `ORB-SLAM3/lib/libORB_SLAM3.so`
+  及其 `.o` 仍是旧头文件产物。`LocalMapping.cc` 按旧布局构造对象，内联析构却
+  绑定到先加载的 `libgaussian_mapper.so` 中的新析构，越界把 `mvGlobalBAPoses`
+  的垃圾指针当 vector 释放。
+- 证据：`reports/tum_crash_rootcause.md`、`reports/gdb_crash.log`
+  （`~MappingOperation` ← `LocalMapping::RunWithLine`）；析构符号大小
+  新 `0x24d` vs 旧 `0x22d`。
+- 修复：按原缓存配置重建 `ORB-SLAM3/build`，再重建顶层 `build`。
+  **无源码修改**；重建后两个 DSO 的析构均为 `0x24d`。
 
-2. **轻量 GBA 事件通道**（本次提交）
-   - `Atlas.h`：`OprType::GlobalBA = 4`；`mvGlobalBAPoses`（仅 `(kf_id, new_Tcw)`，无图像）、`mnEventId`、`mnMapGen`、`reserveGlobalBAPoses/addGlobalBAPose/globalBAPoses/setEventId/eventId/setMapGen/mapGen`；拷贝构造同步搬运。
-   - `LoopClosing.cc`：在 GBA 写回完成、`InformNewBigChange()` 之前发布，**采集的是写回后的最终位姿**（含跨生成树传播得到更正的关键帧），`mapGen = Map::GetId()`，`eventId` 单调递增。两个 GBA 线程（普通版与 WithLine 版）都已插入。
-   - `gaussian_mapper_line.cpp`：新增 `case GlobalBA`，**只消费并记录，不施加形变**；打印 `evt / map / kfs / in_scene / prev_evt / ACCEPTED|DUPLICATE_REJECTED / accepted / duplicate`。
-   - 设计上把"通知通路"与"形变"解耦：形变需要 `ref_kf_id_`，尚未实现，因此这一层明确不施加。
+## 验证（正常 Release 构建）
 
-## 已验证
+| 场景 | 结果 |
+|---|---|
+| TUM 全序列 ×3 | exit 0；崩溃关键字 0；LBA 次数 254/250/241 |
+| office0（Replica RGB-D，GPU 路径） | exit 0；正常导出全局点线地图 |
+| TUM LOOP/GBA | 1 次回环；`GBA: Correct MapPoints and MapLines`；`[SyncEvent] GlobalBA evt=1 map=0 kfs=234 in_scene=234 prev_evt=0 ACCEPTED accepted=1 duplicate=0` |
 
-- 全部编译通过（`cd build && make -j8`，无 error）。
-- 契约自验证 PASS（CPU 四项 + GPU 中心三项）。
-- 默认行为未改变：新事件只打印；legacy 形变路径仍是已修复版本。
+原崩溃窗口在三次全序列运行中均未复现。
 
-## 未验证 / 未实现
+## 构建注意（本次事故根因）
 
-- **真实 GBA 事件从未被观测到**。首次尝试用 `bin/replica_rgbd` + TUM 数据集，因数据集布局不符崩溃：
-  `filesystem error: cannot open directory [...rgbd_dataset_freiburg3_long_office_household/results]`，exit 134。
-  该入口要求 Replica 风格的 `results/` 与 `depth/`；TUM 是 `rgb/` + `depth/` + 关联文件，应用 **`bin/tum_rgbd`** 与 `cfg/ORB_SLAM3/RGB-D/TUM/associations/` 下的关联文件。
-- 因此"发布 → 消费 → 版本检查"**尚未取得运行证据**，不得宣称通过。
-- `ref_kf_id_` 未实现（里程碑 2），故按锚分组的形变应用未实现（里程碑 5）。
-- 整模型检查（协方差 Σ' = R Σ Rᵀ、尺度不变、未选中行不变、线残差、缓存读新值）未做。
-- Adam 策略未改；高阶 SH 旋转未做。
+`ORB-SLAM3` 是独立 CMake 工程，顶层只链接其 `.so`。修改
+`ORB-SLAM3/include/*.h` 后必须先 `cmake --build ORB-SLAM3/build -j8`，
+再 `cmake --build build -j8`；否则内联符号会按不同布局进入不同 DSO。
+
+## 未实现（不变）
+
+- `ref_kf_id_` 与形变应用未实现；`ACCEPTED` 仅表示通知被接受，不代表 Gaussian 已更正。
+- 整模型检查、Adam 策略、高阶 SH 未做。
+
+## 日志
+
+- `reports/tum_crash_rootcause.md` — 根因与符号/时间戳证据
+- `reports/gdb_crash.log` — GDB 全线程栈
+- `/tmp/fix_tum_{1,2,3}.log`、`/tmp/fix_office0.log` — 验证日志（临时）
 
 ## 下一条具体命令
 
-先确认 `bin/tum_rgbd` 的 CLI（`examples/tum_rgbd.cpp`），然后：
-
 ```bash
 cd /workspace/code/PSL-perf
-PHOTO_SLAM_RASTER_BACKEND=C PHOTO_SLAM_LINE_LOSS_EVERY=0 \
-  bin/tum_rgbd ORB-SLAM3/Vocabulary/ORBvoc.txt \
-    cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
-    cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
-    /workspace/code/SEGS-SLAM/datasets/tum/rgbd_dataset_freiburg3_long_office_household \
-    abl_out/geom_gba_tum no_viewer
-grep -E "Loop Closure Detected|Starting Global Bundle Adjustment|SyncEvent" \
-  abl_out/geom_gba_tum/run.log
-```
-
-若 `tum_rgbd` 需要关联文件，按 `examples/tum_rgbd.cpp` 的实际参数顺序补齐
-`cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_long_office_household.txt`（如不存在则生成）。
-
-通过判据：日志中出现 `Starting Global Bundle Adjustment` 且随后出现至少一条
-`[SyncEvent] GlobalBA evt=N ... ACCEPTED`，再出现同一 evt 时为
-`DUPLICATE_REJECTED`；`in_scene` 应接近 `kfs`。
-
----
-
-## 真实 TUM 运行结果（正确入口，已执行）
-
-- 工作树：`b2e997a5d9`，dirty=0；二进制 `bin/tum_rgbd` sha256 `d321f0a1a98752e8…`
-- CLI 已从 `examples/tum_rgbd.cpp` 核实（argc 7 或 8）：
-  `argv[1]=ORBvocab, [2]=ORB cfg, [3]=gaussian cfg, [4]=dataset, [5]=associations, [6]=out, [7]=no_viewer`
-- 命令（已执行）：
-```bash
 PHOTO_SLAM_RASTER_BACKEND=C PHOTO_SLAM_LINE_LOSS_EVERY=0 \
   bin/tum_rgbd ORB-SLAM3/Vocabulary/ORBvoc.txt \
   cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
   cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
   /workspace/code/SEGS-SLAM/datasets/tum/rgbd_dataset_freiburg3_long_office_household \
   cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg3_long_office_household.txt \
-  abl_out/geom_gba_tum no_viewer
+  /tmp/fix_tum_next no_viewer 2>&1 | tee /tmp/fix_tum_next.log
+echo "EXIT=${PIPESTATUS[0]}"
+grep -E "Loop Closure Detected|GBA:|SyncEvent" /tmp/fix_tum_next.log
 ```
-- PID 1630967，**真实退出码 134（SIGABRT）**，不是 tee 的成功。
-- 崩溃点：第 97 行 `free(): invalid pointer`，紧跟在 KF 2 的
-  `LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg`
-  之后；崩溃前最后一条 loop 相关日志是 `LoopClosing bFindedRegion false`。
-- 计数（`abl_out/geom_gba_tum/terminal.log`）：
-  `Starting Global Bundle Adjustment` = **0**
-  `SyncEvent` = **0**
-  `Loop Closure Detected` = **0**
 
-**结论：GBA 从未开始，事件链路未被覆盖。** 本轮的 "GBA写回 → 发布 → 消费 → ACCEPTED"
-顺序**没有任何运行证据**，不做通过声明。ACCEPTED 语义本来也只是"通知被接受"，
-不代表 Gaussian 已更正。
-
-**崩溃归因未确定**：崩溃发生在第一个 loop/GBA 之前，而本轮改动中唯一处于该热路径的是
-`MappingOperation` 拷贝构造新增的成员搬运与 mapper 的 `case GlobalBA`（此时不会执行）。
-因此更可能是既有 TUM 线路的堆错误，但**未做二分验证，不能断言**。
-
-## 下一条具体命令（二分归因）
-
-```bash
-cd /workspace/code/PSL-perf
-git worktree add /workspace/code/PSL-bisect b2e997a5d9~1
-cd /workspace/code/PSL-bisect && mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && make -j8 tum_rgbd
-cd /workspace/code/PSL-bisect && PHOTO_SLAM_RASTER_BACKEND=C PHOTO_SLAM_LINE_LOSS_EVERY=0 \
-  bin/tum_rgbd ORB-SLAM3/Vocabulary/ORBvoc.txt \
-  cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
-  cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
-  /workspace/code/SEGS-SLAM/datasets/tum/rgbd_dataset_freiburg3_long_office_household \
-  cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg3_long_office_household.txt \
-  /tmp/bisect_tum no_viewer; echo "BISECT_EXIT=$?"
-```
-若同样 134 崩溃 → 与本轮改动无关，先修既有崩溃（或改用 office0 等已知可跑序列产生回环），
-再回来验证事件链路。若正常 → 本轮改动引入，回退 `Atlas.h` 拷贝构造成员后重试。

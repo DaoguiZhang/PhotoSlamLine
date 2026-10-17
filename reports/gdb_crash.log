@@ -1,0 +1,625 @@
+warning: Error disabling address space randomization: Operation not permitted
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+[New Thread 0x734fc4dff000 (LWP 1636032)]
+CUDA available! Training on GPU.
+
+ORB-SLAM3 Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+ORB-SLAM2 Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+This program comes with ABSOLUTELY NO WARRANTY;
+This is free software, and you are welcome to redistribute it
+under certain conditions. See LICENSE.txt.
+
+Input sensor was set to: RGB-D
+Loading settings from cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml
+Camera1.k3 optional parameter does not exist...
+	-Loaded camera 1
+Camera.newHeight optional parameter does not exist...
+Camera.newWidth optional parameter does not exist...
+	-Loaded image info
+	-Loaded RGB-D calibration
+	-Loaded ORB settings
+	-Loaded LSD sampling settings
+Viewer.imageViewScale optional parameter does not exist...
+	-Loaded viewer settings
+System.LoadAtlasFromFile optional parameter does not exist...
+System.SaveAtlasToFile optional parameter does not exist...
+	-Loaded Atlas settings
+System.thFarPoints optional parameter does not exist...
+	-Loaded misc parameters
+----------------------------------
+SLAM settings: 
+	-Camera 1 parameters (Pinhole): [ 535.4 539.2 320.1 247.6 ]
+	-Camera 1 distortion parameters: [  0 0 0 0 ]
+	-Original image size: [ 640 , 480 ]
+	-Current image size: [ 640 , 480 ]
+	-Sequence FPS: 30
+	-RGB-D depth map factor: 5000
+	-Features per image: 2000
+	-ORB scale factor: 1.2
+	-ORB number of scales: 8
+	-Initial FAST threshold: 20
+	-Min FAST threshold: 7
+	-Line sampling step: 0.2
+	-Line view weight: 2
+	-Line sigma: 3
+	-Line Top-K: 3
+
+
+Loading ORB Vocabulary. This could take a while...
+Vocabulary loaded!
+
+Initialization of Atlas from scratch 
+Creation of new map with id: 0
+Creation of new map with last KF id: 0
+Seq. Name: 
+-------------------newParameterLoader--------------------------
+
+LSD Extractor Parameters(to do next): 
+	-Sampling step: 0.2
+	-View weight: 2
+	-Sigma: 3
+	-Top-K: 3
+There are 1 cameras in the atlas
+Camera 0 is pinhole
+[LineMode] PHOTO_SLAM_LINE_MODE=2 (0=point-only, 1=line-frontend-only, 2=full point-line) | PO_LINE=1 LBA_LINE=1 | LBA_W=1 LBA_TAU=9 LBA_DELTA=2.44765 LBA_SIGMA_PX=1 | DIAG_LINE_EDGES=0 DIAG_MONO_INIT=0
+[New Thread 0x734daaa42000 (LWP 1636049)]
+[New Thread 0x734daa241000 (LWP 1636050)]
+============================ start Set GaussianMapperLine ====================================
+[Gaussian Mapper]CUDA available! Training on GPU.
+[Gaussian Mapper]Reading parameters from "cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household.yaml"
+[New Thread 0x734da9a40000 (LWP 1636051)]
+[New Thread 0x734da923f000 (LWP 1636052)]
+[New Thread 0x734da2dde000 (LWP 1636060)]
+[New Thread 0x734d7ffff000 (LWP 1636061)]
+[New Thread 0x734d7f7fe000 (LWP 1636062)]
+[New Thread 0x734d7effd000 (LWP 1636063)]
+[New Thread 0x734d7e7fc000 (LWP 1636064)]
+[New Thread 0x734d7dffb000 (LWP 1636065)]
+[New Thread 0x734d7d7fa000 (LWP 1636066)]
+[New Thread 0x734d7cff9000 (LWP 1636067)]
+[New Thread 0x734d63fff000 (LWP 1636068)]
+[New Thread 0x734d637fe000 (LWP 1636069)]
+[New Thread 0x734d62ffd000 (LWP 1636070)]
+[New Thread 0x734d627fc000 (LWP 1636071)]
+[New Thread 0x734d61ffb000 (LWP 1636072)]
+[New Thread 0x734d617fa000 (LWP 1636073)]
+[New Thread 0x734d60ff9000 (LWP 1636074)]
+[New Thread 0x734d3ffff000 (LWP 1636075)]
+[New Thread 0x734d3f7fe000 (LWP 1636076)]
+[New Thread 0x734d3effd000 (LWP 1636077)]
+[New Thread 0x734d3e7fc000 (LWP 1636078)]
+[New Thread 0x734d3dffb000 (LWP 1636079)]
+[New Thread 0x734d3d7fa000 (LWP 1636080)]
+[New Thread 0x734d3cff9000 (LWP 1636081)]
+[New Thread 0x734d1ffff000 (LWP 1636082)]
+[New Thread 0x734d1f7fe000 (LWP 1636083)]
+[New Thread 0x734d1effd000 (LWP 1636084)]
+[New Thread 0x734d1e7fc000 (LWP 1636085)]
+[New Thread 0x734d1dffb000 (LWP 1636086)]
+[New Thread 0x734d1d7fa000 (LWP 1636087)]
+[New Thread 0x734d1cff9000 (LWP 1636088)]
+[New Thread 0x734ceffff000 (LWP 1636089)]
+[New Thread 0x734cef7fe000 (LWP 1636090)]
+[New Thread 0x734ceeffd000 (LWP 1636091)]
+[New Thread 0x734cee7fc000 (LWP 1636092)]
+[New Thread 0x734cedffb000 (LWP 1636093)]
+[New Thread 0x734ced7fa000 (LWP 1636094)]
+[New Thread 0x734cecff9000 (LWP 1636095)]
+[New Thread 0x734cec7f8000 (LWP 1636096)]
+[New Thread 0x734cebff7000 (LWP 1636097)]
+[New Thread 0x734ceb7f6000 (LWP 1636098)]
+[New Thread 0x734ceaff5000 (LWP 1636099)]
+[New Thread 0x734cea7f4000 (LWP 1636100)]
+[New Thread 0x734ce9ff3000 (LWP 1636101)]
+[New Thread 0x734ce97f2000 (LWP 1636102)]
+[New Thread 0x734ce8ff1000 (LWP 1636103)]
+[New Thread 0x734ce87f0000 (LWP 1636104)]
+[New Thread 0x734ce7fef000 (LWP 1636105)]
+[New Thread 0x734ce77ee000 (LWP 1636106)]
+[DEBUG] Thread: GaussianMapperLine thread started.
+[New Thread 0x734ce6fed000 (LWP 1636107)]
+
+-------
+Start processing sequence ...
+Images in the sequence: 2488
+
+Frame id: 0
+First KF:0; Map init KF:0
+------------- !mpCamera2: mCurrentFrame.N --------------- 2004
+New Map created with 1782 points
+New Map created with 120 lines...
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 0
+ created_map_line_num: 120
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 136 -> 136
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 1
+[MapLineCulling] KF1 | Bad:0 | LowRatio:10 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 162
+[LocalMapping Fuse] Candidates: 112 | Fused: 26 | KF Lines: 108 -> 108
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 2
+============= [LIVE SNAKE RADAR] =============
+  - Frame ID: 2
+  - Matches Vector Size: 124
+  - Non-Null Pointers: 55
+  - Bad Lines Flagged: 0
+===============================================
+[ExportMapPointsWithCameraAxesOBJKeyFrame] Exported 2006 map points and camera axes to 2_Keyframe_MapPoints_before.obj
+[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported 55 map lines and camera axes to 2_Keyframe_Maplines_before.obj
+[ExportMapKeyFrameCameraPose] Export successful to 2_Keyframe_Camera_before.txt
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2130, 137, 4863
+free(): invalid pointer
+
+Thread 3 "tum_rgbd" received signal SIGABRT, Aborted.
+[Switching to Thread 0x734daaa42000 (LWP 1636049)]
+__pthread_kill_implementation (no_tid=0, signo=6, threadid=126777412558848) at ./nptl/pthread_kill.c:44
+44	./nptl/pthread_kill.c: No such file or directory.
+
+=== BACKTRACE ALL ===
+
+Thread 54 (Thread 0x734ce6fed000 (LWP 1636107) "tum_rgbd"):
+#0  0x00007350958207f8 in __GI___clock_nanosleep (clock_id=clock_id@entry=0, flags=flags@entry=0, req=0x734ce6f9a570, rem=0x734ce6f9a570) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:78
+#1  0x0000735095825677 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x00007350e599fb5b in GaussianMapperLine::run() () from /workspace/code/PSL-perf/lib/libgaussian_mapper.so
+#3  0x0000735095a40253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#4  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#5  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 53 (Thread 0x734ce77ee000 (LWP 1636106) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 52 (Thread 0x734ce7fef000 (LWP 1636105) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 51 (Thread 0x734ce87f0000 (LWP 1636104) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 50 (Thread 0x734ce8ff1000 (LWP 1636103) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 49 (Thread 0x734ce97f2000 (LWP 1636102) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 48 (Thread 0x734ce9ff3000 (LWP 1636101) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 47 (Thread 0x734cea7f4000 (LWP 1636100) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 46 (Thread 0x734ceaff5000 (LWP 1636099) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 45 (Thread 0x734ceb7f6000 (LWP 1636098) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 44 (Thread 0x734cebff7000 (LWP 1636097) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 43 (Thread 0x734cec7f8000 (LWP 1636096) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 42 (Thread 0x734cecff9000 (LWP 1636095) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 41 (Thread 0x734ced7fa000 (LWP 1636094) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 40 (Thread 0x734cedffb000 (LWP 1636093) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 39 (Thread 0x734cee7fc000 (LWP 1636092) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 38 (Thread 0x734ceeffd000 (LWP 1636091) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 37 (Thread 0x734cef7fe000 (LWP 1636090) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 36 (Thread 0x734ceffff000 (LWP 1636089) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 35 (Thread 0x734d1cff9000 (LWP 1636088) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 34 (Thread 0x734d1d7fa000 (LWP 1636087) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 33 (Thread 0x734d1dffb000 (LWP 1636086) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 32 (Thread 0x734d1e7fc000 (LWP 1636085) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 31 (Thread 0x734d1effd000 (LWP 1636084) "tum_rgbd"):
+#0  0x000073509241de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x000073509241b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 30 (Thread 0x734d1f7fe000 (LWP 1636083) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b74dbc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b74dbc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b74dbc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b74d60, cond=0x5c9c86b74d90) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b74d90, mutex=0x5c9c86b74d60) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 29 (Thread 0x734d1ffff000 (LWP 1636082) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b749a8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b749a8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b749a8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b74950, cond=0x5c9c86b74980) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b74980, mutex=0x5c9c86b74950) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 28 (Thread 0x734d3cff9000 (LWP 1636081) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b7459c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b7459c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b7459c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b74540, cond=0x5c9c86b74570) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b74570, mutex=0x5c9c86b74540) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 27 (Thread 0x734d3d7fa000 (LWP 1636080) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b74188) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b74188) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b74188, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b74130, cond=0x5c9c86b74160) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b74160, mutex=0x5c9c86b74130) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 26 (Thread 0x734d3dffb000 (LWP 1636079) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b73d7c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b73d7c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b73d7c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b73d20, cond=0x5c9c86b73d50) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b73d50, mutex=0x5c9c86b73d20) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 25 (Thread 0x734d3e7fc000 (LWP 1636078) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b7396c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b7396c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b7396c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b73910, cond=0x5c9c86b73940) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b73940, mutex=0x5c9c86b73910) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 24 (Thread 0x734d3effd000 (LWP 1636077) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b7355c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b7355c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b7355c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b73500, cond=0x5c9c86b73530) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b73530, mutex=0x5c9c86b73500) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 23 (Thread 0x734d3f7fe000 (LWP 1636076) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b73148) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b73148) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b73148, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b730f0, cond=0x5c9c86b73120) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b73120, mutex=0x5c9c86b730f0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 22 (Thread 0x734d3ffff000 (LWP 1636075) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b72d3c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b72d3c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b72d3c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b72ce0, cond=0x5c9c86b72d10) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b72d10, mutex=0x5c9c86b72ce0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 21 (Thread 0x734d60ff9000 (LWP 1636074) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b7292c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b7292c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b7292c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b728d0, cond=0x5c9c86b72900) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b72900, mutex=0x5c9c86b728d0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 20 (Thread 0x734d617fa000 (LWP 1636073) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b72518) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b72518) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b72518, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b724c0, cond=0x5c9c86b724f0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b724f0, mutex=0x5c9c86b724c0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 19 (Thread 0x734d61ffb000 (LWP 1636072) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b7210c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b7210c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b7210c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b720b0, cond=0x5c9c86b720e0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b720e0, mutex=0x5c9c86b720b0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 18 (Thread 0x734d627fc000 (LWP 1636071) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b71d1c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b71d1c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b71d1c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b71cc0, cond=0x5c9c86b71cf0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b71cf0, mutex=0x5c9c86b71cc0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 17 (Thread 0x734d62ffd000 (LWP 1636070) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b71928) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b71928) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b71928, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b718d0, cond=0x5c9c86b71900) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b71900, mutex=0x5c9c86b718d0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 16 (Thread 0x734d637fe000 (LWP 1636069) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c86b7142c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c86b7142c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c86b7142c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c86b713d0, cond=0x5c9c86b71400) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c86b71400, mutex=0x5c9c86b713d0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 15 (Thread 0x734d63fff000 (LWP 1636068) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8637a718) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8637a718) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8637a718, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8637a6c0, cond=0x5c9c8637a6f0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8637a6f0, mutex=0x5c9c8637a6c0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 14 (Thread 0x734d7cff9000 (LWP 1636067) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8637a658) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8637a658) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8637a658, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8637a600, cond=0x5c9c8637a630) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8637a630, mutex=0x5c9c8637a600) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 13 (Thread 0x734d7d7fa000 (LWP 1636066) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8637a59c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8637a59c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8637a59c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8637a540, cond=0x5c9c8637a570) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8637a570, mutex=0x5c9c8637a540) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 12 (Thread 0x734d7dffb000 (LWP 1636065) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8637b3dc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8637b3dc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8637b3dc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8637b380, cond=0x5c9c8637b3b0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8637b3b0, mutex=0x5c9c8637b380) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 11 (Thread 0x734d7e7fc000 (LWP 1636064) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8637afc8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8637afc8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8637afc8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8637af70, cond=0x5c9c8637afa0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8637afa0, mutex=0x5c9c8637af70) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 10 (Thread 0x734d7effd000 (LWP 1636063) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8637abd8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8637abd8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8637abd8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8637ab80, cond=0x5c9c8637abb0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8637abb0, mutex=0x5c9c8637ab80) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 9 (Thread 0x734d7f7fe000 (LWP 1636062) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8637a4dc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8637a4dc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8637a4dc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8637a480, cond=0x5c9c8637a4b0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8637a4b0, mutex=0x5c9c8637a480) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 8 (Thread 0x734d7ffff000 (LWP 1636061) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5c9c8687b668) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5c9c8687b668) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c8687b668, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cea41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5c9c8687b610, cond=0x5c9c8687b640) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5c9c8687b640, mutex=0x5c9c8687b610) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007350e269012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007350e2690523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 7 (Thread 0x734da2dde000 (LWP 1636060) "tum_rgbd"):
+#0  0x0000735095853c4f in __GI___poll (fds=0x5c9c862f7360, nfds=2, timeout=100) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x0000734fc5103957 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#2  0x0000734fc51df265 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#3  0x0000734fc50ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#4  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#5  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 6 (Thread 0x734da923f000 (LWP 1636052) "cuda-EvtHandlr"):
+#0  0x0000735095853c4f in __GI___poll (fds=0x734da4000c20, nfds=10, timeout=19) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x0000734fc5103957 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#2  0x0000734fc51df265 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#3  0x0000734fc50ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#4  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#5  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 5 (Thread 0x734da9a40000 (LWP 1636051) "tum_rgbd"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x734da99ed890, op=393, expected=0, futex_word=0x5c9c7665c0b8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x734da99ed890, clockid=0, expected=0, futex_word=0x5c9c7665c0b8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5c9c7665c0b8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x734da99ed890, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007350957cee9b in __pthread_cond_wait_common (abstime=0x734da99ed890, clockid=0, mutex=0x5c9c766d5940, cond=0x5c9c7665c090) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_timedwait64 (cond=0x5c9c7665c090, mutex=0x5c9c766d5940, abstime=0x734da99ed890) at ./nptl/pthread_cond_wait.c:652
+#5  0x0000734fc50496ce in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#6  0x0000734fc50ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#7  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 4 (Thread 0x734daa241000 (LWP 1636050) "tum_rgbd"):
+#0  0x00007350958207f8 in __GI___clock_nanosleep (clock_id=clock_id@entry=0, flags=flags@entry=0, req=req@entry=0x734daa1ee670, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:78
+#1  0x0000735095825677 in __GI___nanosleep (req=req@entry=0x734daa1ee670, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x0000735095856faf in usleep (useconds=<optimized out>) at ../sysdeps/posix/usleep.c:31
+#3  0x00007350e5468240 in ORB_SLAM3::LoopClosing::RunWithLine() () from /workspace/code/PSL-perf/ORB-SLAM3/lib/libORB_SLAM3.so
+#4  0x0000735095a40253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#6  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 3 (Thread 0x734daaa42000 (LWP 1636049) "tum_rgbd"):
+#0  __pthread_kill_implementation (no_tid=0, signo=6, threadid=126777412558848) at ./nptl/pthread_kill.c:44
+#1  __pthread_kill_internal (signo=6, threadid=126777412558848) at ./nptl/pthread_kill.c:78
+#2  __GI___pthread_kill (threadid=126777412558848, signo=signo@entry=6) at ./nptl/pthread_kill.c:89
+#3  0x000073509577d476 in __GI_raise (sig=sig@entry=6) at ../sysdeps/posix/raise.c:26
+#4  0x00007350957637f3 in __GI_abort () at ./stdlib/abort.c:79
+#5  0x00007350957c4677 in __libc_message (action=action@entry=do_abort, fmt=fmt@entry=0x735095916b77 "%s\n") at ../sysdeps/posix/libc_fatal.c:156
+#6  0x00007350957dbcfc in malloc_printerr (str=str@entry=0x735095914744 "free(): invalid pointer") at ./malloc/malloc.c:5666
+#7  0x00007350957dda44 in _int_free (av=<optimized out>, p=<optimized out>, have_lock=0) at ./malloc/malloc.c:4439
+#8  0x00007350957e0453 in __GI___libc_free (mem=<optimized out>) at ./malloc/malloc.c:3391
+#9  0x00007350e5957041 in ORB_SLAM3::MappingOperation::~MappingOperation() () from /workspace/code/PSL-perf/lib/libgaussian_mapper.so
+#10 0x00007350e544463e in ORB_SLAM3::LocalMapping::RunWithLine() () from /workspace/code/PSL-perf/ORB-SLAM3/lib/libORB_SLAM3.so
+#11 0x0000735095a40253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#12 0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#13 0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 2 (Thread 0x734fc4dff000 (LWP 1636032) "cuda00001400006"):
+#0  0x0000735095853c4f in __GI___poll (fds=0x5c9c76610300, nfds=3, timeout=-1) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x0000734fc5103957 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#2  0x0000734fc51df265 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#3  0x0000734fc50ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#4  0x00007350957cfac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#5  0x0000735095860a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 1 (Thread 0x7350373fd000 (LWP 1636000) "tum_rgbd"):
+#0  0x00007350958207f8 in __GI___clock_nanosleep (clock_id=clock_id@entry=0, flags=flags@entry=0, req=req@entry=0x7ffd8c72a670, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:78
+#1  0x0000735095825677 in __GI___nanosleep (req=req@entry=0x7ffd8c72a670, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x0000735095856faf in usleep (useconds=<optimized out>) at ../sysdeps/posix/usleep.c:31
+#3  0x00005c9c4eae11b3 in main ()
