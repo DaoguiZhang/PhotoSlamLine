@@ -125,9 +125,11 @@ public:
         long long missing_event_rows = 0; // ref kf absent from the payload
         long long groups_applied = 0;
     };
+    enum class GbaCorrectionMode { Full, MeansOnly };
     GbaCorrectionStats applyGbaCorrections(
         const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
-        unsigned long event_id);
+        unsigned long event_id,
+        GbaCorrectionMode mode = GbaCorrectionMode::Full);
     unsigned long lastAppliedGbaEvent() const { return last_applied_gba_event_; }
     torch::Tensor refKfIds() const { return ref_kf_id_; }
     torch::Tensor coordEventIds() const { return coord_event_id_; }

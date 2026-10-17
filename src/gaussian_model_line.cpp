@@ -1505,7 +1505,7 @@ std::string GaussianModelLine::adamFingerprint()
 
 GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
     const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
-    unsigned long event_id)
+    unsigned long event_id, GbaCorrectionMode mode)
 {
     GbaCorrectionStats st;
     if (!xyz_.defined() || xyz_.size(0) == 0)
@@ -1576,6 +1576,15 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
                 st.max_translation, disp.max().item<float>());
         }
         rigid_move(xyz_);
+        if (mode == GbaCorrectionMode::MeansOnly)
+        {
+            // Diagnostic decomposition: centres only. Anchors, quaternions,
+            // line directions, Adam moments and the coordinate version are
+            // deliberately left untouched. Not used by production.
+            st.moved_rows += n;
+            ++st.groups_applied;
+            continue;
+        }
         rigid_move(xyz_init_);
 
         // Gaussian orientation: q' = q_G * q (row-vector/layout w,x,y,z).

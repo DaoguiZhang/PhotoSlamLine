@@ -23,6 +23,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <functional>
 #include <fstream>
 #include <chrono>
 #include <ctime>
@@ -476,6 +477,7 @@ public:
         torch::Tensor point_ids, exist_since_iter, max_radii2D;
         torch::Tensor xyz_grad_accum, denom;
         std::vector<RecoveryAdamState> adam;   // 6 optimizer groups
+        std::vector<float> lrs;                // 6 param-group learning rates
         long long iteration = 0;
         long long frozen_opt_steps = 0;
         int active_sh = 0;
@@ -506,6 +508,55 @@ public:
         std::map<long long, std::string> step_param_fp;
     };
 
+    struct EvalViewRenders
+    {
+        std::vector<torch::Tensor> images;   // CPU float [3,H,W]
+        std::vector<double> psnr, ssim;
+        std::vector<std::size_t> fids;
+    };
+    struct DiagPoint
+    {
+        std::string label;
+        long long step = 0, iteration = 0;
+        int active_sh = 0, default_sh = 0;
+        std::vector<torch::Tensor> params;    // 6 CPU clones
+        std::vector<torch::Tensor> grads;     // 6 CPU clones (backward point)
+        std::vector<float> lrs;               // 6 param-group LRs
+        std::vector<long long> adam_steps;    // 6 Adam step counters
+    };
+    struct DiagArm
+    {
+        bool ok = false;
+        std::vector<DiagPoint> points;
+        EvalViewRenders render0, render1, render10;
+        std::string param_fp0, adam_fp0, schedule_fp0;
+        std::vector<int> view_seq;
+    };
+    struct LoopScopeKf
+    {
+        unsigned long kf_id = 0;
+        double rot_deg = 0.0;
+        double trans = 0.0;
+        bool scene_present = false;
+        Sophus::SE3f delta;
+    };
+
+    EvalViewRenders renderEvalViews();
+    DiagPoint captureDiagPoint(const std::string& label, bool with_grads);
+    std::string scheduleFingerprint() const;
+    DiagArm runRepeatDiagArm(const std::string& tag, const RecoverySnapshot& base,
+                             const RecoverySnapshot& kf_usage,
+                             const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses);
+    EvalViewRenders runStep0DiagArm(const std::string& tag, const RecoverySnapshot& base,
+                                    const RecoverySnapshot& kf_usage,
+                                    const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses,
+                                    const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+                                    unsigned long evt, int mode);
+    void runGbaRecoveryDiagnosis(
+        const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+        const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses,
+        unsigned long evt);
+
     RecoverySnapshot captureRecoverySnapshot();
     void restoreRecoverySnapshot(const RecoverySnapshot& snap);
     RecoveryArmResult runRecoveryArm(
@@ -522,6 +573,11 @@ public:
         unsigned long evt);
 
     bool gba_recovery_done_ = false;
+    // Diagnostic hook: ("after_backward" | "after_update"). Used only by the
+    // short gba-recovery mechanism diagnosis; null in production.
+    std::function<void(const char*)> recovery_diag_hook_;
+    std::vector<LoopScopeKf> loop_scope_kfs_;
+    bool loop_scope_available_ = false;
 
 protected:
     std::map<camera_id_t, torch::Tensor> undistort_mask_;
