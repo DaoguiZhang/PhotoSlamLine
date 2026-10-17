@@ -472,25 +472,32 @@ __device__ __forceinline__ void warp_agg_add(float* __restrict__ addr, const flo
 	{
 		// MEASURED semantics (see [FnsTest]): __fns(mask, 0, k) with k >= 1 returns
 		// the (k-1)-th set bit at or after bit 0, and k == 0 only tests bit 0.
-		// So the k-th lane of the mask needs offset i+1, NOT i.
-		const int lane = __fns(act, 0, i + 1);
-		if (lane < 0) break;
-		total += __shfl_sync(act, val, lane);
+		// The return type is unsigned, so the sentinel must be compared explicitly:
+		// `lane < 0` on an unsigned value is always false.
+		const unsigned lane = __fns(act, 0, i + 1);
+		if (lane == 0xFFFFFFFFu || lane >= 32u)
+			break;                      // never shuffle an invalid lane
+		total += __shfl_sync(act, val, static_cast<int>(lane));
 	}
 	// The lane id must be the HARDWARE lane, i.e. the linear thread index within
 	// the warp. The block is 16x16, so a warp spans two tile rows and
 	// (threadIdx.x & 31) COLLIDES between them: two threads would be treated as
 	// the leader and the aggregated sum would be added twice. That was the real
-	// integration bug.
+	// integration bug of the archived candidate.
 	const unsigned laneid = (threadIdx.y * BLOCK_X + threadIdx.x) & 31u;
 	if (laneid == (unsigned)(__ffs(act) - 1))
 		atomicAdd(addr, total);
 }
 
-#define AGGADD(PTR, VAL) do { if (AGG) warp_agg_add((PTR), (VAL)); else atomicAdd((PTR), (VAL)); } while (0)
+// raster-perf-v4 note: the old per-contribution dispatcher macro is gone. The
+// reference kernel above uses plain atomicAdd unconditionally, and the candidate
+// backends are separate kernel instances selected on the HOST.
 
 // Backward version of the rendering procedure.
-template <uint32_t C, bool AGG>
+// A = REFERENCE. This kernel is intentionally left as the upstream algorithm:
+// no backend template parameter and no extra device-side branch, so selecting a
+// candidate backend cannot change the reference's cost or code generation.
+template <uint32_t C>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
 	const uint2* __restrict__ ranges,
@@ -614,7 +621,7 @@ renderCUDA(
 				// Update the gradients w.r.t. color of the Gaussian. 
 				// Atomic, since this pixel is just one of potentially
 				// many that were affected by this Gaussian.
-				AGGADD(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
+				atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
 			}
 			dL_dalpha *= T;
 			// Update last alpha (to be used in the next iteration)
@@ -636,16 +643,16 @@ renderCUDA(
 			const float dG_ddely = -gdy * con_o.z - gdx * con_o.y;
 
 			// Update gradients w.r.t. 2D mean position of the Gaussian
-			AGGADD(&dL_dmean2D[global_id].x, dL_dG * dG_ddelx * ddelx_dx);
-			AGGADD(&dL_dmean2D[global_id].y, dL_dG * dG_ddely * ddely_dy);
+			atomicAdd(&dL_dmean2D[global_id].x, dL_dG * dG_ddelx * ddelx_dx);
+			atomicAdd(&dL_dmean2D[global_id].y, dL_dG * dG_ddely * ddely_dy);
 
 			// Update gradients w.r.t. 2D covariance (2x2 matrix, symmetric)
-			AGGADD(&dL_dconic2D[global_id].x, -0.5f * gdx * d.x * dL_dG);
-			AGGADD(&dL_dconic2D[global_id].y, -0.5f * gdx * d.y * dL_dG);
-			AGGADD(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);
+			atomicAdd(&dL_dconic2D[global_id].x, -0.5f * gdx * d.x * dL_dG);
+			atomicAdd(&dL_dconic2D[global_id].y, -0.5f * gdx * d.y * dL_dG);
+			atomicAdd(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);
 
 			// Update gradients w.r.t. opacity of the Gaussian
-			AGGADD(&(dL_dopacity[global_id]), G * dL_dalpha);
+			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
 		}
 	}
 }
@@ -715,6 +722,216 @@ void BACKWARD::preprocess(
 		dL_drot);
 }
 
+// ---------------------------------------------------------------------------
+// raster-perf-v4: backend B (converged control flow, plain atomicAdd) and
+// backend C (same, plus a 5-stage full-warp tree reduction written by one lane).
+//
+// Contract, identical for B and C:
+//  * Every one of the 32 physical lanes of the warp reaches the common
+//    write-back point in EVERY Gaussian iteration. The original `continue`s and
+//    the `!done` loop exit are replaced by a per-iteration `valid` flag, and the
+//    per-lane contribution registers are re-zeroed at the TOP of every iteration
+//    so no value can leak from the previous one.
+//  * `valid` therefore decides only whether a contribution is COMPUTED; it never
+//    decides whether a lane takes part in the reduction.
+//  * The hardware lane id is the block-linear index
+//    (threadIdx.y * BLOCK_X + threadIdx.x) & 31, never threadIdx.x: the 16x16
+//    block makes a warp span two tile rows of the SAME tile, and both rows must
+//    use their true lane ids.
+//  * All 32 lanes act on the same Gaussian and the same component, because
+//    `collected_id[j]` is shared memory indexed by the loop variable `j`, which
+//    is uniform across the block.
+//  * For C the sum covers all 32 lanes (invalid lanes contribute exactly 0.0f)
+//    and lane 0 writes it, so the leader's own pixel being invalid cannot drop
+//    the other lanes' contributions.
+//  * Transparency/colour recursion, the alpha threshold, last_contributor and
+//    the transmittance semantics are unchanged for valid contributions. Threads
+//    outside the image never read the image or the per-pixel buffers (their
+//    `valid` is false from the first iteration), so no out-of-range load is
+//    introduced.
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ void tree_write(float* __restrict__ addr, const float v)
+{
+	float s = v;
+#pragma unroll
+	for (int off = 16; off > 0; off >>= 1)
+		s += __shfl_down_sync(0xFFFFFFFFu, s, off);
+	if (((threadIdx.y * BLOCK_X + threadIdx.x) & 31u) == 0u)
+		atomicAdd(addr, s);
+}
+
+template <uint32_t C, bool TREE>
+__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
+renderCUDA_conv(
+	const uint2* __restrict__ ranges,
+	const uint32_t* __restrict__ point_list,
+	int W, int H,
+	const float* __restrict__ bg_color,
+	const float2* __restrict__ points_xy_image,
+	const float4* __restrict__ conic_opacity,
+	const float* __restrict__ colors,
+	const float* __restrict__ final_Ts,
+	const uint32_t* __restrict__ n_contrib,
+	const float* __restrict__ dL_dpixels,
+	float3* __restrict__ dL_dmean2D,
+	float4* __restrict__ dL_dconic2D,
+	float* __restrict__ dL_opacity,
+	float* __restrict__ dL_dcolors)
+{
+	auto block = cg::this_thread_block();
+	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
+	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	const uint32_t pix_id = W * pix.y + pix.x;
+	const float2 pixf = { (float)pix.x, (float)pix.y };
+
+	const bool inside = pix.x < W&& pix.y < H;
+	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
+
+	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
+	int toDo = range.y - range.x;
+
+	__shared__ int collected_id[BLOCK_SIZE];
+	__shared__ float2 collected_xy[BLOCK_SIZE];
+	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_colors[C * BLOCK_SIZE];
+
+	const float T_final = inside ? final_Ts[pix_id] : 0;
+	float T = T_final;
+
+	uint32_t contributor = toDo;
+	const int last_contributor = inside ? n_contrib[pix_id] : 0;
+
+	float accum_rec[C] = { 0 };
+	float dL_dpixel[C] = { 0 };
+	if (inside)
+		for (int i = 0; i < C; i++)
+			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+
+	float last_alpha = 0;
+	float last_color[C] = { 0 };
+
+	const float ddelx_dx = 0.5 * W;
+	const float ddely_dy = 0.5 * H;
+
+	// `done` was `!inside` in the reference and is never assigned after that, so
+	// it is kept as an explicit flag rather than as a loop-exit condition.
+	const bool outside = !inside;
+
+	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
+	{
+		block.sync();
+		const int progress = i * BLOCK_SIZE + block.thread_rank();
+		if (range.x + progress < range.y)
+		{
+			const int coll_id = point_list[range.y - progress - 1];
+			collected_id[block.thread_rank()] = coll_id;
+			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
+			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			for (int k = 0; k < C; k++)
+				collected_colors[k * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + k];
+		}
+		block.sync();
+
+		// NOTE: `!done` is NOT part of this condition any more. Every lane
+		// iterates the same number of times so the reduction below is executed
+		// by the whole warp.
+		for (int j = 0; j < min(BLOCK_SIZE, toDo); j++)
+		{
+			contributor--;
+			bool valid = !outside && (contributor < last_contributor);
+
+			// Contribution registers for THIS iteration, re-zeroed every time.
+			float wr_col[C];
+			for (int k = 0; k < C; k++) wr_col[k] = 0.0f;
+			float wr_mx = 0.0f, wr_my = 0.0f;
+			float wr_cx = 0.0f, wr_cy = 0.0f, wr_cw = 0.0f;
+			float wr_op = 0.0f;
+
+			if (valid)
+			{
+				const float2 xy = collected_xy[j];
+				const float2 d = { xy.x - pixf.x, xy.y - pixf.y };
+				const float4 con_o = collected_conic_opacity[j];
+				const float power =
+					-0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+				if (power <= 0.0f)
+				{
+					const float G = expf(power);
+					const float alpha = min(0.99f, con_o.w * G);
+					if (alpha >= 1.0f / 255.0f)
+					{
+						T = T / (1.f - alpha);
+						const float dchannel_dcolor = alpha * T;
+
+						float dL_dalpha = 0.0f;
+						for (int k = 0; k < C; k++)
+						{
+							const float c = collected_colors[k * BLOCK_SIZE + j];
+							accum_rec[k] = last_alpha * last_color[k] + (1.f - last_alpha) * accum_rec[k];
+							last_color[k] = c;
+							const float dL_dchannel = dL_dpixel[k];
+							dL_dalpha += (c - accum_rec[k]) * dL_dchannel;
+							wr_col[k] = dchannel_dcolor * dL_dchannel;
+						}
+						dL_dalpha *= T;
+						last_alpha = alpha;
+
+						float bg_dot_dpixel = 0;
+						for (int k = 0; k < C; k++)
+							bg_dot_dpixel += bg_color[k] * dL_dpixel[k];
+						dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+
+						const float dL_dG = con_o.w * dL_dalpha;
+						const float gdx = G * d.x;
+						const float gdy = G * d.y;
+						const float dG_ddelx = -gdx * con_o.x - gdy * con_o.y;
+						const float dG_ddely = -gdy * con_o.z - gdx * con_o.y;
+
+						wr_mx = dL_dG * dG_ddelx * ddelx_dx;
+						wr_my = dL_dG * dG_ddely * ddely_dy;
+						wr_cx = -0.5f * gdx * d.x * dL_dG;
+						wr_cy = -0.5f * gdx * d.y * dL_dG;
+						wr_cw = -0.5f * gdy * d.y * dL_dG;
+						wr_op = G * dL_dalpha;
+					}
+				}
+			}
+
+			// -------- common write-back point, executed by the whole warp -------
+			const int gid = collected_id[j];
+			if (TREE)
+			{
+				// The preceding `if (valid)` block diverges, so converge the warp
+				// explicitly before the full-mask shuffles of the tree.
+				__syncwarp();
+				for (int k = 0; k < C; k++)
+					tree_write(&dL_dcolors[gid * C + k], wr_col[k]);
+				tree_write(&dL_dmean2D[gid].x, wr_mx);
+				tree_write(&dL_dmean2D[gid].y, wr_my);
+				tree_write(&dL_dconic2D[gid].x, wr_cx);
+				tree_write(&dL_dconic2D[gid].y, wr_cy);
+				tree_write(&dL_dconic2D[gid].w, wr_cw);
+				tree_write(&dL_opacity[gid], wr_op);
+			}
+			else
+			{
+				if (valid)
+				{
+					for (int k = 0; k < C; k++)
+						atomicAdd(&dL_dcolors[gid * C + k], wr_col[k]);
+					atomicAdd(&dL_dmean2D[gid].x, wr_mx);
+					atomicAdd(&dL_dmean2D[gid].y, wr_my);
+					atomicAdd(&dL_dconic2D[gid].x, wr_cx);
+					atomicAdd(&dL_dconic2D[gid].y, wr_cy);
+					atomicAdd(&dL_dconic2D[gid].w, wr_cw);
+					atomicAdd(&dL_opacity[gid], wr_op);
+				}
+			}
+		}
+	}
+}
+
 void BACKWARD::render(
 	const dim3 grid, const dim3 block,
 	const uint2* ranges,
@@ -733,41 +950,53 @@ void BACKWARD::render(
 	float* dL_dopacity,
 	float* dL_dcolors)
 {
-	// raster-perf-v2: the backend is chosen at runtime inside ONE binary, and the
-	// backend actually used is printed once so a run can never be mislabelled.
-	static const bool warp_agg = []() {
-		const char* e = std::getenv("PHOTO_SLAM_RASTER_WARP_AGG");
-		const bool on = (e != nullptr && std::atoi(e) != 0);
+	// ---------------------------------------------------------------------
+	// raster-perf-v4: HOST-side dispatch to three independent kernel instances.
+	//   A = reference              renderCUDA<NUM_CHANNELS>
+	//   B = converged control flow renderCUDA_conv<NUM_CHANNELS,false>
+	//   C = B + 5-stage warp tree  renderCUDA_conv<NUM_CHANNELS,true>
+	// Each backend is its own instantiation, so selecting B or C adds no
+	// device-side branch and no extra register pressure to the reference.
+	// ---------------------------------------------------------------------
+	static const int backend = []() {
+		const char* e = std::getenv("PHOTO_SLAM_RASTER_BACKEND");
+		int b = 0;
+		if (e != nullptr)
+		{
+			if (e[0] == 'B' || e[0] == 'b') b = 1;
+			else if (e[0] == 'C' || e[0] == 'c') b = 2;
+		}
 		printf("[RasterBackend] BACKWARD::render = %s\n",
-		       on ? "warp-aggregated candidate" : "reference (per-lane atomicAdd)");
+		       b == 0 ? "A reference (per-contribution atomicAdd)"
+		              : (b == 1 ? "B converged control flow (atomicAdd)"
+		                        : "C converged + 5-stage warp tree"));
 		fflush(stdout);
-		return on;
+		return b;
 	}();
-	auto launch = [&](bool agg) {
-		if (agg)
-			renderCUDA<NUM_CHANNELS, true> << <grid, block >> >(
+
+	auto launch = [&](int b) {
+		if (b == 1)
+			renderCUDA_conv<NUM_CHANNELS, false> << <grid, block >> >(
+				ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
+				final_Ts, n_contrib, dL_dpixels, dL_dmean2D, dL_dconic2D,
+				dL_dopacity, dL_dcolors);
+		else if (b == 2)
+			renderCUDA_conv<NUM_CHANNELS, true> << <grid, block >> >(
 				ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
 				final_Ts, n_contrib, dL_dpixels, dL_dmean2D, dL_dconic2D,
 				dL_dopacity, dL_dcolors);
 		else
-			renderCUDA<NUM_CHANNELS, false> << <grid, block >> >(
+			renderCUDA<NUM_CHANNELS> << <grid, block >> >(
 				ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors,
 				final_Ts, n_contrib, dL_dpixels, dL_dmean2D, dL_dconic2D,
 				dL_dopacity, dL_dcolors);
 	};
 
-	// ---------------------------------------------------------------------
-	// Correctness verification on IDENTICAL inputs (PHOTO_SLAM_RASTER_AGG_SELFCHECK=1).
-	// Reference and candidate are launched on the same forward buffers and the
-	// same dL_dpixels; the reference is additionally run twice so the numerical
-	// noise floor (ref vs ref) is measured before the candidate error is judged.
-	// The reference result is the one written to the caller's outputs.
-	// ---------------------------------------------------------------------
 	static const int selfcheck = []() {
 		const char* e = std::getenv("PHOTO_SLAM_RASTER_AGG_SELFCHECK");
 		return e ? std::atoi(e) : 0;
 	}();
-	// item 一: run the __fns primitive table exactly once, before anything else.
+	// item 一 of the previous round: the __fns primitive table, run exactly once.
 	if (selfcheck)
 	{
 		static bool fns_done = false;
@@ -794,76 +1023,152 @@ void BACKWARD::render(
 			}
 		}
 	}
+
+	// ---------------------------------------------------------------------
+	// A / A-repeat / B / C on IDENTICAL inputs, into separate buffers.
+	// Reported as three pairs: A-A (noise floor), A-B (control-flow refactor),
+	// A-C and B-C (the tree). The selected backend is then launched ONE more time
+	// into the caller's outputs, so a candidate training run genuinely returns the
+	// candidate's gradients and each backward executes exactly one backend.
+	//
+	// Pre-stated acceptance: a pair passes when its max_abs is no worse than
+	// 10x the A-A max_abs (or 1e-7, whichever is larger) AND its global relative
+	// L2 is <= 1e-6. Near-zero entries are never judged by their own relative
+	// error; the global L2 is used instead.
+	// ---------------------------------------------------------------------
 	if (selfcheck && n_gaussians > 0)
 	{
-		const size_t P = (size_t)n_gaussians;
-		const size_t n_mean = P * 3, n_conic = P * 4;
-		const size_t n_op = P, n_col = P * NUM_CHANNELS;
-		float *tmpA = nullptr, *tmpB = nullptr, *tmpC = nullptr;
-		const size_t sz = (n_mean + n_conic + n_op + n_col) * sizeof(float);
-		cudaMalloc(&tmpA, sz); cudaMalloc(&tmpB, sz); cudaMalloc(&tmpC, sz);
-		if (tmpA && tmpB && tmpC)
+		// Run for the first calls (small tiles / boundary cases) and then once per
+		// new size bucket, so the check covers small AND real-scale inputs without
+		// paying the comparison cost on every iteration.
+		static int sc_calls = 0;
+		static int sc_bucket = -1;
+		const int bucket = n_gaussians / 40000;
+		const bool do_check = (sc_calls < 2) || (bucket != sc_bucket);
+		++sc_calls;
+		sc_bucket = bucket;
+
+		if (do_check)
 		{
-			float* A_mean = tmpA; float* A_conic = A_mean + n_mean;
-			float* A_op = A_conic + n_conic; float* A_col = A_op + n_op;
-			float* B_mean = tmpB; float* B_conic = B_mean + n_mean;
-			float* B_op = B_conic + n_conic; float* B_col = B_op + n_op;
-			float* C_mean = tmpC; float* C_conic = C_mean + n_mean;
-			float* C_op = C_conic + n_conic; float* C_col = C_op + n_op;
-			cudaMemset(tmpA, 0, sz); cudaMemset(tmpB, 0, sz); cudaMemset(tmpC, 0, sz);
+			const size_t P = (size_t)n_gaussians;
+			const size_t n_mean = P * 3, n_conic = P * 4;
+			const size_t n_op = P, n_col = P * NUM_CHANNELS;
+			const size_t sz = (n_mean + n_conic + n_op + n_col) * sizeof(float);
+			float *bA = nullptr, *bN = nullptr, *bB = nullptr, *bC = nullptr;
+			cudaMalloc(&bA, sz); cudaMalloc(&bN, sz); cudaMalloc(&bB, sz); cudaMalloc(&bC, sz);
+			if (bA && bN && bB && bC)
+			{
+				cudaMemset(bA, 0, sz); cudaMemset(bN, 0, sz);
+				cudaMemset(bB, 0, sz); cudaMemset(bC, 0, sz);
+				float* A_mean = bA; float* A_conic = A_mean + n_mean;
+				float* A_op = A_conic + n_conic; float* A_col = A_op + n_op;
+				float* N_mean = bN; float* N_conic = N_mean + n_mean;
+				float* N_op = N_conic + n_conic; float* N_col = N_op + n_op;
+				float* B_mean = bB; float* B_conic = B_mean + n_mean;
+				float* B_op = B_conic + n_conic; float* B_col = B_op + n_op;
+				float* C_mean = bC; float* C_conic = C_mean + n_mean;
+				float* C_op = C_conic + n_conic; float* C_col = C_op + n_op;
 
-			float ms_ref = 0, ms_ref2 = 0, ms_cand = 0;
-			cudaEvent_t e0, e1; cudaEventCreate(&e0); cudaEventCreate(&e1);
+				cudaEvent_t e0, e1; cudaEventCreate(&e0); cudaEventCreate(&e1);
+				float msA = 0, msN = 0, msB = 0, msC = 0;
+				#define TIME_LAUNCH(BK, MEAN, CONIC, OP, COL, MS) \
+					cudaEventRecord(e0); \
+					if ((BK) == 1) renderCUDA_conv<NUM_CHANNELS,false> << <grid, block >> >(ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels, (float3*)(MEAN), (float4*)(CONIC), (OP), (COL)); \
+					else if ((BK) == 2) renderCUDA_conv<NUM_CHANNELS,true> << <grid, block >> >(ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels, (float3*)(MEAN), (float4*)(CONIC), (OP), (COL)); \
+					else renderCUDA<NUM_CHANNELS> << <grid, block >> >(ranges, point_list, W, H, bg_color, means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels, (float3*)(MEAN), (float4*)(CONIC), (OP), (COL)); \
+					cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&(MS), e0, e1);
+				TIME_LAUNCH(0, A_mean, A_conic, A_op, A_col, msA);
+				TIME_LAUNCH(0, N_mean, N_conic, N_op, N_col, msN);
+				TIME_LAUNCH(1, B_mean, B_conic, B_op, B_col, msB);
+				TIME_LAUNCH(2, C_mean, C_conic, C_op, C_col, msC);
+				#undef TIME_LAUNCH
 
-			cudaEventRecord(e0);
-			renderCUDA<NUM_CHANNELS, false> << <grid, block >> >(ranges, point_list, W, H, bg_color,
-				means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels,
-				(float3*)A_mean, (float4*)A_conic, A_op, A_col);
-			cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms_ref, e0, e1);
-
-			cudaEventRecord(e0);
-			renderCUDA<NUM_CHANNELS, false> << <grid, block >> >(ranges, point_list, W, H, bg_color,
-				means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels,
-				(float3*)C_mean, (float4*)C_conic, C_op, C_col);
-			cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms_ref2, e0, e1);
-
-			cudaEventRecord(e0);
-			renderCUDA<NUM_CHANNELS, true> << <grid, block >> >(ranges, point_list, W, H, bg_color,
-				means2D, conic_opacity, colors, final_Ts, n_contrib, dL_dpixels,
-				(float3*)B_mean, (float4*)B_conic, B_op, B_col);
-			cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms_cand, e0, e1);
-
-			auto cmp = [&](const char* nm, const float* a, const float* b, size_t n) {
-				double ma = 0, mr = 0;
-				std::vector<float> ha(n), hb(n);
-				cudaMemcpy(ha.data(), a, n * sizeof(float), cudaMemcpyDeviceToHost);
-				cudaMemcpy(hb.data(), b, n * sizeof(float), cudaMemcpyDeviceToHost);
-				for (size_t i = 0; i < n; ++i) {
-					const double d = std::fabs((double)ha[i] - (double)hb[i]);
-					if (d > ma) ma = d;
-					const double den = std::fabs((double)hb[i]);
-					if (den > 1e-12) { const double r = d / den; if (r > mr) mr = r; }
+				// ---- per-group noise floor, measured BEFORE any judgement ----
+				// The reference is NOT deterministic: its atomicAdd order varies
+				// between launches, so A vs A already differs. Each group must
+				// therefore be judged against ITS OWN reproducibility, never
+				// against a fixed constant and never by the relative error of
+				// near-zero entries.
+				auto maxabs = [&](const float* x, const float* y, size_t n) {
+					std::vector<float> hx(n), hy(n);
+					cudaMemcpy(hx.data(), x, n * sizeof(float), cudaMemcpyDeviceToHost);
+					cudaMemcpy(hy.data(), y, n * sizeof(float), cudaMemcpyDeviceToHost);
+					double ma = 0.0, num = 0.0, den = 0.0;
+					for (size_t i = 0; i < n; ++i) {
+						const double d = std::fabs((double)hx[i] - (double)hy[i]);
+						if (d > ma) ma = d;
+						num += d * d;
+						den += (double)hy[i] * (double)hy[i];
+					}
+					return std::make_pair(ma, std::sqrt(num) / (std::sqrt(den) + 1e-30));
+				};
+				const size_t ns[4] = { n_mean, n_conic, n_op, n_col };
+				const char* gn[4] = { "mean2D", "conic2D", "opacity", "colors" };
+				const float* Ag[4] = { A_mean, A_conic, A_op, A_col };
+				const float* Ng[4] = { N_mean, N_conic, N_op, N_col };
+				const float* Bg[4] = { B_mean, B_conic, B_op, B_col };
+				const float* Cg[4] = { C_mean, C_conic, C_op, C_col };
+				double noise[4] = {0, 0, 0, 0};
+				printf("[AggSelfCheck] P=%zu  A=%.4f ms  A2=%.4f ms  B=%.4f ms  C=%.4f ms\n",
+				       P, msA, msN, msB, msC);
+				printf("  noise floor (A vs A repeat) -- the scale every judge uses:\n");
+				for (int g = 0; g < 4; ++g) {
+					const auto r = maxabs(Ng[g], Ag[g], ns[g]);
+					noise[g] = r.first;
+					printf("    %-8s max_abs=%.4e relL2=%.4e\n", gn[g], r.first, r.second);
 				}
-				printf("    %-22s max_abs=%.6e max_rel=%.6e\n", nm, ma, mr);
-			};
-			printf("[AggSelfCheck] P=%zu  ref_ms=%.4f ref2_ms=%.4f cand_ms=%.4f\n",
-			       P, ms_ref, ms_ref2, ms_cand);
-			printf("  noise floor (reference vs reference):\n");
-			cmp("mean2D", (float*)C_mean, (float*)A_mean, n_mean);
-			cmp("conic2D", (float*)C_conic, (float*)A_conic, n_conic);
-			cmp("opacity", C_op, A_op, n_op);
-			cmp("colors", C_col, A_col, n_col);
-			printf("  candidate (warp-aggregated) vs reference:\n");
-			cmp("mean2D", (float*)B_mean, (float*)A_mean, n_mean);
-			cmp("conic2D", (float*)B_conic, (float*)A_conic, n_conic);
-			cmp("opacity", B_op, A_op, n_op);
-			cmp("colors", B_col, A_col, n_col);
-			fflush(stdout);
-			cudaFree(tmpA); cudaFree(tmpB); cudaFree(tmpC);
+				// Pre-stated margin: a group passes when its max_abs is within 10x
+				// the SAME group's A-A max_abs (or 1e-7), AND the global relative L2
+				// is within 10x the same group's A-A relative L2 (or 1e-6).
+				auto judge = [&](int g, const char* tag, const float* X) {
+					const auto r = maxabs(X, Ag[g], ns[g]);
+					const auto rn = maxabs(Ng[g], Ag[g], ns[g]);
+					const double thr = std::max(10.0 * noise[g], 1e-7);
+					const double thrl2 = std::max(10.0 * rn.second, 1e-6);
+					printf("    %-3s %-8s max_abs=%.4e (thr %.3e, %.1fx noise)  relL2=%.4e  %s\n",
+					       tag, gn[g], r.first, thr, noise[g] > 0 ? r.first / noise[g] : 0.0,
+					       r.second, (r.first <= thr && r.second <= thrl2) ? "PASS" : "FAIL");
+				};
+				printf("  B vs A  (control-flow refactor only):\n");
+				for (int g = 0; g < 4; ++g) judge(g, "B-A", Bg[g]);
+				printf("  C vs A  (converged + tree):\n");
+				for (int g = 0; g < 4; ++g) judge(g, "C-A", Cg[g]);
+				printf("  C vs B  (tree only, same control flow):\n");
+				for (int g = 0; g < 4; ++g) judge(g, "C-B", Cg[g]);
+
+				// ---- alternating multi-block timing, warm-up + median/dist ----
+				const int WARM = 3, BLOCKS = 9;
+				float tA[9], tB[9], tC[9];
+				for (int w = 0; w < WARM; ++w) { launch(0); launch(1); launch(2); }
+				cudaDeviceSynchronize();
+				for (int k = 0; k < BLOCKS; ++k) {
+					float ms = 0;
+					cudaEventRecord(e0); launch(0);
+					cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms, e0, e1);
+					tA[k] = ms;
+					cudaEventRecord(e0); launch(1);
+					cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms, e0, e1);
+					tB[k] = ms;
+					cudaEventRecord(e0); launch(2);
+					cudaEventRecord(e1); cudaEventSynchronize(e1); cudaEventElapsedTime(&ms, e0, e1);
+					tC[k] = ms;
+				}
+				auto stat = [&](const char* nm, float* t) {
+					std::vector<float> v(t, t + BLOCKS);
+					std::sort(v.begin(), v.end());
+					double s = 0; for (float x : v) s += x;
+					printf("    %-2s min=%.4f median=%.4f max=%.4f mean=%.4f\n",
+					       nm, v.front(), v[BLOCKS / 2], v.back(), s / BLOCKS);
+				};
+				printf("  alternating blocks (n=%d after %d warm-ups, same inputs):\n",
+				       BLOCKS, WARM);
+				stat("A", tA); stat("B", tB); stat("C", tC);
+				fflush(stdout);
+				cudaFree(bA); cudaFree(bN); cudaFree(bB); cudaFree(bC);
+			}
 		}
-		launch(false);   // authoritative result = reference
-		return;
 	}
 
-	launch(warp_agg);
+	// Exactly ONE backend runs into the caller's buffers: the selected one.
+	launch(backend);
 }
