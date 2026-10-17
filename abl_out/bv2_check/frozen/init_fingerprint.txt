@@ -1,7 +1,0 @@
-fingerprint 6971d30494f47349_n1940_nline151
-gaussians 1940
-line_gaussians 151
-checkpoint /workspace/code/PSL-perf/abl_out/bv2_check/frozen/init_checkpoint.pt
-input_hash 244608adc4245a0d
-image_hash 912dfbe968fdf40a
-kf_seq_hash f7f8b327024cdaeb

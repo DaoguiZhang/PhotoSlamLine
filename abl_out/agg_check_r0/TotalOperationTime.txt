@@ -1,2 +1,0 @@
-Total Operation Time (seconds): 887.281
-Total Operation Time (minutes): 14.788

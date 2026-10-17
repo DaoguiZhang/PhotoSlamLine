@@ -1,4 +1,0 @@
-# completed_optimizer_steps
-0
-1000
-5000

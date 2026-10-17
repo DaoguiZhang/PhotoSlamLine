@@ -1,9 +1,0 @@
-variant,zero_grad_ms,fwd_only_ms,fwd_bwd_ms,derived_fwd_ms,derived_bwd_ms
-render_only,3.158e-05,0.686816,0.686816,0.686784,0
-photo,3.158e-05,1.52048,8.94838,1.52045,7.4279
-photo_aniso,3.158e-05,1.49353,12.1669,1.49349,10.6734
-photo_aniso_position,3.158e-05,1.66861,13.4761,1.66858,11.8075
-photo_aniso_ecc,3.158e-05,2.08358,13.1389,2.08355,11.0553
-photo_aniso_ori,3.158e-05,1.8133,13.6623,1.81327,11.849
-photo_aniso_all_struct,3.158e-05,2.21943,11.1715,2.2194,8.9521
-optimizer_step,0,0.120323,0.120323,0.120323,0

@@ -1,2 +1,0 @@
-batch,iteration,keyframe_fid,candidates,kept,keep_frac,seed
-1,1,101,10792,5396,0.5,20260101
