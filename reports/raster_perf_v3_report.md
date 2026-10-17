@@ -72,20 +72,33 @@ twice for the noise floor:
 | max_rel | ≤ 1.2e-02 | ≤ 5.1e-02 |
 
 The candidate's error is now the same order as the reference's own run-to-run reproducibility, i.e.
-**float summation order only** — no missing, duplicated or mis-assigned contributions. Smaller cases
-in the same run behave the same way (conic2D 9.1e-05 vs a 1.3e-05 noise floor). All seven write-back
-sites were aggregated at once, so the per-group table above already covers `mean2D`, `conic2D`,
-`opacity` and `colors`; the downstream `xyz`/scale/rotation/SH gradients are produced from these by
-`BACKWARD::preprocess`, whose inputs are now equal to the reference's to float precision.
+**float summation order only** — no missing, duplicated or mis-assigned contributions. All seven
+write-back sites were aggregated at once, so the per-group table above already covers `mean2D`,
+`conic2D`, `opacity` and `colors`; the downstream `xyz`/scale/rotation/SH gradients are produced from
+these by `BACKWARD::preprocess`, whose inputs are now equal to the reference's to float precision.
+
+Two further scales from the same run confirm it independently:
+
+| | P = 159 452: noise floor | P = 159 452: candidate |
+|---|---|---|
+| `mean2D` max_abs | 9.02e-10 | **2.85e-09** |
+| `conic2D` max_abs | 4.29e-06 | **3.43e-05** |
+| `opacity` max_abs | 1.37e-09 | **9.33e-09** |
+| `colors` max_abs | 4.37e-09 | **1.51e-08** |
+| max_rel | ≤ 2.1e-02 | ≤ 3.6e-02 |
+
+(same pattern for the P≈1 900 cases, e.g. `conic2D` 6.3e-06 against a 4.3e-06 noise floor).
+
 
 Note the previous round's failure was **not** caused by the aggregation idea: it was caused by a
 colliding lane id writing every aggregated sum twice, plus a mis-typed shuffle index.
 
 ## 五 Performance: correct, but **~8× slower** — route terminated
 
-| P = 148 727 | reference | reference (repeat) | candidate |
+| P | reference | reference (repeat) | candidate |
 |---|---|---|---|
-| single-kernel time | 10.01 ms | 9.70 ms | **81.56 ms** |
+| 148 727 | 10.01 ms | 9.70 ms | **81.56 ms** |
+| 159 452 | 5.61 ms | 5.27 ms | **36.01 ms** |
 
 Timed as three separate single-kernel launches on identical inputs (the self-check's own timing), **not**
 as a total for the three-call sequence. Cold: the per-lane enumeration costs `__popc(act)` shuffles per
