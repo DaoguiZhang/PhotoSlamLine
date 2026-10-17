@@ -3,7 +3,7 @@
 状态：**v1 与复核均为负；强制 GBA 形变实验结束。GBA 形变默认关闭
 （`PHOTO_SLAM_GBA_APPLY_CORRECTION=1` 显式开启），事件消费、相机更新、
 事件版本与 legacy LOOP 更正全部保留。**
-HEAD：本次提交。工作树干净（构建产物一并提交）。
+HEAD：`a26e835d03`。源码/脚本/报告入 Git；**二进制与 results/ 独立归档，不再提交到源码 Git**。
 
 ## 本轮结论（详细见 `reports/gba_state_audit_report.md`）
 
