@@ -55,3 +55,55 @@ grep -E "Loop Closure Detected|Starting Global Bundle Adjustment|SyncEvent" \
 通过判据：日志中出现 `Starting Global Bundle Adjustment` 且随后出现至少一条
 `[SyncEvent] GlobalBA evt=N ... ACCEPTED`，再出现同一 evt 时为
 `DUPLICATE_REJECTED`；`in_scene` 应接近 `kfs`。
+
+---
+
+## 真实 TUM 运行结果（正确入口，已执行）
+
+- 工作树：`b2e997a5d9`，dirty=0；二进制 `bin/tum_rgbd` sha256 `d321f0a1a98752e8…`
+- CLI 已从 `examples/tum_rgbd.cpp` 核实（argc 7 或 8）：
+  `argv[1]=ORBvocab, [2]=ORB cfg, [3]=gaussian cfg, [4]=dataset, [5]=associations, [6]=out, [7]=no_viewer`
+- 命令（已执行）：
+```bash
+PHOTO_SLAM_RASTER_BACKEND=C PHOTO_SLAM_LINE_LOSS_EVERY=0 \
+  bin/tum_rgbd ORB-SLAM3/Vocabulary/ORBvoc.txt \
+  cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
+  cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
+  /workspace/code/SEGS-SLAM/datasets/tum/rgbd_dataset_freiburg3_long_office_household \
+  cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg3_long_office_household.txt \
+  abl_out/geom_gba_tum no_viewer
+```
+- PID 1630967，**真实退出码 134（SIGABRT）**，不是 tee 的成功。
+- 崩溃点：第 97 行 `free(): invalid pointer`，紧跟在 KF 2 的
+  `LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg`
+  之后；崩溃前最后一条 loop 相关日志是 `LoopClosing bFindedRegion false`。
+- 计数（`abl_out/geom_gba_tum/terminal.log`）：
+  `Starting Global Bundle Adjustment` = **0**
+  `SyncEvent` = **0**
+  `Loop Closure Detected` = **0**
+
+**结论：GBA 从未开始，事件链路未被覆盖。** 本轮的 "GBA写回 → 发布 → 消费 → ACCEPTED"
+顺序**没有任何运行证据**，不做通过声明。ACCEPTED 语义本来也只是"通知被接受"，
+不代表 Gaussian 已更正。
+
+**崩溃归因未确定**：崩溃发生在第一个 loop/GBA 之前，而本轮改动中唯一处于该热路径的是
+`MappingOperation` 拷贝构造新增的成员搬运与 mapper 的 `case GlobalBA`（此时不会执行）。
+因此更可能是既有 TUM 线路的堆错误，但**未做二分验证，不能断言**。
+
+## 下一条具体命令（二分归因）
+
+```bash
+cd /workspace/code/PSL-perf
+git worktree add /workspace/code/PSL-bisect b2e997a5d9~1
+cd /workspace/code/PSL-bisect && mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && make -j8 tum_rgbd
+cd /workspace/code/PSL-bisect && PHOTO_SLAM_RASTER_BACKEND=C PHOTO_SLAM_LINE_LOSS_EVERY=0 \
+  bin/tum_rgbd ORB-SLAM3/Vocabulary/ORBvoc.txt \
+  cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
+  cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
+  /workspace/code/SEGS-SLAM/datasets/tum/rgbd_dataset_freiburg3_long_office_household \
+  cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg3_long_office_household.txt \
+  /tmp/bisect_tum no_viewer; echo "BISECT_EXIT=$?"
+```
+若同样 134 崩溃 → 与本轮改动无关，先修既有崩溃（或改用 office0 等已知可跑序列产生回环），
+再回来验证事件链路。若正常 → 本轮改动引入，回退 `Atlas.h` 拷贝构造成员后重试。
