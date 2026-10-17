@@ -1454,11 +1454,55 @@ bool runRigidCorrectionContractTest()
     check(mk(Rz, {0.2f, 0.4f, -0.1f}), {1.f, 0.f, 0.f}, {0.5f, 0.1f, -0.7f}, 1.f, "Rz90+trans");
     check(mk(Rz, {0.2f, 0.4f, -0.1f}), {1.f, 0.f, 0.f}, {0.5f, 0.1f, -0.7f}, 2.f, "Rz90+scale2");
 
+    // ------------------------------------------------------------------
+    // geom-sync-v2 里程碑 1: measure the GPU centre path instead of deriving it.
+    // Calls the real API the mapper calls, with the tensor the mapper builds
+    // (EigenMatrix2TorchTensor(M, CUDA).transpose(0,1)), and compares against the
+    // CPU reference. Tolerance fixed BEFORE running: 1e-4 absolute (fp32 kernel
+    // on a 4x4 with O(1) coordinates).
+    // ------------------------------------------------------------------
+    float worst_gpu = 0.f;
+    bool gpu_ran = false;
+    if (torch::cuda::is_available()) {
+        gpu_ran = true;
+        const float tol_gpu = 1e-4f;
+        std::vector<Eigen::Vector3f> pts_cpu = {
+            {0.4f, -0.3f, 1.9f}, {-1.1f, 0.7f, 0.5f},
+            {2.0f, 1.3f, -0.8f}, {0.05f, -2.2f, 3.1f}};
+        auto run_case = [&](const Eigen::Matrix4f& M, const char* label) {
+            torch::Tensor pts = torch::zeros({(long)pts_cpu.size(), 3},
+                                             torch::TensorOptions().dtype(torch::kFloat));
+            for (size_t i = 0; i < pts_cpu.size(); ++i)
+                for (int j = 0; j < 3; ++j)
+                    pts.index_put_({(long)i, j}, pts_cpu[i][j]);
+            torch::Tensor pts_gpu = pts.to(torch::kCUDA);
+            torch::Tensor mt = tensor_utils::EigenMatrix2TorchTensor(M, torch::kCUDA)
+                                   .transpose(0, 1);
+            transformPoints(pts_gpu, mt);
+            cudaDeviceSynchronize();
+            torch::Tensor back = pts_gpu.to(torch::kCPU);
+            float e = 0.f;
+            for (size_t i = 0; i < pts_cpu.size(); ++i) {
+                Eigen::Vector3f ref = M.block<3, 3>(0, 0) * pts_cpu[i] + M.block<3, 1>(0, 3);
+                for (int j = 0; j < 3; ++j)
+                    e = std::max(e, std::abs(back.index({(long)i, j}).item<float>() - ref[j]));
+            }
+            worst_gpu = std::max(worst_gpu, e);
+            printf("[SyncContract] GPU centre %-14s max_abs_vs_cpu=%.2e %s\n",
+                   label, e, e < tol_gpu ? "OK" : "MISMATCH");
+        };
+        run_case(mk(Eigen::Matrix3f::Identity(), Eigen::Vector3f::Zero()), "identity");
+        run_case(mk(Eigen::Matrix3f::Identity(), {0.5f, -0.25f, 1.f}), "translation");
+        run_case(mk(Rz, {0.2f, 0.4f, -0.1f}), "Rz90+trans");
+    } else {
+        printf("[SyncContract] GPU centre SKIPPED (no CUDA device)\n");
+    }
+
     const bool pass = (worst_rec < 1e-5f) && (worst_dir < 1e-5f) &&
-                      (worst_anchor < 1e-5f);
-    printf("[SyncContract] worst recover=%.2e direction=%.2e anchor=%.2e | "
-           "old expression error=%.2e | %s\n",
-           worst_rec, worst_dir, worst_anchor, old_dir,
+                      (worst_anchor < 1e-5f) && (!gpu_ran || worst_gpu < 1e-4f);
+    printf("[SyncContract] worst recover=%.2e direction=%.2e anchor=%.2e "
+           "gpu_centre=%.2e | old expression error=%.2e | %s\n",
+           worst_rec, worst_dir, worst_anchor, worst_gpu, old_dir,
            pass ? "PASS (new entry)" : "FAIL (new entry)");
     fflush(stdout);
     return pass;

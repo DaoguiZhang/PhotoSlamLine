@@ -87,3 +87,63 @@ PHOTO_SLAM_SYNC_CONTRACT_TEST=1 CONDS=RA W=/workspace/code/PSL-perf \
   bash scripts/run_frozen_abl.sh synctest 20 office0 0
 grep SyncContract abl_out/synctest/run.log
 ```
+
+---
+
+# 续：里程碑 1 的 GPU 实测（自 `f02c52920d` 起）
+
+## 已完成
+
+`runRigidCorrectionContractTest` 增加**真实 GPU 调用**：用 mapper 实际构造的同一张量
+（`EigenMatrix2TorchTensor(M, kCUDA).transpose(0,1)`）调用 `transformPoints`，与 CPU
+标准几何比较。容差在运行前固定为 **1e-4 绝对误差**。
+
+```
+[SyncContract] GPU centre identity    max_abs_vs_cpu=0.00e+00 OK
+[SyncContract] GPU centre translation max_abs_vs_cpu=0.00e+00 OK
+[SyncContract] GPU centre Rz90+trans  max_abs_vs_cpu=0.00e+00 OK
+[SyncContract] ... gpu_centre=0.00e+00 | old expression error=2.00e+00 | PASS
+```
+
+上一轮"仅由列主序推导确认、未实测"的边界**已消除**：中心路径在三组刚体用例上与 CPU 逐位一致。
+
+里程碑 1 覆盖情况：
+
+| 检查项 | 状态 |
+|---|---|
+| 中心（GPU 实测） | **通过** |
+| 线锚点 `xyz_init_` | 通过（CPU 参考，误差 0） |
+| 线方向 | 通过（CPU 参考，误差 0；旧表达式误差 2.00） |
+| 旋转/平移恢复 | 通过（误差 0） |
+| 协方差方向（四元数） | **未测** |
+| 刚体下尺度保持 | **未测** |
+| 未选中 Gaussian 保持原值 | **未测** |
+| 线位置残差 + 线缓存读新值 | **未测** |
+
+后四项需要在一个真实 `GaussianModelLine` 实例上调用
+`scaledTransformVisiblePointsOfKeyframe`（含 `markVisible`），本轮未搭建该夹具。
+
+## 执行中断说明
+
+**状态：执行中断（上下文预算用尽），不是缺数据或技术依赖阻塞。**
+
+里程碑 2–8 全部未开始：`ref_kf_id_`、事件通道、统一应用、事件/状态验证、
+真实 TUM 回环运行、短窗口恢复对照、一键串行脚本。
+
+交接时仓库状态：`src/gaussian_model_line.cpp` 与 `src/gaussian_mapper_line.cpp`
+已编译通过，默认行为不变（新路径仅在 `PHOTO_SLAM_SYNC_CONTRACT_TEST=1` 时运行自检；
+回环更正仍走已修复的 legacy 路径）。后端 C 实现未改动。
+
+## 下一条可执行命令
+
+```bash
+cd /workspace/code/PSL-perf && cd build && make -j8 && cd .. && \
+rm -rf abl_out/synctest_gpu && \
+PHOTO_SLAM_SYNC_CONTRACT_TEST=1 CONDS=RA W=/workspace/code/PSL-perf \
+  bash scripts/run_frozen_abl.sh synctest_gpu 20 office0 0 && \
+grep SyncContract abl_out/synctest_gpu/run.log
+```
+
+下一步（里程碑 1 收尾）应在 `tests/` 下新建一个独立夹具：构造 N=8 的
+`GaussianModelLine`，标记 3 行为 line，调用 `scaledTransformVisiblePointsOfKeyframe`
+两次（选中/未选中），逐项断言协方差朝向、尺度不变、未选中行逐位不变、线缓存版本号变化。
