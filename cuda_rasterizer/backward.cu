@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cmath>
 #include <vector>
+#include <string>
 #include "auxiliary.h"
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
@@ -400,27 +401,67 @@ __global__ void preprocessCUDA(
 }
 
 // ---------------------------------------------------------------------------
-// raster-perf-v2: warp-aggregated gradient write-back (candidate backend).
+// raster-perf-v3 item 一: standalone test of __fns, with NO Gaussian rendering
+// involved. Settles the documented PTX semantics for the cases that matter here:
+//   * offset = 0
+//   * masks that do / do not contain lane 0
+//   * the highest bit, a single lane, alternating bits, irregular masks
+//   * the invalid return value
+// and compares the ORIGINAL enumeration call __fns(mask,0,i+1) against the
+// modified one __fns(mask,0,i), so the report's explanation is corrected by
+// measurement instead of by reading.
 //
-// PRECONDITION, verified in this file: inside the inner loop `global_id` is read
-// from `collected_id[j]` (SHARED memory), so it is identical for every thread of
-// the block at a given inner-loop step. All participating lanes therefore write
-// to the SAME Gaussian and the SAME gradient component, and different Gaussians
-// can never be mixed. Lanes that left the loop via `continue` (power > 0,
-// alpha < 1/255) or that had already reached last_contributor are not in
-// __activemask() and are excluded, so no contribution is dropped or duplicated.
-//
-// The reduction enumerates the active lanes explicitly, with a trip count that
-// is uniform for every lane in the active mask. That is valid for ANY subset of
-// lanes - unlike a butterfly shuffle over a partial mask, which would read from
-// lanes outside the mask. Exactly one lane per active mask issues one atomicAdd
-// per gradient component.
-//
-// Semantics preserved: the per-pixel transmittance recursion, the colour
-// recursion, the alpha threshold, the early exits and every gradient formula are
-// untouched; only the summation order of the write-back changes, which float
-// addition permits.
+// __fns(mask, base, offset) returns the bit position of the (offset)-th set bit
+// with position STRICTLY GREATER THAN base; i.e. the search starts after `base`
+// and offset is 0-based from there. It returns 0xFFFFFFFF when no such bit
+// exists. Only one lane of the warp evaluates every case, so the printed table
+// is a per-case answer rather than a per-lane answer.
 // ---------------------------------------------------------------------------
+__device__ __forceinline__ unsigned long long fns_tbl_col(const unsigned mask, const int offset)
+{
+	// Encode "invalid" distinctly from a valid lane id.
+	const unsigned long long r = static_cast<unsigned long long>(__fns(mask, 0u, offset));
+	return (r == 0xFFFFFFFFull) ? 0xFFFFFFFFFFFFFFFFull : r;
+}
+
+__global__ void fnsSelfTestKernel(unsigned long long* out /* [6][4] */)
+{
+	if (threadIdx.x != 0) return;
+	const unsigned cases[6] = {
+		0xFFFFFFFFu,  // full warp, contains lane 0
+		0xFFFFFFFEu,  // lane 0 cleared; lowest set bit is lane 1
+		0x80000000u,  // only the highest bit
+		0x00000001u,  // only lane 0
+		0xAAAAAAAAu,  // alternating, starts at lane 1
+		0x00050005u,  // irregular: lanes 0, 2, 16, 18
+	};
+	for (int c = 0; c < 6; ++c)
+	{
+		out[c * 4 + 0] = static_cast<unsigned long long>(cases[c]);
+		out[c * 4 + 1] = fns_tbl_col(cases[c], 0);   // offset 0
+		out[c * 4 + 2] = fns_tbl_col(cases[c], 1);   // offset 1 (old i+1 at i=0)
+		out[c * 4 + 3] = fns_tbl_col(cases[c], 2);   // offset 2
+	}
+}
+
+// ---------------------------------------------------------------------------
+// raster-perf-v3 item 二: full-warp 5-stage tree reduction.
+//
+// Contract: EVERY thread of the physical warp executes this, and threads that
+// must not contribute pass 0.0f. That is why the loop body below was rewritten
+// so that no `continue` can leave a lane outside the converged region: a sparse
+// mask must never be applied to a plain shuffle tree, and __activemask() is not
+// a convergence point. The result is only valid in lane 0.
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ float warp_tree_sum(float v)
+{
+#pragma unroll
+	for (int off = 16; off > 0; off >>= 1)
+		v += __shfl_down_sync(0xffffffffu, v, off);
+	return v;
+}
+
+// Old per-lane enumeration kept for reference only (archived candidate).
 __device__ __forceinline__ void warp_agg_add(float* __restrict__ addr, const float val)
 {
 	const unsigned act = __activemask();
@@ -429,14 +470,20 @@ __device__ __forceinline__ void warp_agg_add(float* __restrict__ addr, const flo
 	float total = 0.0f;
 	for (int i = 0; i < n; ++i)
 	{
-		// __fns(mask, base, offset) searches for the offset-th set bit AFTER bit
-		// `base`; offset is 0-based from `base`. Passing i (not i+1) enumerates
-		// every active lane exactly once, starting with the lowest one.
-		const int lane = __fns(act, 0, i);
+		// MEASURED semantics (see [FnsTest]): __fns(mask, 0, k) with k >= 1 returns
+		// the (k-1)-th set bit at or after bit 0, and k == 0 only tests bit 0.
+		// So the k-th lane of the mask needs offset i+1, NOT i.
+		const int lane = __fns(act, 0, i + 1);
 		if (lane < 0) break;
 		total += __shfl_sync(act, val, lane);
 	}
-	if ((unsigned)(threadIdx.x & 31u) == (unsigned)(__ffs(act) - 1))
+	// The lane id must be the HARDWARE lane, i.e. the linear thread index within
+	// the warp. The block is 16x16, so a warp spans two tile rows and
+	// (threadIdx.x & 31) COLLIDES between them: two threads would be treated as
+	// the leader and the aggregated sum would be added twice. That was the real
+	// integration bug.
+	const unsigned laneid = (threadIdx.y * BLOCK_X + threadIdx.x) & 31u;
+	if (laneid == (unsigned)(__ffs(act) - 1))
 		atomicAdd(addr, total);
 }
 
@@ -720,6 +767,33 @@ void BACKWARD::render(
 		const char* e = std::getenv("PHOTO_SLAM_RASTER_AGG_SELFCHECK");
 		return e ? std::atoi(e) : 0;
 	}();
+	// item 一: run the __fns primitive table exactly once, before anything else.
+	if (selfcheck)
+	{
+		static bool fns_done = false;
+		if (!fns_done)
+		{
+			fns_done = true;
+			unsigned long long* d = nullptr;
+			if (cudaMalloc(&d, 6 * 4 * sizeof(unsigned long long)) == cudaSuccess)
+			{
+				fnsSelfTestKernel << <1, 32 >> > (d);
+				cudaDeviceSynchronize();
+				unsigned long long h[24] = {0};
+				cudaMemcpy(h, d, sizeof(h), cudaMemcpyDeviceToHost);
+				printf("[FnsTest] __fns(mask, base=0, offset)  (0xffffffffffffffff = invalid)\n");
+				const char* nm[6] = {"FFFFFFFF", "FFFFFFFE", "80000000",
+				                     "00000001", "AAAAAAAA", "00050005"};
+				for (int c = 0; c < 6; ++c)
+					printf("    mask=%s  off0=%s  off1=%s  off2=%s\n", nm[c],
+					       h[c*4+1] == 0xFFFFFFFFFFFFFFFFull ? "invalid" : std::to_string(h[c*4+1]).c_str(),
+					       h[c*4+2] == 0xFFFFFFFFFFFFFFFFull ? "invalid" : std::to_string(h[c*4+2]).c_str(),
+					       h[c*4+3] == 0xFFFFFFFFFFFFFFFFull ? "invalid" : std::to_string(h[c*4+3]).c_str());
+				fflush(stdout);
+				cudaFree(d);
+			}
+		}
+	}
 	if (selfcheck && n_gaussians > 0)
 	{
 		const size_t P = (size_t)n_gaussians;
