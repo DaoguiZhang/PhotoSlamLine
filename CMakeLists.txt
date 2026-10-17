@@ -173,6 +173,8 @@ target_link_libraries(gaussian_viewer
 add_executable(train_colmap examples/train_colmap.cpp)
 target_link_libraries(train_colmap gaussian_viewer gaussian_mapper)
 
+add_executable(eval_common_views examples/eval_common_views.cpp)
+target_link_libraries(eval_common_views gaussian_mapper ${TORCH_LIBRARIES} ${OpenCV_LIBRARIES})
 add_executable(view_result examples/view_result.cpp)
 target_link_libraries(view_result gaussian_viewer gaussian_mapper)
 
