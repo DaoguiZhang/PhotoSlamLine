@@ -3597,6 +3597,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
 
         // Optimizer step
         if (getIteration() < opt_params_.iterations_) {
+            writeAdamAudit("step_entry");
             gaussians_->optimizer_->step();
             ++frozen_opt_steps_;   // real optimizer-step counter (ablation)
             gaussians_->optimizer_->zero_grad(true);
@@ -3606,6 +3607,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
             if (getIteration() % 50 == 0)
                 gaussians_->normalizeRotationQuaternions();
         }
+        writeAdamAudit("after_update");
         if (recovery_diag_hook_) recovery_diag_hook_("after_update");
         g_gpu_prof.markOptimizerEnd();
     }
@@ -4191,6 +4193,13 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
     if (!gaussians_) return r;
 
     restoreRecoverySnapshot(base);
+    diag_snapshot_rot_data_ = base.rotation.defined()
+        ? reinterpret_cast<std::uintptr_t>(base.rotation.data_ptr()) : 0;
+    // gba-state-audit: make the two arms' paths explicit in the log, because
+    // the production default for the Gaussian deformation is now OFF.
+    std::cerr << "[GbaRecovery] arm=" << tag << " deformation="
+              << (apply_map ? "ON(applyGbaCorrections)" : "OFF(pose-only)")
+              << std::endl;
     for (auto& kv : kf_usage.kfs)
     {
         auto pkf = scene_->getKeyframe(kv.first);
@@ -4233,6 +4242,15 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
         r.max_translation = st.max_translation;
         r.mean_translation = st.moved_rows > 0
             ? st.translation_sum / static_cast<double>(st.moved_rows) : 0.0;
+        std::cerr << "[GbaRecovery] arm=" << tag << " moved=" << st.moved_rows
+                  << " nonzero=" << st.nonzero_moved_rows
+                  << " line=" << st.line_rows_moved << std::endl;
+    }
+    else
+    {
+        std::cerr << "[GbaRecovery] arm=" << tag
+                  << " moved=0 (deformation intentionally not applied)"
+                  << std::endl;
     }
     syncDev();
     r.sync_seconds = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -4474,9 +4492,381 @@ GaussianMapperLine::DiagPoint GaussianMapperLine::captureDiagPoint(
     return p;
 }
 
-std::string GaussianMapperLine::scheduleFingerprint() const
+namespace
 {
-    std::ostringstream ss;
+// Rotation matrix from (possibly unnormalised) quaternions, [N,4] -> [N,3,3].
+torch::Tensor gbaRotationMatrix(const torch::Tensor& q_in)
+{
+    torch::Tensor q = q_in / q_in.norm(2, 1, true).clamp_min(1e-12f);
+    torch::Tensor r = q.select(1, 0), x = q.select(1, 1), y = q.select(1, 2),
+                  z = q.select(1, 3);
+    torch::Tensor R = torch::zeros({q.size(0), 3, 3}, q.options());
+    auto set = [&](int i, int j, torch::Tensor v) { R.select(1, i).select(1, j).copy_(v); };
+    set(0, 0, 1 - 2 * (y * y + z * z));
+    set(0, 1, 2 * (x * y - r * z));
+    set(0, 2, 2 * (x * z + r * y));
+    set(1, 0, 2 * (x * y + r * z));
+    set(1, 1, 1 - 2 * (x * x + z * z));
+    set(1, 2, 2 * (y * z - r * x));
+    set(2, 0, 2 * (x * z - r * y));
+    set(2, 1, 2 * (y * z + r * x));
+    set(2, 2, 1 - 2 * (x * x + y * y));
+    return R;
+}
+
+torch::Tensor gbaCovariance(const torch::Tensor& q, const torch::Tensor& scaling)
+{
+    torch::Tensor R = gbaRotationMatrix(q);
+    torch::Tensor e = torch::exp(scaling.to(q.device()).to(q.dtype()));
+    torch::Tensor RS = R * e.unsqueeze(1);
+    return torch::bmm(RS, RS.transpose(1, 2));
+}
+
+// q and -q are the same rotation. The angle is computed in double precision
+// from the relative quaternion, so identical float32 inputs give exactly 0
+// (an acos(|dot|) formula has a ~0.1 deg floor on 75k rows).
+double gbaQuatAngleDegMax(const torch::Tensor& a_in, const torch::Tensor& b_in)
+{
+    if (!a_in.defined() || !b_in.defined() || a_in.size(0) != b_in.size(0))
+        return -1.0;
+    // The relative rotation angle does not need normalised inputs: the scale
+    // of a quaternion cancels in 2*atan2(|v|, |w|) of q_a^-1 * q_b. Keeping the
+    // raw values makes identical inputs give exactly 0 instead of the
+    // normalisation round-off floor.
+    torch::Tensor ac = a_in.to(torch::kCPU).to(torch::kFloat32).contiguous();
+    torch::Tensor bc = b_in.to(torch::kCPU).to(torch::kFloat32).contiguous();
+    const float* qa = ac.data_ptr<float>();
+    const float* qb = bc.data_ptr<float>();
+    const long long n = ac.size(0);
+    double worst = 0.0;
+    auto dot4 = [](const float* x, const float* y) {
+        return (double)x[0] * y[0] + (double)x[1] * y[1] +
+               (double)x[2] * y[2] + (double)x[3] * y[3];
+    };
+    for (long long i = 0; i < n; ++i)
+    {
+        const float* x = qa + 4 * i;
+        const float* y = qb + 4 * i;
+        // relative quaternion q_a^-1 * q_b = (w, v)
+        double w = dot4(x, y);
+        double vx = x[0] * y[1] - x[1] * y[0] - x[2] * y[3] + x[3] * y[2];
+        double vy = x[0] * y[2] + x[1] * y[3] - x[2] * y[0] - x[3] * y[1];
+        double vz = x[0] * y[3] + x[2] * y[1] - x[3] * y[0] - x[1] * y[2];
+        double nv = std::sqrt(vx * vx + vy * vy + vz * vz);
+        double ang = 2.0 * std::atan2(nv, std::fabs(w));
+        if (ang > worst) worst = ang;
+    }
+    return worst * 180.0 / M_PI;
+}
+}  // namespace
+
+void GaussianMapperLine::writeAdamAudit(const char* stage)
+{
+    static const bool audit_enabled = []() {
+        const char* p = std::getenv("PHOTO_SLAM_GBA_UPDATE_AUDIT");
+        return p && p[0] != '\0';
+    }();
+    if (!audit_enabled || !gaussians_ || !gaussians_->optimizer_) return;
+    if (adam_audit_updates_ >= 12) return;
+    if (std::string(stage) == "step_entry")
+    {
+        if (iteration_ != adam_audit_last_iteration_)
+        {
+            adam_audit_last_iteration_ = iteration_;
+            adam_audit_step_calls_this_iter_ = 0;
+        }
+        ++adam_audit_step_calls_this_iter_;
+        ++adam_audit_step_calls_total_;
+    }
+    else
+    {
+        ++adam_audit_updates_;
+    }
+    if (!adam_audit_out_)
+    {
+        const char* path = std::getenv("PHOTO_SLAM_GBA_UPDATE_AUDIT");
+        adam_audit_out_ = std::make_unique<std::ofstream>(path, std::ios::out);
+        *adam_audit_out_
+            << "stage,iteration,frozen_step,step_calls_total,"
+               "step_calls_this_iter,group,member_name,member_impl,param_impl,"
+               "same_impl,member_data,param_data,same_data_ptr,"
+               "snapshot_rot_data,snapshot_shares_storage,shape0,shape1,"
+               "stride0,stride1,dtype,device,requires_grad,is_leaf,grad_defined,"
+               "grad_data,grad_l2,state_found,state_step,exp_avg_defined,"
+               "exp_avg_l2,exp_avg_sq_l2,max_exp_avg_sq_defined,lr,beta1,beta2,"
+               "eps,weight_decay,amsgrad,dup_param_count,group_param_count,"
+               "rotation_norm_min,rotation_norm_max\n";
+    }
+    auto& groups = gaussians_->optimizer_->param_groups();
+    auto& state = gaussians_->optimizer_->state();
+    const std::vector<torch::Tensor> members = {
+        gaussians_->xyz_, gaussians_->features_dc_, gaussians_->features_rest_,
+        gaussians_->opacity_, gaussians_->scaling_, gaussians_->rotation_};
+    const char* names[6] = {"xyz", "features_dc", "features_rest", "opacity",
+                            "scaling", "rotation"};
+    for (std::size_t i = 0; i < groups.size(); ++i)
+    {
+        if (groups[i].params().empty()) continue;
+        auto& p = groups[i].params()[0];
+        const torch::Tensor& m = (i < members.size()) ? members[i] : p;
+        auto* pimpl = p.unsafeGetTensorImpl();
+        std::uintptr_t pdata = reinterpret_cast<std::uintptr_t>(p.data_ptr());
+        std::uintptr_t mdata = m.defined()
+            ? reinterpret_cast<std::uintptr_t>(m.data_ptr()) : 0;
+        auto g = p.grad();
+        auto it = state.find(pimpl);
+        auto& opt = static_cast<torch::optim::AdamOptions&>(groups[i].options());
+        auto betas = opt.betas();
+        double rot_min = 0.0, rot_max = 0.0;
+        if (i == 5 && p.numel() > 0)
+        {
+            torch::NoGradGuard ng;
+            auto n = torch::sqrt(torch::sum(p * p, 1));
+            rot_min = n.min().item<double>();
+            rot_max = n.max().item<double>();
+        }
+        int dup = 0;
+        for (std::size_t j = 0; j < groups.size(); ++j)
+            for (auto& q : groups[j].params())
+                if (q.unsafeGetTensorImpl() == pimpl) ++dup;
+        bool snap_shared = diag_snapshot_rot_data_ != 0 &&
+                           pdata == diag_snapshot_rot_data_;
+        *adam_audit_out_
+            << stage << ',' << iteration_ << ',' << frozen_opt_steps_ << ','
+            << adam_audit_step_calls_total_ << ','
+            << adam_audit_step_calls_this_iter_ << ',' << i << ','
+            << ((i < 6) ? names[i] : "extra") << ','
+            << reinterpret_cast<std::uintptr_t>(m.defined()
+                   ? m.unsafeGetTensorImpl() : nullptr) << ',' <<
+            reinterpret_cast<std::uintptr_t>(pimpl) << ','
+            << ((m.defined() && m.unsafeGetTensorImpl() == pimpl) ? 1 : 0)
+            << ',' << mdata << ',' << pdata << ',' << (mdata == pdata ? 1 : 0)
+            << ',' << diag_snapshot_rot_data_ << ',' << (snap_shared ? 1 : 0)
+            << ',' << (p.dim() > 0 ? p.size(0) : -1) << ','
+            << (p.dim() > 1 ? p.size(1) : -1) << ','
+            << (p.dim() > 0 ? p.stride(0) : -1) << ','
+            << (p.dim() > 1 ? p.stride(1) : -1) << ',' << p.dtype() << ','
+            << p.device() << ',' << (p.requires_grad() ? 1 : 0) << ','
+            << (p.is_leaf() ? 1 : 0) << ',' << (g.defined() ? 1 : 0) << ','
+            << reinterpret_cast<std::uintptr_t>(g.defined() ? g.data_ptr()
+                                                           : nullptr)
+            << ','
+            << (g.defined() ? g.norm().item<double>() : -1.0) << ','
+            << ((it != state.end()) ? 1 : 0) << ','
+            << ((it != state.end())
+                    ? static_cast<long long>(
+                          static_cast<torch::optim::AdamParamState&>(*it->second)
+                              .step())
+                    : -1LL)
+            << ',';
+        if (it != state.end())
+        {
+            auto& st = static_cast<torch::optim::AdamParamState&>(*it->second);
+            *adam_audit_out_ << (st.exp_avg().defined() ? 1 : 0) << ','
+                             << (st.exp_avg().defined()
+                                     ? st.exp_avg().norm().item<double>()
+                                     : -1.0)
+                             << ','
+                             << (st.exp_avg_sq().defined()
+                                     ? st.exp_avg_sq().norm().item<double>()
+                                     : -1.0)
+                             << ',' << (st.max_exp_avg_sq().defined() ? 1 : 0);
+        }
+        else
+        {
+            *adam_audit_out_ << "0,-1,-1,0";
+        }
+        *adam_audit_out_ << ',' << opt.lr() << ',' << std::get<0>(betas) << ','
+                         << std::get<1>(betas) << ',' << opt.eps() << ','
+                         << opt.weight_decay() << ','
+                         << (opt.amsgrad() ? 1 : 0) << ',' << dup << ','
+                         << groups[i].params().size() << ',' << rot_min << ','
+                         << rot_max << '\n';
+        adam_audit_out_->flush();
+    }
+}
+
+void GaussianMapperLine::runFirstUpdateReplay(const std::string& tag,
+                                              const RotationAdamSample& s,
+                                              const DiagArm& arm)
+{
+    if (!s.valid || !s.param.defined()) return;
+    const torch::Tensor empty;
+    torch::Tensor actual;
+    for (const auto& pt : arm.points)
+        if (pt.label == "first_update" && pt.params.size() >= 6)
+            actual = pt.params[5];
+
+    auto toDev = [&](const torch::Tensor& t) {
+        return t.defined() ? t.to(device_type_).clone() : torch::Tensor();
+    };
+
+    std::vector<torch::Tensor> after_step, after_norm;
+    for (int rep = 0; rep < 5; ++rep)
+    {
+        torch::Tensor p = s.param.to(device_type_).clone().detach();
+        p.set_requires_grad(true);
+        if (s.grad_defined && s.grad.defined())
+            p.mutable_grad() = toDev(s.grad);
+
+        torch::optim::AdamOptions opts(s.lr);
+        opts.betas(std::make_tuple(s.beta1, s.beta2));
+        opts.eps(s.eps);
+        opts.weight_decay(s.weight_decay);
+        opts.amsgrad(s.amsgrad);
+        torch::optim::Adam adam({p}, opts);
+        auto key = p.unsafeGetTensorImpl();
+        auto st = std::make_unique<torch::optim::AdamParamState>();
+        if (s.state_found)
+        {
+            st->step(s.step);
+            if (s.exp_avg.defined()) st->exp_avg(toDev(s.exp_avg));
+            if (s.exp_avg_sq.defined()) st->exp_avg_sq(toDev(s.exp_avg_sq));
+            if (s.max_exp_avg_sq.defined())
+                st->max_exp_avg_sq(toDev(s.max_exp_avg_sq));
+        }
+        adam.state()[key] = std::move(st);
+        adam.step();
+        if (device_type_ == torch::kCUDA) torch::cuda::synchronize();
+        after_step.push_back(p.detach().to(torch::kCPU).clone());
+        torch::Tensor q = after_step.back();
+        torch::Tensor n =
+            torch::sqrt(torch::sum(q * q, 1, true).clamp_min(1e-16f));
+        after_norm.push_back((q / n).clone());
+    }
+
+    std::ofstream csv((diag_root_.empty() ? result_dir_.parent_path() : diag_root_) /
+                      "first_update_replay.csv");
+    csv << "tag,stage,replay,state_found,state_step,lr,beta1,beta2,eps,"
+           "weight_decay,amsgrad,param_impl,member_impl,same_impl,"
+           "grad_defined,grad_l2,raw_max_abs_vs_rep0,quat_angle_deg_vs_rep0,"
+           "cov_max_abs_vs_rep0\n";
+    auto emit = [&](const char* stage, int rep, const torch::Tensor& cur,
+                    const torch::Tensor& base) {
+        double raw = -1.0, ang = -1.0, cov = -1.0;
+        if (rep > 0)
+        {
+            raw = (cur - base).abs().max().item<double>();
+            ang = gbaQuatAngleDegMax(cur, base);
+            cov = (gbaCovariance(cur, s.scaling) -
+                   gbaCovariance(base, s.scaling))
+                      .abs()
+                      .max()
+                      .item<double>();
+        }
+        csv << tag << ',' << stage << ',' << rep << ','
+            << (s.state_found ? 1 : 0) << ',' << s.step << ',' << s.lr << ','
+            << s.beta1 << ',' << s.beta2 << ',' << s.eps << ','
+            << s.weight_decay << ',' << (s.amsgrad ? 1 : 0) << ','
+            << s.param_impl << ',' << s.member_impl << ','
+            << (s.param_impl == s.member_impl ? 1 : 0) << ','
+            << (s.grad_defined ? 1 : 0) << ','
+            << (s.grad.defined() ? s.grad.norm().item<double>() : -1.0) << ','
+            << raw << ',' << ang << ',' << cov << '\n';
+    };
+    for (int rep = 0; rep < 5; ++rep) emit("entry", rep, s.param, s.param);
+    for (int rep = 0; rep < 5; ++rep)
+        emit("after_step", rep, after_step[rep], after_step[0]);
+    for (int rep = 0; rep < 5; ++rep)
+        emit("after_normalize", rep, after_norm[rep], after_norm[0]);
+    csv.flush();
+
+    std::ofstream act((diag_root_.empty() ? result_dir_.parent_path() : diag_root_) /
+                      "first_update_actual.csv", std::ios::app);
+    if (act.tellp() == 0)
+        act << "tag,param_impl,member_impl,same_impl,grad_defined,state_found,"
+           "state_step,replay_repeat_raw_max_abs,replay_repeat_quat_deg,"
+           "replay_repeat_cov_max_abs,actual_vs_replay_raw_max_abs,"
+           "actual_vs_replay_quat_deg,actual_vs_replay_cov_max_abs,"
+           "actual_normalized_vs_replay_quat_deg\n";
+    double rep_raw = 0.0, rep_ang = 0.0, rep_cov = 0.0;
+    for (int rep = 1; rep < 5; ++rep)
+    {
+        rep_raw = std::max(rep_raw,
+                           (after_step[rep] - after_step[0]).abs().max()
+                               .item<double>());
+        rep_ang = std::max(rep_ang,
+                           gbaQuatAngleDegMax(after_step[rep], after_step[0]));
+        rep_cov = std::max(
+            rep_cov, (gbaCovariance(after_step[rep], s.scaling) -
+                      gbaCovariance(after_step[0], s.scaling))
+                         .abs().max().item<double>());
+    }
+    double a_raw = -1.0, a_ang = -1.0, a_cov = -1.0, a_norm_ang = -1.0;
+    if (actual.defined() && actual.size(0) == after_step[0].size(0))
+    {
+        a_raw = (actual - after_step[0]).abs().max().item<double>();
+        a_ang = gbaQuatAngleDegMax(actual, after_step[0]);
+        a_cov = (gbaCovariance(actual, s.scaling) -
+                 gbaCovariance(after_step[0], s.scaling))
+                    .abs().max().item<double>();
+        torch::Tensor n = torch::sqrt(
+            torch::sum(actual * actual, 1, true).clamp_min(1e-16f));
+        a_norm_ang =
+            gbaQuatAngleDegMax(actual / n, after_norm[0]);
+    }
+    act << tag << ',' << s.param_impl << ',' << s.member_impl << ','
+        << (s.param_impl == s.member_impl ? 1 : 0) << ','
+        << (s.grad_defined ? 1 : 0) << ',' << (s.state_found ? 1 : 0) << ','
+        << s.step << ',' << rep_raw << ',' << rep_ang << ',' << rep_cov << ','
+        << a_raw << ',' << a_ang << ',' << a_cov << ',' << a_norm_ang << '\n';
+    act.flush();
+    std::cerr << "[GbaDiag] replay " << tag << " repeat_raw=" << rep_raw
+              << " repeat_quat_deg=" << rep_ang << " repeat_cov=" << rep_cov
+              << " actual_raw=" << a_raw << " actual_quat_deg=" << a_ang
+              << " actual_cov=" << a_cov
+              << " same_impl=" << (s.param_impl == s.member_impl) << std::endl;
+}
+
+void GaussianMapperLine::writeCrossArmInputDiff(const std::string& tag,
+                                                const RotationAdamSample& s)
+{
+    if (!first_bw_rot_ref_.valid)
+    {
+        first_bw_rot_ref_ = s;
+        return;
+    }
+    const RotationAdamSample& a = first_bw_rot_ref_;
+    if (!a.param.defined() || !s.param.defined() ||
+        a.param.sizes() != s.param.sizes())
+        return;
+    auto maxabs = [](const torch::Tensor& x, const torch::Tensor& y) {
+        if (!x.defined() || !y.defined() || x.sizes() != y.sizes()) return -1.0;
+        return (x - y).abs().max().item<double>();
+    };
+    torch::Tensor base = a.scaling.defined() ? a.scaling : s.scaling;
+    std::ofstream csv((diag_root_.empty() ? result_dir_.parent_path() : diag_root_) /
+                      "first_update_cross.csv");
+    csv << "tag,arm_ref,param_max_abs,grad_max_abs,exp_avg_max_abs,"
+           "exp_avg_sq_max_abs,state_step_ref,state_step_tag,"
+           "quat_angle_deg,cov_max_abs,lr_ref,lr_tag,eps_ref,eps_tag,"
+           "wd_ref,wd_tag,beta1_ref,beta1_tag,same_impl_ref,same_impl_tag,"
+           "grad_defined_ref,grad_defined_tag,state_found_ref,state_found_tag\n";
+    double cov = -1.0;
+    if (base.defined() && base.size(0) == s.param.size(0))
+        cov = (gbaCovariance(s.param, base) - gbaCovariance(a.param, base))
+                  .abs().max().item<double>();
+    csv << tag << ",ref," << maxabs(a.param, s.param) << ','
+        << maxabs(a.grad, s.grad) << ',' << maxabs(a.exp_avg, s.exp_avg) << ','
+        << maxabs(a.exp_avg_sq, s.exp_avg_sq) << ',' << a.step << ',' << s.step
+        << ',' << gbaQuatAngleDegMax(a.param, s.param) << ',' << cov << ','
+        << a.lr << ',' << s.lr << ',' << a.eps << ',' << s.eps << ','
+        << a.weight_decay << ',' << s.weight_decay << ',' << a.beta1 << ','
+        << s.beta1 << ',' << (a.param_impl == a.member_impl ? 1 : 0) << ','
+        << (s.param_impl == s.member_impl ? 1 : 0) << ','
+        << (a.grad_defined ? 1 : 0) << ',' << (s.grad_defined ? 1 : 0) << ','
+        << (a.state_found ? 1 : 0) << ',' << (s.state_found ? 1 : 0) << '\n';
+    csv.flush();
+    std::cerr << "[GbaDiag] cross-arm input: param=" << maxabs(a.param, s.param)
+              << " grad=" << maxabs(a.grad, s.grad)
+              << " exp_avg=" << maxabs(a.exp_avg, s.exp_avg)
+              << " exp_avg_sq=" << maxabs(a.exp_avg_sq, s.exp_avg_sq)
+              << " quat_deg=" << gbaQuatAngleDegMax(a.param, s.param)
+              << " cov=" << cov << std::endl;
+}
+
+std::string GaussianMapperLine::scheduleFingerprint() const
+{    std::ostringstream ss;
     ss << iteration_ << ';' << gaussians_->active_sh_degree_ << '/'
        << default_sh_ << ';';
     for (const auto& kv : kfs_used_times_) ss << kv.first << ':' << kv.second << ',';
@@ -4546,6 +4936,9 @@ GaussianMapperLine::DiagArm GaussianMapperLine::runRepeatDiagArm(
 {
     DiagArm arm;
     restoreRecoverySnapshot(base);
+    diag_snapshot_rot_data_ = base.rotation.defined()
+        ? reinterpret_cast<std::uintptr_t>(base.rotation.data_ptr()) : 0;
+    first_bw_rot_ = RotationAdamSample();
     for (auto& kv : kf_usage.kfs)
     {
         auto pkf = scene_->getKeyframe(kv.first);
@@ -4577,7 +4970,70 @@ GaussianMapperLine::DiagArm GaussianMapperLine::runRepeatDiagArm(
 
     recovery_diag_hook_ = [&](const char* ev) {
         if (std::string(ev) == "after_backward" && frozen_opt_steps_ == 0)
+        {
             arm.points.push_back(captureDiagPoint("first_backward", true));
+            if (!first_bw_rot_.valid)
+            {
+                // gba-state-audit: take the state from the ACTUAL parameter
+                // object (param group), not from the model member.
+                auto& groups = gaussians_->optimizer_->param_groups();
+                auto& state = gaussians_->optimizer_->state();
+                RotationAdamSample s;
+                if (groups.size() > 5 && !groups[5].params().empty())
+                {
+                    auto& p = groups[5].params()[0];
+                    auto& opt =
+                        static_cast<torch::optim::AdamOptions&>(groups[5].options());
+                    auto betas = opt.betas();
+                    s.valid = true;
+                    s.param = p.detach().to(torch::kCPU).clone();
+                    auto g = p.grad();
+                    s.grad_defined = g.defined();
+                    if (g.defined()) s.grad = g.detach().to(torch::kCPU).clone();
+                    auto it = state.find(p.unsafeGetTensorImpl());
+                    s.state_found = (it != state.end());
+                    if (s.state_found)
+                    {
+                        auto& st = static_cast<torch::optim::AdamParamState&>(
+                            *it->second);
+                        s.step = static_cast<long long>(st.step());
+                        if (st.exp_avg().defined())
+                            s.exp_avg = st.exp_avg().detach().to(torch::kCPU).clone();
+                        if (st.exp_avg_sq().defined())
+                            s.exp_avg_sq =
+                                st.exp_avg_sq().detach().to(torch::kCPU).clone();
+                        if (st.max_exp_avg_sq().defined())
+                            s.max_exp_avg_sq = st.max_exp_avg_sq()
+                                                   .detach().to(torch::kCPU).clone();
+                    }
+                    if (gaussians_->scaling_.defined())
+                        s.scaling =
+                            gaussians_->scaling_.detach().to(torch::kCPU).clone();
+                    s.param_impl = reinterpret_cast<std::uintptr_t>(
+                        p.unsafeGetTensorImpl());
+                    s.param_data =
+                        reinterpret_cast<std::uintptr_t>(p.data_ptr());
+                    s.member_impl = reinterpret_cast<std::uintptr_t>(
+                        gaussians_->rotation_.unsafeGetTensorImpl());
+                    s.member_data = reinterpret_cast<std::uintptr_t>(
+                        gaussians_->rotation_.data_ptr());
+                    s.lr = opt.lr();
+                    s.beta1 = std::get<0>(betas);
+                    s.beta2 = std::get<1>(betas);
+                    s.eps = opt.eps();
+                    s.weight_decay = opt.weight_decay();
+                    s.amsgrad = opt.amsgrad();
+                    first_bw_rot_ = s;
+                    std::cerr << "[GbaDiag] rotation sample tag=" << tag
+                              << " same_impl="
+                              << (s.param_impl == s.member_impl)
+                              << " grad_defined=" << s.grad_defined
+                              << " state_found=" << s.state_found
+                              << " adam_step=" << s.step << std::endl;
+                    writeCrossArmInputDiff(tag, s);
+                }
+            }
+        }
         if (std::string(ev) == "after_update")
         {
             if (frozen_opt_steps_ == 1)
@@ -4606,6 +5062,8 @@ GaussianMapperLine::DiagArm GaussianMapperLine::runRepeatDiagArm(
     }
     arm.render10 = renderEvalViews();
     recovery_diag_hook_ = nullptr;
+    runFirstUpdateReplay(tag, first_bw_rot_, arm);
+    first_bw_rot_ = RotationAdamSample();
     arm.view_seq = frozen_train_views_flat_;
     arm.ok = (frozen_opt_steps_ == 10);
     return arm;
@@ -4619,6 +5077,8 @@ void GaussianMapperLine::runGbaRecoveryDiagnosis(
     const char* dir_env = std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG");
     if (!dir_env || dir_env[0] == '\0' || gba_recovery_done_ || !gaussians_)
         return;
+    first_bw_rot_ref_ = RotationAdamSample();
+    diag_root_ = std::filesystem::path(dir_env);
     gba_recovery_done_ = true;
     const std::filesystem::path root(dir_env);
     std::filesystem::create_directories(root);
@@ -6034,23 +6494,27 @@ void GaussianMapperLine::combineMappingOperations_withLine()
             // the reported correction cost is not inflated by the offline arms.
             const auto t_start = std::chrono::steady_clock::now();
             GaussianModelLine::GbaCorrectionStats stats;
-            // gba-recovery-v1 found no stable quality gain from deforming the
-            // Gaussians at the GBA event, so the deformation is optional.
-            // Default stays ON to keep earlier results reproducible; set
-            // PHOTO_SLAM_GBA_APPLY_CORRECTION=0 to keep camera poses only.
+            // gba-recovery closed the forced deformation: v1 and the mechanism
+            // diagnosis found no stable quality or time gain. The event is still
+            // consumed, camera poses are still updated and the applied-event
+            // version is still bumped; only the Gaussian coordinates are left
+            // alone unless the deformation is explicitly requested.
             const char* apply_env = std::getenv("PHOTO_SLAM_GBA_APPLY_CORRECTION");
             const bool deform_gaussians =
-                !(apply_env && std::string(apply_env) == "0");
+                (apply_env && std::string(apply_env) == "1");
             if (!deform_gaussians)
             {
-                std::cerr << "[GBA-Apply] deformation DISABLED "
-                             "(PHOTO_SLAM_GBA_APPLY_CORRECTION=0); camera "
-                             "poses still updated, "
+                std::cerr << "[GBA-Apply] deformation DISABLED (default; set "
+                             "PHOTO_SLAM_GBA_APPLY_CORRECTION=1 to enable). "
+                             "Camera poses are still updated; "
                           << deltas.size() << " deltas not applied"
                           << std::endl;
             }
             else
             {
+                std::cerr << "[GBA-Apply] deformation ENABLED explicitly "
+                             "(PHOTO_SLAM_GBA_APPLY_CORRECTION=1)"
+                          << std::endl;
                 std::unique_lock<std::mutex> lock_render(mutex_render_);
                 stats = gaussians_->applyGbaCorrections(deltas, evt);
             }

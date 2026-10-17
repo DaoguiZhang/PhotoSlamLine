@@ -540,6 +540,24 @@ public:
         bool scene_present = false;
         Sophus::SE3f delta;
     };
+    // Exactly what the first optimizer.step() of a replay arm consumes for the
+    // rotation group, taken from the real parameter object (not from the model
+    // member) right after the first backward.
+    struct RotationAdamSample
+    {
+        bool valid = false;
+        torch::Tensor param, grad, exp_avg, exp_avg_sq, max_exp_avg_sq;
+        torch::Tensor scaling;          // for covariance comparison
+        long long step = -1;            // Adam step counter BEFORE the update
+        bool state_found = false;
+        std::uintptr_t param_impl = 0;
+        std::uintptr_t param_data = 0;
+        std::uintptr_t member_impl = 0;
+        std::uintptr_t member_data = 0;
+        bool grad_defined = false;
+        double lr = 0.0, beta1 = 0.0, beta2 = 0.0, eps = 0.0, weight_decay = 0.0;
+        bool amsgrad = false;
+    };
 
     EvalViewRenders renderEvalViews();
     DiagPoint captureDiagPoint(const std::string& label, bool with_grads);
@@ -559,6 +577,13 @@ public:
 
     RecoverySnapshot captureRecoverySnapshot();
     void restoreRecoverySnapshot(const RecoverySnapshot& snap);
+    // gba-state-audit: records the state that is actually fed to Adam, keyed by
+    // the parameter's TensorImpl, plus identity checks against the model member.
+    void writeAdamAudit(const char* stage);
+    // gba-state-audit: replays one real Adam update offline (no render, loss or
+    // event) from deep copies, and compares it with the training result.
+    void runFirstUpdateReplay(const std::string& tag, const RotationAdamSample& s,
+                              const DiagArm& arm);
     RecoveryArmResult runRecoveryArm(
         const std::string& tag, const RecoverySnapshot& base,
         const RecoverySnapshot& kf_usage,
@@ -578,6 +603,21 @@ public:
     std::function<void(const char*)> recovery_diag_hook_;
     std::vector<LoopScopeKf> loop_scope_kfs_;
     bool loop_scope_available_ = false;
+
+    // gba-state-audit (PHOTO_SLAM_GBA_UPDATE_AUDIT=<csv>): state actually fed
+    // to Adam, one row per param group per captured update stage.
+    std::unique_ptr<std::ofstream> adam_audit_out_;
+    int adam_audit_groups_seen_ = 0;
+    long long adam_audit_last_iteration_ = -1;
+    long long adam_audit_step_calls_this_iter_ = 0;
+    long long adam_audit_updates_ = 0;          // captured optimizer steps
+    long long adam_audit_step_calls_total_ = 0;
+    std::uintptr_t diag_snapshot_rot_data_ = 0; // snapshot vs live storage check
+    RotationAdamSample first_bw_rot_;
+    RotationAdamSample first_bw_rot_ref_;   // first arm's sample (cross-arm)
+    std::filesystem::path diag_root_;       // PHOTO_SLAM_GBA_RECOVERY_DIAG root
+    void writeCrossArmInputDiff(const std::string& tag,
+                                const RotationAdamSample& s);
 
 protected:
     std::map<camera_id_t, torch::Tensor> undistort_mask_;

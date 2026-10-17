@@ -1,0 +1,9 @@
+event_evt=1
+gaussians=79760
+line_gaussians=96
+kfs=235
+iteration=15720
+active_sh=3
+default_sh=3
+param_fp=0d562f41471915c4_n79760_nline96
+adam_fp=77cbc7e2c2e123de

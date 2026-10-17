@@ -1,5 +1,12 @@
 # GBA recovery — mechanism diagnosis (post-v1)
 
+> **Correction (see `gba_state_audit_report.md`).** The `first_backward,…` rows
+> used below are PARAMETERS; the gradient rows are `first_backward,grad_*` and
+> they differ by ~1 ULP (rotation max_abs 1.4e-08). The `quat_angle_deg` values
+> in the 0.1 deg range are the numerical floor of the `acos(|dot|)` formula; the
+> stable formulation in the audit report gives exactly 0 for bitwise-equal
+> tensors. Conclusions below that do not depend on those two readings stand.
+
 Status: **negative / not promoted**. v1 results in `reports/gba_recovery_v1_report.md`
 are unchanged. This round only instruments and diagnoses; it does not retune or
 re-run the 500-step matrix.

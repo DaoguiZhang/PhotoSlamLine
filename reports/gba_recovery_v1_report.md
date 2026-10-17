@@ -1,5 +1,21 @@
 # gba-recovery-v1 — controlled two-arm GBA correction experiment
 
+> **Status note (added after `d2c8f94283`/`80c68c5cac`, see
+> `reports/gba_state_audit_report.md`). Numbers below are kept unchanged.**
+> 1. The harness at run time did not restore optimizer param-group LRs. This
+>    affected only the `lr_equal` repeat check, not any quality curve: the
+>    training body re-sets all six group LRs every iteration before the
+>    forward, and only group 0 has an iteration-dependent schedule. Step-0
+>    diagnostics never call `optimizer.step()` and are unaffected.
+> 2. "ULP-level tensor drift after training" is withdrawn. The two arms'
+>    first-backward rotation gradient already differs by ~1 ULP (1.4e-08), and
+>    Adam with `eps=1e-15` amplifies it to 6.8e-03 after one update and
+>    ~4.6e-02 after ten. The 0.039 figure is that accumulated amplification.
+> 3. The Gaussian deformation is now OFF by default
+>    (`PHOTO_SLAM_GBA_APPLY_CORRECTION=1` enables it); events, camera poses and
+>    the legacy LOOP correction are unchanged. A re-run 500-step pair
+>    (`reports/gba_state_audit_report.md` §6) confirms the negative result.
+
 Base commit: `9be7e400e1` (applyGbaCorrections) + this round's harness.
 Worktree at run time: modified experiment code, built with
 `scripts/build_two_level.sh` (ORB-SLAM3 first, then top level; both DSOs
