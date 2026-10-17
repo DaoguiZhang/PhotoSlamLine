@@ -16,9 +16,10 @@
 
 ## 1. 固定版本、配置与标识
 
-- 源码：`5e34226b0c3f7416355973becece41b898e8815b`（GBA 状态一致性收尾）**+ 本轮 quad 补丁**
-  （点专用构建目标、`[QuadMetrics]` 遥测、点管线 `TrackRGBD` 入口、共享配置生成、脚本）。
-  发车前工作树含该补丁（`dirty_files=47` 含运行产物），因此**以二进制哈希为准确身份**：
+- 源码：基线 `5e34226b0c3f7416355973becece41b898e8815b`（GBA 状态一致性收尾）+ 本轮 quad 补丁
+  （点专用构建目标、`[QuadMetrics]` 遥测、点管线 `TrackRGBD` 入口、共享配置生成、脚本），
+  补丁已提交为 `4c1b86bb99`（含本报告）。发车时工作树为"基线 + 同一补丁"（`dirty_files=47`
+  含运行产物），因此**以二进制哈希为准确身份**：
   - `bin/replica_rgbd` = `6800cc2d014b813259e82b7c0de467c42f197955c0c03bc8ed6ba6f6b52bd962`
   - `bin/replica_rgbd_point` = `3b34c1db8478b3e5fa074b0861b0ab0afac1ecd7dbe8cf32d3afe8a3072e112e`
   - `ORB-SLAM3/lib/libORB_SLAM3.so` = `6d9ace129739168019ba3f1e737363bdd4848b84984ec8b998d855c10c2d35ac`
