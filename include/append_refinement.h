@@ -699,4 +699,157 @@ inline bool drainAndSettleQueue(const std::function<bool()>& has_ops,
 
 inline std::string boolStr(bool b) { return b ? "1" : "0"; }
 
+// -------------------------------------------------------------------------
+// One-frame diagnostic for the EXISTING psnr_gaussian_splatting output.
+//
+// It uses exactly the same tensors as renderAndRecordKeyframe():
+//   masked_image = rendered_image * undistort_mask
+//   gt_image     = keyframe original_image_
+// The original output is NOT changed. This helper only recomputes, on CPU:
+//   - overall MSE / PSNR (full 3*H*W denominator, same as loss_utils::psnr)
+//   - per-channel MSE / PSNR and their mean (same as
+//     loss_utils::psnr_gaussian_splatting)
+//   - mask statistics and a clearly-labelled mask-valid-only PSNR
+// -------------------------------------------------------------------------
+inline void writePsnrGaussianSplattingDiagnostic(
+    const std::filesystem::path& out_path,
+    const std::string& build,
+    unsigned long fid,
+    int iteration,
+    int camera_id,
+    int width,
+    int height,
+    int active_sh,
+    int num_levels,
+    bool pyramid_training,
+    const torch::Tensor& masked_image,
+    const torch::Tensor& gt_image,
+    const torch::Tensor& mask,
+    double psnr_original,
+    double psnr_gs_original)
+{
+    torch::NoGradGuard no_grad;
+
+    auto m = masked_image.detach().to(torch::kCPU).to(torch::kFloat32);
+    auto g = gt_image.detach().to(torch::kCPU).to(torch::kFloat32);
+    torch::Tensor mk;
+    if (mask.defined())
+        mk = mask.detach().to(torch::kCPU).to(torch::kFloat32);
+
+    const int C = (m.dim() >= 1) ? static_cast<int>(m.size(0)) : -1;
+    const int H = (m.dim() >= 2) ? static_cast<int>(m.size(1)) : -1;
+    const int W = (m.dim() >= 3) ? static_cast<int>(m.size(2)) : -1;
+    const long long denominator = static_cast<long long>(m.numel());
+
+    auto sq = (m - g).pow(2);
+    const double mse_all = sq.mean().item<double>();
+    const double psnr_all =
+        (mse_all > 0.0) ? 10.0 * std::log10(1.0 / mse_all)
+                        : std::numeric_limits<double>::infinity();
+
+    std::vector<double> mse_c, psnr_c;
+    if (C > 0)
+    {
+        auto mse_c_t = sq.view({C, -1}).mean(1);
+        auto psnr_c_t = 20.0 * torch::log10(1.0 / torch::sqrt(mse_c_t));
+        auto mse_c_cpu = mse_c_t.to(torch::kCPU);
+        auto psnr_c_cpu = psnr_c_t.to(torch::kCPU);
+        for (int i = 0; i < C; ++i)
+        {
+            mse_c.push_back(mse_c_cpu[i].item<double>());
+            psnr_c.push_back(psnr_c_cpu[i].item<double>());
+        }
+    }
+    const double psnr_gs_recomputed =
+        psnr_c.empty()
+            ? std::numeric_limits<double>::quiet_NaN()
+            : std::accumulate(psnr_c.begin(), psnr_c.end(), 0.0) / psnr_c.size();
+
+    double mask_zero_fraction = -1.0;
+    double mask_min = 0.0, mask_max = 0.0;
+    double psnr_mask_valid_only = std::numeric_limits<double>::quiet_NaN();
+    double valid_fraction = -1.0;
+    if (mk.defined())
+    {
+        mask_min = mk.min().item<double>();
+        mask_max = mk.max().item<double>();
+        auto mask_expanded = mk.expand_as(m);
+        const long long zeros = static_cast<long long>(
+            (mask_expanded <= 0).sum().item<int64_t>());
+        mask_zero_fraction =
+            denominator > 0 ? static_cast<double>(zeros) / denominator : -1.0;
+        auto valid = mask_expanded > 0;
+        const long long valid_count = static_cast<long long>(
+            valid.sum().item<int64_t>());
+        valid_fraction =
+            denominator > 0 ? static_cast<double>(valid_count) / denominator : -1.0;
+        if (valid_count > 0)
+        {
+            const double mse_valid =
+                sq.masked_select(valid).mean().item<double>();
+            psnr_mask_valid_only =
+                (mse_valid > 0.0)
+                    ? 10.0 * std::log10(1.0 / mse_valid)
+                    : std::numeric_limits<double>::infinity();
+        }
+    }
+
+    const double delta_all = psnr_original - psnr_all;
+    const double delta_gs = psnr_gs_original - psnr_gs_recomputed;
+    const double jensen_gap = psnr_gs_recomputed - psnr_all;
+
+    std::ofstream out(out_path, std::ios::out | std::ios::trunc);
+    out << std::fixed << std::setprecision(12);
+    out << "build,fid,iteration,camera_id,width,height,C,dtype,device,"
+           "active_sh,num_pyramid_levels,pyramid_training,"
+           "mask_defined,mask_shape,mask_min,mask_max,mask_zero_fraction,"
+           "valid_element_fraction,denominator_elements,denominator_includes_masked_out,"
+           "masked_min,masked_max,gt_min,gt_max,"
+           "mse_all,psnr_all_recomputed,psnr_original_api,delta_all,"
+           "psnr_c_mean_recomputed,psnr_gs_original_api,delta_gs,jensen_gap,"
+           "psnr_mask_valid_only";
+    for (int i = 0; i < C; ++i)
+        out << ",mse_c" << i << ",psnr_c" << i;
+    out << "\n";
+    out << build << ',' << fid << ',' << iteration << ',' << camera_id << ','
+        << width << ',' << height << ',' << C << ','
+        << m.dtype() << ',' << m.device() << ',' << active_sh << ','
+        << num_levels << ',' << (pyramid_training ? 1 : 0) << ','
+        << (mk.defined() ? 1 : 0) << ',';
+    if (mk.defined())
+        out << mk.sizes() << ',';
+    else
+        out << "none,";
+    out << mask_min << ',' << mask_max << ',' << mask_zero_fraction << ','
+        << valid_fraction << ',' << denominator << ",1,"
+        << m.min().item<double>() << ',' << m.max().item<double>() << ','
+        << g.min().item<double>() << ',' << g.max().item<double>() << ','
+        << mse_all << ',' << psnr_all << ',' << psnr_original << ','
+        << delta_all << ',' << psnr_gs_recomputed << ','
+        << psnr_gs_original << ',' << delta_gs << ',' << jensen_gap << ','
+        << psnr_mask_valid_only;
+    for (int i = 0; i < C; ++i)
+        out << ',' << mse_c[i] << ',' << psnr_c[i];
+    out << "\n";
+    out.flush();
+
+    std::cerr << "[PSNR-DIAG] build=" << build << " fid=" << fid
+              << " iter=" << iteration << " shape=" << C << "x" << H << "x" << W
+              << " mask_zero_frac=" << mask_zero_fraction
+              << " denom=" << denominator
+              << " mse_all=" << mse_all
+              << " psnr_all=" << psnr_all
+              << " psnr_api=" << psnr_original
+              << " delta_all=" << delta_all
+              << " psnr_gs_recomputed=" << psnr_gs_recomputed
+              << " psnr_gs_api=" << psnr_gs_original
+              << " delta_gs=" << delta_gs
+              << " jensen_gap=" << jensen_gap
+              << " psnr_mask_valid_only=" << psnr_mask_valid_only
+              << " active_sh=" << active_sh
+              << " levels=" << num_levels
+              << " pyramid=" << (pyramid_training ? 1 : 0)
+              << std::endl;
+}
+
 } // namespace append_refinement

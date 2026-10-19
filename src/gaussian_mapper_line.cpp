@@ -8638,6 +8638,32 @@ void GaussianMapperLine::renderAndRecordKeyframe(
     psnr = loss_utils::psnr(masked_image, gt_image).item().toFloat();
     psnr_gs = loss_utils::psnr_gaussian_splatting(masked_image, gt_image).item().toFloat();
 
+    // Shutdown-only, default-off single-frame diagnostic. Same masked_image /
+    // gt_image / mask as the original metrics; original outputs unchanged.
+    {
+        static const bool psnr_diag_enabled = []() {
+            const char* e = std::getenv("PHOTO_SLAM_PSNR_DIAG");
+            return e && std::atoi(e) != 0;
+        }();
+        static const long long psnr_diag_fid = []() {
+            const char* e = std::getenv("PHOTO_SLAM_PSNR_DIAG_FID");
+            return e ? std::atoll(e) : -1LL;
+        }();
+        if (shutdown_record_phase_ && psnr_diag_enabled && !psnr_diag_done_ &&
+            (psnr_diag_fid < 0 ||
+             static_cast<long long>(pkf->fid_) == psnr_diag_fid)) {
+            append_refinement::writePsnrGaussianSplattingDiagnostic(
+                result_dir_ / "psnr_gaussian_splatting_diag.txt",
+                "L", static_cast<unsigned long>(pkf->fid_), getIteration(),
+                static_cast<int>(pkf->camera_id_), pkf->image_width_,
+                pkf->image_height_, gaussians_->active_sh_degree_,
+                num_gaus_pyramid_sub_levels_, isdoingGausPyramidTraining(),
+                masked_image, gt_image, undistort_mask_[pkf->camera_id_],
+                static_cast<double>(psnr), static_cast<double>(psnr_gs));
+            psnr_diag_done_ = true;
+        }
+    }
+
     recordKeyframeRendered(masked_image, gt_image, pkf->fid_, result_img_dir, result_gt_dir, result_loss_dir, name_suffix);    
 }
 
@@ -8703,7 +8729,9 @@ void GaussianMapperLine::renderAndRecordAllKeyframesReadOnly(std::string name_su
 
     {
         torch::NoGradGuard no_grad;
+        shutdown_record_phase_ = true;
         renderAndRecordAllKeyframes(name_suffix);
+        shutdown_record_phase_ = false;
     }
 
     std::string why = "none";

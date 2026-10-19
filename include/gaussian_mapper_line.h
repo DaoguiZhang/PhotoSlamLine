@@ -714,6 +714,9 @@ protected:
     bool keep_training_ = false;
     int default_sh_ = 0;
     bool prof_refine_phase_ = false; ///< CUDA 事件剖分：是否处于最终精修阶段
+    // Shutdown-only single-frame PSNR diagnostic (PHOTO_SLAM_PSNR_DIAG).
+    bool shutdown_record_phase_ = false;
+    bool psnr_diag_done_ = false;
 
     // Wall-clock phase timing (关键路径诊断，std::chrono 统计)
     double phase_slam_end_s_ = 0.0;    ///< SLAM 结束时刻(相对 mapper 启动)

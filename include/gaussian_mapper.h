@@ -366,6 +366,9 @@ protected:
     bool loop_closure_iteration_;
     bool keep_training_ = false;
     int default_sh_ = 0;
+    // Shutdown-only single-frame PSNR diagnostic (PHOTO_SLAM_PSNR_DIAG).
+    bool shutdown_record_phase_ = false;
+    bool psnr_diag_done_ = false;
 
     // Settings
     SystemSensorType sensor_type_;
