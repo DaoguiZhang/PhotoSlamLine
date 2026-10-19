@@ -362,18 +362,33 @@ public:
 
     // ---- append refinement state (PHOTO_SLAM_APPEND_STEPS) --------------
     append_refinement::Config append_config_;
+    append_refinement::TimeBudgetConfig time_budget_config_;
+    bool time_budget_mode_ = false;
     bool append_phase_ = false;                 // gated INSIDE trainForOneIterationErrorGuided()
     bool append_ok_ = false;
     std::string append_fail_reason_;
+    std::string budget_status_ = "disabled";
+    bool budget_unmatched_ = false;
     long long append_completed_steps_ = 0;      // after real optimizer.step()
+    long long append_iterations_ = 0;           // training calls in append loop
     long long natural_completed_steps_ = 0;
     int append_start_iteration_ = 0;
+    double cumulative_train_seconds_ = 0.0;     // natural + refinement + append
+    double natural_cumulative_train_seconds_ = 0.0;
+    double budget_overshoot_seconds_ = 0.0;
     double natural_train_seconds_ = 0.0;
     double append_train_seconds_ = 0.0;
     double append_preflight_seconds_ = 0.0;
+    double append_queue_seconds_ = 0.0;
+    double natural_save_seconds_ = 0.0;
+    double budget_save_seconds_ = 0.0;
     double append_validation_seconds_ = 0.0;
     double shutdown_export_seconds_ = 0.0;
     std::filesystem::path append_dir_;
+    std::filesystem::path natural_end_ply_dir_;
+    std::filesystem::path budget_end_ply_dir_;
+    int natural_end_iteration_ = -1;
+    int budget_end_iteration_ = -1;
     std::vector<std::size_t> append_view_seq_;
     std::size_t append_view_cursor_ = 0;
     std::vector<std::array<long long, 3>> append_actual_views_;

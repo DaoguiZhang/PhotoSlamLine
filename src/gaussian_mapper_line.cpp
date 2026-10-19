@@ -27,6 +27,7 @@
 #include <limits>
 #include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -524,6 +525,9 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
 void GaussianMapperLine::run()
 {
     const auto mapper_start = std::chrono::steady_clock::now();
+    // Initialize append/budget configuration BEFORE natural training so the
+    // cumulative training-time boundary is active from the first real update.
+    appendRefinementEnabled();
     // First loop: Initial gaussian mapping
     std::cerr << "[DEBUG] Thread: GaussianMapperLine thread started." << std::endl;
     while (!isStopped()) {
@@ -3315,6 +3319,7 @@ void GaussianMapperLine::trainColmap()
 // Error-guided training 加权随机采样（Roulette Wheel Selection / 轮盘赌算法），让 L1 Loss 更大（即 PSNR 更低）的图像拥有更大的概率被选中
 void GaussianMapperLine::trainForOneIterationErrorGuided()
 {
+    const auto budget_iter_start = std::chrono::steady_clock::now();
     increaseIteration(1);
     maybeSnapshotAndAudit();   // mapper-budget-v1: full snapshots at fixed steps
     auto iter_start_timing = std::chrono::steady_clock::now();
@@ -3648,7 +3653,8 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
             ++frozen_opt_steps_;   // real optimizer-step counter (ablation)
             if (append_phase_) {
                 ++append_completed_steps_;
-                if (append_completed_steps_ == append_config_.steps)
+                if (append_config_.steps > 0 &&
+                    append_completed_steps_ == append_config_.steps)
                     appendRecordFirstStepAudit("last_step_after");
             }
             gaussians_->optimizer_->zero_grad(true);
@@ -3665,6 +3671,15 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         g_gpu_prof.markOptimizerEnd();
     }
     g_gpu_prof.endIteration(prof_refine_phase_);
+
+    // Unified cumulative-training-time boundary (see GaussianMapper).
+    if (time_budget_mode_) {
+        if (device_type_ == torch::kCUDA)
+            torch::cuda::synchronize();
+        cumulative_train_seconds_ +=
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - budget_iter_start).count();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3674,7 +3689,10 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
 bool GaussianMapperLine::appendRefinementEnabled()
 {
     append_config_ = append_refinement::readConfig();
-    return append_config_.enabled();
+    time_budget_config_ = append_refinement::readTimeBudget();
+    time_budget_mode_ = time_budget_config_.enabled();
+    // Budget mode is primary; PHOTO_SLAM_APPEND_STEPS becomes a safety cap.
+    return append_config_.enabled() || time_budget_config_.enabled();
 }
 
 long long GaussianMapperLine::appendValidatedCount()
@@ -3710,11 +3728,16 @@ bool GaussianMapperLine::appendPreflight(std::string& reason,
     auto drain_one = [this]() {
         combineMappingOperations_withLine();
     };
-    if (!append_refinement::drainAndSettleQueue(
-            has_ops, drain_one,
-            append_config_.queue_timeout_ms,
-            append_config_.queue_quiet_ms,
-            drained_batches, reason))
+    const auto queue_start = std::chrono::steady_clock::now();
+    const bool queue_ok = append_refinement::drainAndSettleQueue(
+        has_ops, drain_one,
+        append_config_.queue_timeout_ms,
+        append_config_.queue_quiet_ms,
+        drained_batches, reason);
+    append_queue_seconds_ =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - queue_start).count();
+    if (!queue_ok)
         return false;
     if (!pSLAM_->isShutDown()) {
         reason = "slam_shutdown_revoked";
@@ -3743,8 +3766,12 @@ void GaussianMapperLine::prepareAppendViewSequence()
         remaining.push_back(kv.second->remaining_times_of_use_);
     }
 
+    // Budget mode has no step count: pre-generate a generous deterministic
+    // sequence (each cycle still uses every keyframe).
+    const int planned_steps =
+        (append_config_.steps > 0) ? append_config_.steps : 50000;
     append_view_seq_ = append_refinement::buildViewSequence(
-        fids.size(), append_config_.steps, append_config_.seed);
+        fids.size(), planned_steps, append_config_.seed);
 
     std::filesystem::create_directories(append_dir_);
     std::ofstream out(append_dir_ / "append_views_planned.csv");
@@ -3858,7 +3885,17 @@ void GaussianMapperLine::appendWriteStatus(bool ok, const std::string& reason)
     out << std::fixed << std::setprecision(6);
     out << "ok=" << (ok ? 1 : 0) << '\n';
     out << "fail_reason=" << reason << '\n';
+    out << "mode=" << append_refinement::appendModeName(time_budget_mode_,
+                                                          append_config_.steps) << '\n';
+    out << "budget_seconds=" << time_budget_config_.seconds << '\n';
+    out << "budget_status=" << budget_status_ << '\n';
+    out << "budget_unmatched=" << (budget_unmatched_ ? 1 : 0) << '\n';
+    out << "budget_overshoot_seconds=" << budget_overshoot_seconds_ << '\n';
+    out << "cumulative_train_seconds=" << cumulative_train_seconds_ << '\n';
+    out << "natural_cumulative_train_seconds="
+        << natural_cumulative_train_seconds_ << '\n';
     out << "append_steps_requested=" << append_config_.steps << '\n';
+    out << "append_iterations=" << append_iterations_ << '\n';
     out << "append_completed_steps=" << append_completed_steps_ << '\n';
     out << "natural_completed_steps=" << natural_completed_steps_ << '\n';
     out << "raw_iteration=" << getIteration() << '\n';
@@ -3871,7 +3908,14 @@ void GaussianMapperLine::appendWriteStatus(bool ok, const std::string& reason)
     out << "natural_train_seconds=" << natural_train_seconds_ << '\n';
     out << "append_train_seconds=" << append_train_seconds_ << '\n';
     out << "append_preflight_seconds=" << append_preflight_seconds_ << '\n';
+    out << "append_queue_seconds=" << append_queue_seconds_ << '\n';
+    out << "natural_save_seconds=" << natural_save_seconds_ << '\n';
+    out << "budget_save_seconds=" << budget_save_seconds_ << '\n';
     out << "append_validation_seconds=" << append_validation_seconds_ << '\n';
+    out << "natural_end_ply_dir=" << natural_end_ply_dir_.string() << '\n';
+    out << "budget_end_ply_dir=" << budget_end_ply_dir_.string() << '\n';
+    out << "natural_end_iteration=" << natural_end_iteration_ << '\n';
+    out << "budget_end_iteration=" << budget_end_iteration_ << '\n';
     out << "line_loss_every=" << lineLossEvery() << '\n';
     out << "line_loss_disabled_in_append=1\n";
     const char* backend = std::getenv("PHOTO_SLAM_RASTER_BACKEND");
@@ -3888,9 +3932,20 @@ void GaussianMapperLine::runAppendRefinement()
     append_ok_ = false;
     append_fail_reason_.clear();
     append_completed_steps_ = 0;
+    append_iterations_ = 0;
     append_start_iteration_ = 0;
     append_gaussian_count_before_ = -1;
     append_line_count_before_ = -1;
+    budget_status_ = time_budget_mode_ ? "pending" : "disabled";
+    budget_unmatched_ = false;
+    budget_overshoot_seconds_ = 0.0;
+    append_queue_seconds_ = 0.0;
+    natural_save_seconds_ = 0.0;
+    budget_save_seconds_ = 0.0;
+    natural_end_ply_dir_.clear();
+    budget_end_ply_dir_.clear();
+    natural_end_iteration_ = -1;
+    budget_end_iteration_ = -1;
 
     {
         std::ofstream s(append_dir_ / "append_summary.txt",
@@ -3898,6 +3953,9 @@ void GaussianMapperLine::runAppendRefinement()
         s << "# append refinement (line build)\n";
         s << "enabled=1\n";
         s << "build=L_target\n";
+        s << "mode=" << append_refinement::appendModeName(
+                             time_budget_mode_, append_config_.steps) << '\n';
+        s << "budget_seconds=" << time_budget_config_.seconds << '\n';
         s << "config_steps=" << append_config_.steps << '\n';
         s << "seed=" << append_config_.seed << '\n';
         s << "line_loss_disabled_in_append=1\n";
@@ -3922,15 +3980,30 @@ void GaussianMapperLine::runAppendRefinement()
     pre << std::fixed << std::setprecision(6)
         << "slam_shutdown=1 queue_settled=1 drained_operation_batches="
         << drained_batches
+        << " queue_drain_seconds=" << append_queue_seconds_
         << " preflight_seconds=" << append_preflight_seconds_;
     append_refinement::appendLine(append_dir_ / "append_summary.txt", pre.str());
 
     append_start_iteration_ = getIteration();
     natural_completed_steps_ = frozen_opt_steps_;
     natural_train_seconds_ = total_training_time_ms_ / 1000.0;
+    natural_cumulative_train_seconds_ = cumulative_train_seconds_;
 
-    if (static_cast<long long>(append_start_iteration_) + append_config_.steps >
-        static_cast<long long>(opt_params_.iterations_)) {
+    // Natural-end model in the consistent boundary state (SLAM stopped and
+    // queue empty). Evaluation is offline on this PLY.
+    {
+        const auto save_start = std::chrono::steady_clock::now();
+        natural_end_iteration_ = getIteration();
+        natural_end_ply_dir_ = append_dir_ / "natural_end";
+        savePly(natural_end_ply_dir_);
+        natural_save_seconds_ =
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - save_start).count();
+    }
+
+    if (!time_budget_mode_ &&
+        static_cast<long long>(append_start_iteration_) + append_config_.steps >
+            static_cast<long long>(opt_params_.iterations_)) {
         reason = "iteration_cap_would_block_real_updates";
         std::cerr << "[APPEND][FAIL] " << reason
                   << " (start_iteration=" << append_start_iteration_
@@ -3938,6 +4011,15 @@ void GaussianMapperLine::runAppendRefinement()
                   << " cap=" << opt_params_.iterations_ << ")" << std::endl;
         appendWriteStatus(false, reason);
         return;
+    }
+    if (time_budget_mode_ &&
+        static_cast<long long>(append_start_iteration_) >=
+            static_cast<long long>(opt_params_.iterations_)) {
+        budget_status_ = "iteration_cap";
+        budget_unmatched_ = true;
+        std::cerr << "[APPEND][BUDGET] unmatched: iteration cap already reached"
+                  << " (start_iteration=" << append_start_iteration_
+                  << " cap=" << opt_params_.iterations_ << ")" << std::endl;
     }
 
     append_param_snapshot_ =
@@ -3964,12 +4046,36 @@ void GaussianMapperLine::runAppendRefinement()
     const auto train_start = std::chrono::steady_clock::now();
     int no_progress = 0;
     bool failed = false;
+    const long long step_cap = (append_config_.steps > 0)
+                                   ? static_cast<long long>(append_config_.steps)
+                                   : std::numeric_limits<long long>::max();
 
-    while (append_completed_steps_ < append_config_.steps) {
+    if (time_budget_mode_ &&
+        natural_cumulative_train_seconds_ >= time_budget_config_.seconds) {
+        budget_status_ = "natural_exceeds_budget";
+        budget_unmatched_ = true;
+        budget_overshoot_seconds_ =
+            natural_cumulative_train_seconds_ - time_budget_config_.seconds;
+        std::cerr << "[APPEND][BUDGET] unmatched: natural training already used "
+                  << natural_cumulative_train_seconds_ << "s >= budget "
+                  << time_budget_config_.seconds << "s; append skipped" << std::endl;
+    }
+
+    while (append_completed_steps_ < step_cap) {
+        if (time_budget_mode_ &&
+            cumulative_train_seconds_ >= time_budget_config_.seconds)
+            break;
+
         if (static_cast<long long>(getIteration()) >=
             static_cast<long long>(opt_params_.iterations_)) {
             reason = "iteration_cap_reached_during_append";
-            failed = true;
+            if (time_budget_mode_) {
+                budget_status_ = "iteration_cap";
+                budget_unmatched_ = true;
+            }
+            else {
+                failed = true;
+            }
             break;
         }
         if (append_view_cursor_ >= append_view_seq_.size()) {
@@ -3992,6 +4098,7 @@ void GaussianMapperLine::runAppendRefinement()
             failed = true;
             break;
         }
+        ++append_iterations_;
 
         if (device_type_ == torch::kCUDA)
             torch::cuda::synchronize();
@@ -4010,12 +4117,51 @@ void GaussianMapperLine::runAppendRefinement()
     }
     if (device_type_ == torch::kCUDA)
         torch::cuda::synchronize();
-    append_train_seconds_ =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - train_start).count() / 1000.0;
     append_phase_ = false;
     if (append_adam_audit_)
         append_adam_audit_->flush();
+
+    if (time_budget_mode_) {
+        append_train_seconds_ = std::max(
+            0.0, cumulative_train_seconds_ - natural_cumulative_train_seconds_);
+        if (cumulative_train_seconds_ >= time_budget_config_.seconds) {
+            budget_status_ = "matched";
+            budget_unmatched_ = false;
+            budget_overshoot_seconds_ =
+                cumulative_train_seconds_ - time_budget_config_.seconds;
+        }
+        else if (append_config_.steps > 0 &&
+                 append_completed_steps_ >= append_config_.steps) {
+            budget_status_ = "step_cap_before_budget";
+            budget_unmatched_ = true;
+        }
+        else if (budget_status_ == "pending") {
+            budget_status_ = "stopped_unknown";
+            budget_unmatched_ = true;
+        }
+    }
+    else {
+        append_train_seconds_ =
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - train_start).count();
+    }
+
+    {
+        if (budget_status_ == "natural_exceeds_budget") {
+            budget_end_ply_dir_ = natural_end_ply_dir_;
+            budget_end_iteration_ = natural_end_iteration_;
+            budget_save_seconds_ = 0.0;
+        }
+        else {
+            const auto save_start = std::chrono::steady_clock::now();
+            budget_end_iteration_ = getIteration();
+            budget_end_ply_dir_ = append_dir_ / "budget_end";
+            savePly(budget_end_ply_dir_);
+            budget_save_seconds_ =
+                std::chrono::duration_cast<std::chrono::duration<double>>(
+                    std::chrono::steady_clock::now() - save_start).count();
+        }
+    }
 
     const auto validation_start = std::chrono::steady_clock::now();
     const auto param_diff = append_refinement::diffParamSnapshot(
@@ -4047,15 +4193,20 @@ void GaussianMapperLine::runAppendRefinement()
         long long after_step = (gi < adam_steps_after.size())
                                    ? adam_steps_after[gi] : -1;
         const long long delta = after_step - before_step;
-        if (delta == append_config_.steps)
+        if (append_completed_steps_ > 0 &&
+            delta == append_completed_steps_)
             ++adam_advanced_groups;
         adam_detail << " group" << gi << "_step_delta=" << delta;
     }
 
-    bool adam_ok = (adam_expected_groups > 0) &&
-                   (adam_advanced_groups == adam_expected_groups);
-    const bool steps_ok = append_completed_steps_ == append_config_.steps;
-    const bool params_updated = param_diff.changed_elements > 0;
+    bool adam_ok = (append_completed_steps_ == 0) ||
+                   ((adam_expected_groups > 0) &&
+                    (adam_advanced_groups == adam_expected_groups));
+    const bool steps_ok = time_budget_mode_
+                              ? true
+                              : (append_completed_steps_ == append_config_.steps);
+    const bool params_updated = (append_completed_steps_ == 0) ||
+                                (param_diff.changed_elements > 0);
     const bool params_finite =
         param_diff.nan_elements == 0 && param_diff.inf_elements == 0;
     const bool identity_ok =
@@ -4070,7 +4221,13 @@ void GaussianMapperLine::runAppendRefinement()
         (append_kf_before_.size() == kf_after.size()) &&
         slam_shutdown_after && queue_empty_after &&
         (append_actual_views_.size() ==
-         static_cast<std::size_t>(append_config_.steps));
+         static_cast<std::size_t>(append_iterations_));
+    const bool budget_ok =
+        !time_budget_mode_ ||
+        (budget_status_ == "matched" ||
+         budget_status_ == "natural_exceeds_budget" ||
+         budget_status_ == "iteration_cap" ||
+         budget_status_ == "step_cap_before_budget");
 
     append_validation_seconds_ =
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -4100,13 +4257,28 @@ void GaussianMapperLine::runAppendRefinement()
         std::ostringstream os;
         os << std::fixed << std::setprecision(6);
         os << "boundary_validation"
+           << " mode=" << append_refinement::appendModeName(
+                                time_budget_mode_, append_config_.steps)
+           << " budget_seconds=" << time_budget_config_.seconds
+           << " budget_status=" << budget_status_
+           << " budget_unmatched=" << (budget_unmatched_ ? 1 : 0)
+           << " budget_overshoot_seconds=" << budget_overshoot_seconds_
+           << " cumulative_train_seconds=" << cumulative_train_seconds_
+           << " natural_cumulative_train_seconds="
+           << natural_cumulative_train_seconds_
            << " natural_completed_steps=" << natural_completed_steps_
+           << " append_iterations=" << append_iterations_
            << " append_completed_steps=" << append_completed_steps_
            << " raw_iteration=" << getIteration()
            << " natural_train_seconds=" << natural_train_seconds_
            << " append_train_seconds=" << append_train_seconds_
            << " append_preflight_seconds=" << append_preflight_seconds_
+           << " append_queue_seconds=" << append_queue_seconds_
+           << " natural_save_seconds=" << natural_save_seconds_
+           << " budget_save_seconds=" << budget_save_seconds_
            << " append_validation_seconds=" << append_validation_seconds_
+           << " natural_end_iteration=" << natural_end_iteration_
+           << " budget_end_iteration=" << budget_end_iteration_
            << " gaussians_entry=" << append_gaussian_count_before_
            << " gaussians_end=" << gaussian_count_after
            << " line_gaussians_entry=" << append_line_count_before_
@@ -4121,7 +4293,7 @@ void GaussianMapperLine::runAppendRefinement()
            << " optimizer_identity_preserved="
            << append_refinement::boolStr(identity_ok)
            << " adam_groups_expected=" << adam_expected_groups
-           << " adam_groups_advanced_by_" << append_config_.steps << "="
+           << " adam_groups_advanced_by_" << append_completed_steps_ << "="
            << adam_advanced_groups
            << " pose_max_delta=" << kf_cmp[0]
            << " intrinsics_max_delta=" << kf_cmp[1]
@@ -4138,7 +4310,8 @@ void GaussianMapperLine::runAppendRefinement()
     }
 
     const bool ok = !failed && steps_ok && params_updated && params_finite &&
-                    identity_ok && count_ok && geometry_ok && adam_ok;
+                    identity_ok && count_ok && geometry_ok && adam_ok &&
+                    budget_ok;
     if (!ok && reason.empty()) {
         if (!steps_ok) reason = "append_step_count_mismatch";
         else if (!params_updated) reason = "no_parameter_update";
@@ -4147,13 +4320,18 @@ void GaussianMapperLine::runAppendRefinement()
         else if (!count_ok) reason = "gaussian_count_changed";
         else if (!geometry_ok) reason = "camera_or_keyframe_changed";
         else if (!adam_ok) reason = "adam_step_not_advanced";
+        else if (!budget_ok) reason = "budget_status_invalid";
         else reason = "unknown";
     }
     appendWriteStatus(ok, ok ? "none" : reason);
 
     std::cerr << "[APPEND] " << (ok ? "OK" : "FAIL")
-              << " build=L steps=" << append_completed_steps_ << "/"
-              << append_config_.steps
+              << " build=L mode=" << append_refinement::appendModeName(
+                     time_budget_mode_, append_config_.steps)
+              << " steps=" << append_completed_steps_ << "/"
+              << (append_config_.steps > 0
+                      ? std::to_string(append_config_.steps)
+                      : std::string("budget"))
               << " natural_steps=" << natural_completed_steps_
               << " raw_iteration=" << getIteration()
               << " gaussians=" << gaussian_count_after
@@ -4163,6 +4341,10 @@ void GaussianMapperLine::runAppendRefinement()
               << " pose_delta=" << kf_cmp[0]
               << " adam_groups=" << adam_advanced_groups << "/"
               << adam_expected_groups
+              << " cumulative_train_seconds=" << cumulative_train_seconds_
+              << " budget_status=" << budget_status_
+              << " budget_unmatched=" << (budget_unmatched_ ? 1 : 0)
+              << " overshoot=" << budget_overshoot_seconds_
               << " train_seconds=" << append_train_seconds_
               << " reason=" << (ok ? "none" : reason) << std::endl;
     if (!ok)
@@ -4176,6 +4358,7 @@ void GaussianMapperLine::runAppendRefinement()
  */
 void GaussianMapperLine::trainForOneIteration()
 {
+    const auto budget_iter_start = std::chrono::steady_clock::now();
     increaseIteration(1);
     auto iter_start_timing = std::chrono::steady_clock::now();
 
@@ -4501,6 +4684,15 @@ void GaussianMapperLine::trainForOneIteration()
         g_gpu_prof.markOptimizerEnd();
     }
     g_gpu_prof.endIteration(prof_refine_phase_);
+
+    // Unified cumulative-training-time boundary (see GaussianMapper).
+    if (time_budget_mode_) {
+        if (device_type_ == torch::kCUDA)
+            torch::cuda::synchronize();
+        cumulative_train_seconds_ +=
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - budget_iter_start).count();
+    }
 }
 
 bool GaussianMapperLine::isStopped()

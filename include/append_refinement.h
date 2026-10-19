@@ -50,6 +50,40 @@ struct Config
     bool enabled() const { return steps > 0; }
 };
 
+// Cumulative TRAINING-time budget (not full mapping wall time).
+// Measured inside every real training call with a steady_clock and a trailing
+// CUDA synchronize, so natural online training + final refinement + append all
+// use the same boundary.
+struct TimeBudgetConfig
+{
+    double seconds = 0.0;           // PHOTO_SLAM_TRAIN_TIME_BUDGET
+
+    bool enabled() const { return seconds > 0.0; }
+};
+
+inline TimeBudgetConfig readTimeBudget()
+{
+    TimeBudgetConfig c;
+    if (const char* e = std::getenv("PHOTO_SLAM_TRAIN_TIME_BUDGET"))
+        c.seconds = std::atof(e);
+    if (!std::isfinite(c.seconds) || c.seconds < 0.0)
+        c.seconds = 0.0;
+    return c;
+}
+
+// Priority rule:
+//   1. PHOTO_SLAM_TRAIN_TIME_BUDGET > 0 -> budget mode is primary. If
+//      PHOTO_SLAM_APPEND_STEPS is also > 0 it acts ONLY as a safety step cap.
+//   2. budget == 0 and PHOTO_SLAM_APPEND_STEPS > 0 -> exact step mode.
+//   3. both zero -> append refinement disabled (normal online semantics).
+inline std::string appendModeName(bool budget_mode, int steps)
+{
+    if (budget_mode && steps > 0) return "budget_primary_step_cap";
+    if (budget_mode) return "budget";
+    if (steps > 0) return "steps";
+    return "disabled";
+}
+
 inline Config readConfig()
 {
     Config c;
