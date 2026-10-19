@@ -255,6 +255,10 @@ protected:
         std::string name_suffix = "");
     void renderAndRecordAllKeyframes(
         std::string name_suffix = "");
+    // Stage-boundary evaluation/export wrapper: NoGradGuard + before/after
+    // state comparison. Writes eval_guard_<suffix>.txt.
+    void renderAndRecordAllKeyframesReadOnly(
+        std::string name_suffix = "");
 
     void savePly(std::filesystem::path result_dir);
     void keyframesToJson(std::filesystem::path result_dir);
@@ -318,6 +322,7 @@ protected:
     append_refinement::Config append_config_;
     append_refinement::TimeBudgetConfig time_budget_config_;
     bool time_budget_mode_ = false;
+    bool append_diag_mode_ = false;             // PHOTO_SLAM_APPEND_DIAG
     bool append_phase_ = false;                 // gated INSIDE the training body
     bool append_ok_ = false;
     std::string append_fail_reason_;

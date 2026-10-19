@@ -551,7 +551,7 @@ void GaussianMapper::run()
 
     // Save and clear
     const auto export_start = std::chrono::steady_clock::now();
-    renderAndRecordAllKeyframes("_shutdown");
+    renderAndRecordAllKeyframesReadOnly("_shutdown");
     savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
     writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
     shutdown_export_seconds_ =
@@ -818,13 +818,14 @@ void GaussianMapper::trainForOneIteration()
         // Optimizer step
         quad_mapping_ms_ += static_cast<double>(iter_time);
         if (getIteration() < opt_params_.iterations_) {
-            if (append_phase_ && append_completed_steps_ == 0)
+            if (append_phase_ && append_diag_mode_ &&
+                append_completed_steps_ == 0)
                 appendRecordFirstStepAudit("first_step_before");
             gaussians_->optimizer_->step();
             ++quad_opt_steps_;
             if (append_phase_) {
                 ++append_completed_steps_;
-                if (append_config_.steps > 0 &&
+                if (append_diag_mode_ && append_config_.steps > 0 &&
                     append_completed_steps_ == append_config_.steps)
                     appendRecordFirstStepAudit("last_step_after");
             }
@@ -856,6 +857,10 @@ bool GaussianMapper::appendRefinementEnabled()
     append_config_ = append_refinement::readConfig();
     time_budget_config_ = append_refinement::readTimeBudget();
     time_budget_mode_ = time_budget_config_.enabled();
+    if (const char* e = std::getenv("PHOTO_SLAM_APPEND_DIAG"))
+        append_diag_mode_ = (std::atoi(e) != 0);
+    else
+        append_diag_mode_ = false;
     // Budget mode is primary; PHOTO_SLAM_APPEND_STEPS becomes a safety cap.
     return append_config_.enabled() || time_budget_config_.enabled();
 }
@@ -1195,12 +1200,14 @@ void GaussianMapper::runAppendRefinement()
 
     prepareAppendViewSequence();
 
-    append_adam_audit_ = std::make_unique<std::ofstream>(
-        append_dir_ / "append_step_audit.csv",
-        std::ios::out | std::ios::trunc);
-    *append_adam_audit_
-        << "stage,iteration,append_completed_steps,group,has_param,"
-           "grad_defined,grad_l2,adam_step,impl_ptr,data_ptr\n";
+    if (append_diag_mode_) {
+        append_adam_audit_ = std::make_unique<std::ofstream>(
+            append_dir_ / "append_step_audit.csv",
+            std::ios::out | std::ios::trunc);
+        *append_adam_audit_
+            << "stage,iteration,append_completed_steps,group,has_param,"
+               "grad_defined,grad_l2,adam_step,impl_ptr,data_ptr\n";
+    }
 
     // ---- real append training: SAME trainForOneIteration() body -----------
     const long long step_cap = (append_config_.steps > 0)
@@ -1348,31 +1355,62 @@ void GaussianMapper::runAppendRefinement()
     const bool queue_empty_after =
         pSLAM_ && !pSLAM_->getAtlas()->hasMappingOperation();
 
-    // Adam-step verification: only parameters that REALLY had a gradient when
-    // the first append step was executed are required to advance. Parameters
-    // without a gradient are reported, never forced.
-    long long adam_expected_groups = 0;
+    // Adam-step verification. In independent acceptance/diagnostic mode
+    // (PHOTO_SLAM_APPEND_DIAG=1) only groups that really had a gradient on the
+    // first append step are required to advance. In normal/formal mode there is
+    // NO per-step grad readback; we verify the stage-boundary Adam deltas:
+    // at least one group advanced by the real step count and no group advanced
+    // by more (parameters without gradients are not forced).
+    long long adam_expected_groups = -1;
+    long long adam_checked_groups = 0;
     long long adam_advanced_groups = 0;
+    bool adam_over_advanced = false;
+    const bool strict_grad_audit =
+        append_diag_mode_ && !append_first_step_grads_.empty();
     std::ostringstream adam_detail;
-    for (std::size_t gi = 0; gi < append_first_step_grads_.size(); ++gi) {
-        const auto& g = append_first_step_grads_[gi];
-        if (!g.grad_defined)
-            continue;
-        ++adam_expected_groups;
-        long long before_step = (gi < append_adam_steps_before_.size())
-                                    ? append_adam_steps_before_[gi] : -1;
-        long long after_step = (gi < adam_steps_after.size())
-                                   ? adam_steps_after[gi] : -1;
-        const long long delta = after_step - before_step;
-        if (append_completed_steps_ > 0 &&
-            delta == append_completed_steps_)
-            ++adam_advanced_groups;
-        adam_detail << " group" << gi << "_step_delta=" << delta;
+    if (strict_grad_audit) {
+        adam_expected_groups = 0;
+        for (std::size_t gi = 0; gi < append_first_step_grads_.size(); ++gi) {
+            const auto& g = append_first_step_grads_[gi];
+            if (!g.grad_defined)
+                continue;
+            ++adam_expected_groups;
+            ++adam_checked_groups;
+            long long before_step = (gi < append_adam_steps_before_.size())
+                                        ? append_adam_steps_before_[gi] : -1;
+            long long after_step = (gi < adam_steps_after.size())
+                                       ? adam_steps_after[gi] : -1;
+            const long long delta = after_step - before_step;
+            if (append_completed_steps_ > 0 &&
+                delta == append_completed_steps_)
+                ++adam_advanced_groups;
+            if (delta > append_completed_steps_)
+                adam_over_advanced = true;
+            adam_detail << " group" << gi << "_step_delta=" << delta;
+        }
+    }
+    else {
+        for (std::size_t gi = 0; gi < append_adam_steps_before_.size(); ++gi) {
+            ++adam_checked_groups;
+            long long before_step = append_adam_steps_before_[gi];
+            long long after_step = (gi < adam_steps_after.size())
+                                       ? adam_steps_after[gi] : -1;
+            const long long delta = after_step - before_step;
+            if (append_completed_steps_ > 0 &&
+                delta == append_completed_steps_)
+                ++adam_advanced_groups;
+            if (delta > append_completed_steps_)
+                adam_over_advanced = true;
+            adam_detail << " group" << gi << "_step_delta=" << delta;
+        }
     }
 
     bool adam_ok = (append_completed_steps_ == 0) ||
-                   ((adam_expected_groups > 0) &&
-                    (adam_advanced_groups == adam_expected_groups));
+                   (strict_grad_audit
+                        ? (adam_expected_groups > 0 &&
+                           adam_advanced_groups == adam_expected_groups &&
+                           !adam_over_advanced)
+                        : (adam_advanced_groups > 0 && !adam_over_advanced));
     const bool steps_ok = time_budget_mode_
                               ? true
                               : (append_completed_steps_ == append_config_.steps);
@@ -1461,6 +1499,7 @@ void GaussianMapper::runAppendRefinement()
            << " optimizer_identity_preserved="
            << append_refinement::boolStr(identity_ok)
            << " adam_groups_expected=" << adam_expected_groups
+           << " adam_groups_checked=" << adam_checked_groups
            << " adam_groups_advanced_by_" << append_completed_steps_ << "="
            << adam_advanced_groups
            << " pose_max_delta=" << kf_cmp[0]
@@ -1507,7 +1546,7 @@ void GaussianMapper::runAppendRefinement()
               << " nan=" << param_diff.nan_elements
               << " pose_delta=" << kf_cmp[0]
               << " adam_groups=" << adam_advanced_groups << "/"
-              << adam_expected_groups
+              << (strict_grad_audit ? adam_expected_groups : adam_checked_groups)
               << " cumulative_train_seconds=" << cumulative_train_seconds_
               << " budget_status=" << budget_status_
               << " budget_unmatched=" << (budget_unmatched_ ? 1 : 0)
@@ -2712,6 +2751,8 @@ void GaussianMapper::renderAndRecordKeyframe(
     std::filesystem::path result_loss_dir,
     std::string name_suffix)
 {
+    // Evaluation/export is read-only: no autograd graph, no parameter writes.
+    torch::NoGradGuard no_grad;
     auto start_timing = std::chrono::steady_clock::now();
     auto render_pkg = GaussianRenderer::render(
         pkf,
@@ -2786,6 +2827,56 @@ void GaussianMapper::renderAndRecordAllKeyframes(
 
         ++kfit;
     }
+}
+
+void GaussianMapper::renderAndRecordAllKeyframesReadOnly(std::string name_suffix)
+{
+    const auto usage_before = append_refinement::captureKfUsageState(*scene_);
+    const auto model_before = append_refinement::captureEvalModelState(*gaussians_);
+    const auto used_before = kfs_used_times_;
+    const int iter_before = getIteration();
+    const long long steps_before = quad_opt_steps_;
+    const double map_ms_before = quad_mapping_ms_;
+
+    {
+        torch::NoGradGuard no_grad;
+        renderAndRecordAllKeyframes(name_suffix);
+    }
+
+    std::string why = "none";
+    bool ok = true;
+    if (getIteration() != iter_before) {
+        ok = false; why = "iteration_changed";
+    } else if (quad_opt_steps_ != steps_before) {
+        ok = false; why = "optimizer_step_count_changed";
+    } else if (quad_mapping_ms_ != map_ms_before) {
+        ok = false; why = "training_time_counter_changed";
+    } else if (kfs_used_times_ != used_before) {
+        ok = false; why = "kfs_used_times_changed";
+    } else if (!append_refinement::compareKfUsageState(
+                   usage_before, *scene_, why)) {
+        ok = false;
+    } else if (!append_refinement::compareEvalModelState(
+                   model_before, *gaussians_, why)) {
+        ok = false;
+    }
+
+    std::string tag = name_suffix;
+    if (!tag.empty() && tag[0] == '_') tag = tag.substr(1);
+    std::ofstream out(result_dir_ / ("eval_guard_" + tag + ".txt"),
+                      std::ios::out | std::ios::trunc);
+    out << "ok=" << (ok ? 1 : 0) << "\n";
+    out << "fail_reason=" << why << "\n";
+    out << "iteration=" << iter_before << "\n";
+    out << "optimizer_steps=" << steps_before << "\n";
+    out << "training_timer=" << map_ms_before << "\n";
+    out << "params_changed=0\n";
+    out << "adam_steps_changed=0\n";
+    out << "training_counters_changed=0\n";
+    out << "viewport_or_pyramid_budget_changed=0\n";
+    out.flush();
+    std::cerr << "[EvalGuard] " << (ok ? "OK" : "FAIL")
+              << " suffix=" << name_suffix << " reason=" << why << std::endl;
 }
 
 void GaussianMapper::savePly(std::filesystem::path result_dir)

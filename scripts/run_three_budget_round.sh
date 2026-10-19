@@ -70,6 +70,7 @@ PY
 clean_env() {
     env -u PHOTO_SLAM_APPEND_STEPS \
         -u PHOTO_SLAM_APPEND_SEED \
+        -u PHOTO_SLAM_APPEND_DIAG \
         -u PHOTO_SLAM_GBA_APPLY_CORRECTION \
         -u PHOTO_SLAM_GBA_RECOVERY \
         -u PHOTO_SLAM_GBA_RECOVERY_DIAG \
@@ -123,12 +124,14 @@ run_case() {
     local plys=0
     [[ -n "$(find "${out}/append/natural_end/point_cloud" -name point_cloud.ply 2>/dev/null | head -1)" ]] && plys=$((plys+1))
     [[ -n "$(find "${out}/append/budget_end/point_cloud" -name point_cloud.ply 2>/dev/null | head -1)" ]] && plys=$((plys+1))
+    local guard_ok=0
+    [[ -f "${out}/eval_guard_shutdown.txt" ]] && grep -qx 'ok=1' "${out}/eval_guard_shutdown.txt" && guard_ok=1
 
-    if [[ "${ec}" -eq 0 && "${ok}" -eq 1 && "${plys}" -eq 2 && "${bstat}" != "pending" && "${bstat}" != "" ]]; then
-        echo "[budget-round] ${tag}: PASS exit=${ec} wall=${wall}s budget_status=${bstat} unmatched=${bmis:-?}"
+    if [[ "${ec}" -eq 0 && "${ok}" -eq 1 && "${plys}" -eq 2 && "${guard_ok}" -eq 1 && "${bstat}" != "pending" && "${bstat}" != "" ]]; then
+        echo "[budget-round] ${tag}: PASS exit=${ec} wall=${wall}s budget_status=${bstat} unmatched=${bmis:-?} eval_guard=1"
         return 0
     fi
-    echo "[budget-round] ${tag}: FAIL exit=${ec} status_ok=${ok} plys=${plys} budget_status=${bstat}" >&2
+    echo "[budget-round] ${tag}: FAIL exit=${ec} status_ok=${ok} plys=${plys} eval_guard=${guard_ok} budget_status=${bstat}" >&2
     [[ -f "${status}" ]] && sed -n '1,60p' "${status}" | sed 's/^/    /' >&2
     echo "    log: ${log}" >&2
     if [[ "${ec}" -ne 0 ]]; then

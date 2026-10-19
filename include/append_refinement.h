@@ -501,6 +501,155 @@ inline std::vector<long long> captureAdamSteps(torch::optim::Adam& opt)
     return out;
 }
 
+// -------------------------------------------------------------------------
+// Read-only evaluation guard.
+//
+// The in-process shutdown render is an EXPORT/EVALUATION path. It must not
+// touch parameters, Adam state, model buffers, keyframe usage counters,
+// pyramid budgets or training counters. This snapshot/compare pair proves it
+// at a stage boundary (never inside the per-step training path).
+// -------------------------------------------------------------------------
+struct EvalModelState
+{
+    ParamSnapshot params;
+    std::vector<long long> adam_steps;
+    int active_sh = -1;
+    std::vector<torch::Tensor> buffers;   // CPU clones
+    std::vector<bool> buffer_defined;
+};
+
+template <typename ModelT>
+inline EvalModelState captureEvalModelState(ModelT& model)
+{
+    EvalModelState s;
+    s.params = captureParamSnapshot(*model.optimizer_);
+    s.adam_steps = captureAdamSteps(*model.optimizer_);
+    s.active_sh = model.active_sh_degree_;
+    auto add = [&s](const torch::Tensor& t) {
+        s.buffer_defined.push_back(t.defined());
+        s.buffers.push_back(t.defined()
+                                ? t.detach().to(torch::kCPU).clone()
+                                : torch::Tensor());
+    };
+    add(model.max_radii2D_);
+    add(model.xyz_gradient_accum_);
+    add(model.denom_);
+    return s;
+}
+
+template <typename ModelT>
+inline bool compareEvalModelState(const EvalModelState& before,
+                                  ModelT& model,
+                                  std::string& why)
+{
+    if (model.active_sh_degree_ != before.active_sh)
+    {
+        why = "active_sh_degree_changed";
+        return false;
+    }
+    const auto diff = diffParamSnapshot(before.params, *model.optimizer_);
+    if (!diff.identity_preserved || !diff.shape_preserved ||
+        diff.changed_elements != 0)
+    {
+        why = "parameters_changed";
+        return false;
+    }
+    const auto steps_after = captureAdamSteps(*model.optimizer_);
+    if (steps_after != before.adam_steps)
+    {
+        why = "adam_steps_changed";
+        return false;
+    }
+    auto same_tensor = [](const torch::Tensor& cur,
+                          const torch::Tensor& ref,
+                          bool was_defined) {
+        if (cur.defined() != was_defined)
+            return false;
+        if (!was_defined)
+            return true;
+        return torch::equal(cur.detach().to(torch::kCPU), ref);
+    };
+    if (!same_tensor(model.max_radii2D_, before.buffers[0],
+                     before.buffer_defined[0]))
+    {
+        why = "max_radii2D_changed";
+        return false;
+    }
+    if (!same_tensor(model.xyz_gradient_accum_, before.buffers[1],
+                     before.buffer_defined[1]))
+    {
+        why = "xyz_gradient_accum_changed";
+        return false;
+    }
+    if (!same_tensor(model.denom_, before.buffers[2],
+                     before.buffer_defined[2]))
+    {
+        why = "denom_changed";
+        return false;
+    }
+    why = "none";
+    return true;
+}
+
+struct KfUsageState
+{
+    std::vector<unsigned long> fids;
+    std::vector<int> remaining;
+    std::vector<std::vector<int>> pyramid;
+};
+
+template <typename SceneT>
+inline KfUsageState captureKfUsageState(SceneT& scene)
+{
+    KfUsageState s;
+    for (auto& kv : scene.keyframes())
+    {
+        s.fids.push_back(static_cast<unsigned long>(kv.second->fid_));
+        s.remaining.push_back(kv.second->remaining_times_of_use_);
+        s.pyramid.push_back(kv.second->gaus_pyramid_times_of_use_);
+    }
+    return s;
+}
+
+template <typename SceneT>
+inline bool compareKfUsageState(const KfUsageState& before,
+                                SceneT& scene,
+                                std::string& why)
+{
+    std::size_t i = 0;
+    for (auto& kv : scene.keyframes())
+    {
+        if (i >= before.fids.size())
+        {
+            why = "keyframe_count_changed";
+            return false;
+        }
+        if (static_cast<unsigned long>(kv.second->fid_) != before.fids[i])
+        {
+            why = "keyframe_order_changed";
+            return false;
+        }
+        if (kv.second->remaining_times_of_use_ != before.remaining[i])
+        {
+            why = "remaining_times_of_use_changed";
+            return false;
+        }
+        if (kv.second->gaus_pyramid_times_of_use_ != before.pyramid[i])
+        {
+            why = "gaus_pyramid_budget_changed";
+            return false;
+        }
+        ++i;
+    }
+    if (i != before.fids.size())
+    {
+        why = "keyframe_count_changed";
+        return false;
+    }
+    why = "none";
+    return true;
+}
+
 /**
  * Wait until the SLAM mapping-operation queue is empty AND stays empty for
  * `quiet_ms`. Any pending operation is processed through the caller's normal

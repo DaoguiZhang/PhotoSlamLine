@@ -121,6 +121,7 @@ run_case() {
         PHOTO_SLAM_LINE_MODE="${mode}" \
         PHOTO_SLAM_APPEND_STEPS="${STEPS}" \
         PHOTO_SLAM_APPEND_SEED="${SEED}" \
+        PHOTO_SLAM_APPEND_DIAG=1 \
         "${ROOT}/bin/${bin}" "${VOCAB}" "${ORB_CFG}" "${cfg}" "${DS}" "${out}" no_viewer \
         > "${log}" 2>&1
     local ec=$?
@@ -135,12 +136,14 @@ run_case() {
     fi
     local steps_ok=0
     [[ "${steps_done}" == "${STEPS}" ]] && steps_ok=1
+    local guard_ok=0
+    [[ -f "${out}/eval_guard_shutdown.txt" ]] && grep -qx 'ok=1' "${out}/eval_guard_shutdown.txt" && guard_ok=1
 
-    if [[ "${ec}" -eq 0 && "${status_ok}" -eq 1 && "${steps_ok}" -eq 1 ]]; then
-        echo "[append-accept] ${tag}: PASS (exit=${ec}, append_steps=${steps_done})"
+    if [[ "${ec}" -eq 0 && "${status_ok}" -eq 1 && "${steps_ok}" -eq 1 && "${guard_ok}" -eq 1 ]]; then
+        echo "[append-accept] ${tag}: PASS (exit=${ec}, append_steps=${steps_done}, eval_guard=1)"
         return 0
     fi
-    echo "[append-accept] ${tag}: FAIL (exit=${ec}, status_ok=${status_ok}, append_steps=${steps_done})" >&2
+    echo "[append-accept] ${tag}: FAIL (exit=${ec}, status_ok=${status_ok}, append_steps=${steps_done}, eval_guard=${guard_ok})" >&2
     [[ -f "${status}" ]] && sed -n '1,40p' "${status}" | sed 's/^/    /' >&2
     echo "    log: ${log}" >&2
     return 1
