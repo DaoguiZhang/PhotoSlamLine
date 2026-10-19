@@ -1,0 +1,124 @@
+# ==========================
+
+# Build
+
+# ==========================
+
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+Makefile
+compile_commands.json
+
+ORB-SLAM3/build/
+ORB-SLAM3/lib/
+ORB-SLAM/Thirdparty/DBoW2/build/
+ORB-SLAM/Thirdparty/g2o/build/
+ORB-SLAM/Thirdparty/Sophus/build/
+
+ORB-SLAM3/Vocabulary/ORBvoc.txt
+
+bin/
+lib/
+
+# ==========================
+
+# Outputs
+
+# ==========================
+
+results/
+output/
+outputs/
+logs/
+tmp/
+
+# ==========================
+
+# Datasets
+
+# ==========================
+
+datasets/
+data/
+
+# ==========================
+
+# Gaussian Splatting
+
+# ==========================
+
+*.ply
+*.bin
+*.ckpt
+*.pth
+*.pt
+scripts/*.ply
+scripts/*.obj
+Test/
+
+# ==========================
+
+# ORB-SLAM
+
+# ==========================
+
+Vocabulary/ORBvoc.txt
+
+# ==========================
+
+# VSCode
+
+# ==========================
+
+.vscode/
+
+# ==========================
+
+# Python
+
+# ==========================
+
+**pycache**/
+*.pyc
+*.pyo
+
+# ==========================
+
+# System
+
+# ==========================
+
+.DS_Store
+Thumbs.db
+
+# ==========================
+
+# ROS
+
+# ==========================
+
+devel/
+install/
+log/
+
+# ==========================
+
+# Docker
+
+# ==========================
+
+docker_data/
+*.tar
+
+# ==========================
+
+# Local Config
+
+# ==========================
+
+*.user.yaml
+*.local.yaml
+.env
+
