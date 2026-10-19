@@ -31,8 +31,11 @@
 #include <thread>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <random>
 #include <mutex>
+
+#include "append_refinement.h"
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/cudaimgproc.hpp>
@@ -112,6 +115,14 @@ public:
     void run();
     void trainColmap();
     void trainForOneIteration();
+
+    // ---- append refinement (PHOTO_SLAM_APPEND_STEPS) --------------------
+    // Same control/logging mechanism as the point build, inserted after the
+    // original final refinement and before shutdown export/signalStop().
+    // Structural line losses stay OFF during append and the raster backend is
+    // whatever the caller selected (C for the L acceptance run).
+    bool appendRefinementEnabled();
+    void runAppendRefinement();
 
     // Frozen-geometry mapper ablation. The scene produced by SLAM (keyframe
     // poses + images, sparse point cloud, line samples) is frozen once at the
@@ -227,6 +238,16 @@ protected:
     void increasePcdByKeyframeInactiveGeoDensify(
         std::shared_ptr<GaussianKeyframeLine> pkf);
 
+    // Append-phase internals (same shared helpers as GaussianMapper).
+    bool appendPreflight(std::string& reason, int& drained_batches);
+    void prepareAppendViewSequence();
+    std::shared_ptr<GaussianKeyframeLine> useOneAppendKeyframe();
+    void appendRecordFirstStepAudit(const char* stage);
+    void appendWriteBoundary(const std::filesystem::path& file, const char* stage);
+    void appendWriteStatus(bool ok, const std::string& reason);
+    long long appendValidatedCount();
+    long long appendValidatedLineCount();
+
     // bool needInterruptTraining();
     // void setInterruptTraining(const bool interrupt_training);
 
@@ -338,6 +359,32 @@ public:
     // REAL optimizer steps executed (counted next to optimizer_->step(),
     // independent of the loop/iteration counter).
     long long frozen_opt_steps_ = 0;
+
+    // ---- append refinement state (PHOTO_SLAM_APPEND_STEPS) --------------
+    append_refinement::Config append_config_;
+    bool append_phase_ = false;                 // gated INSIDE trainForOneIterationErrorGuided()
+    bool append_ok_ = false;
+    std::string append_fail_reason_;
+    long long append_completed_steps_ = 0;      // after real optimizer.step()
+    long long natural_completed_steps_ = 0;
+    int append_start_iteration_ = 0;
+    double natural_train_seconds_ = 0.0;
+    double append_train_seconds_ = 0.0;
+    double append_preflight_seconds_ = 0.0;
+    double append_validation_seconds_ = 0.0;
+    double shutdown_export_seconds_ = 0.0;
+    std::filesystem::path append_dir_;
+    std::vector<std::size_t> append_view_seq_;
+    std::size_t append_view_cursor_ = 0;
+    std::vector<std::array<long long, 3>> append_actual_views_;
+    std::vector<long long> append_adam_steps_before_;
+    std::vector<append_refinement::GroupGradInfo> append_first_step_grads_;
+    append_refinement::ParamSnapshot append_param_snapshot_;
+    std::vector<append_refinement::KeyframeState> append_kf_before_;
+    std::uint64_t append_camera_hash_before_ = 0;
+    long long append_gaussian_count_before_ = -1;
+    long long append_line_count_before_ = -1;
+    std::unique_ptr<std::ofstream> append_adam_audit_;
     // Pre-generated keyframe sampling sequence (indices into scene keyframe
     // order), generated once and replayed identically by every condition and
     // every repeat.

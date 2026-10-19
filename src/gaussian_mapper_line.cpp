@@ -26,7 +26,9 @@
 #include <functional>
 #include <limits>
 #include <algorithm>
-#include <sstream>#include <opencv2/imgcodecs.hpp>
+#include <iomanip>
+#include <sstream>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include "LineMode.h"
@@ -978,13 +980,35 @@ void GaussianMapperLine::run()
     phase_refine_s_ = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - refine_start).count() / 1000.0;
 
+    // Append refinement: real extra optimizer updates on the EXISTING line
+    // model. Inserted AFTER the original final refinement and BEFORE shutdown
+    // export/signalStop(); the natural training and fixed refinement rules are
+    // left untouched.
+    if (appendRefinementEnabled()) {
+        runAppendRefinement();
+    }
+
     // Save and clear
+    const auto export_start = std::chrono::steady_clock::now();
     if (scene_->keyframes().empty()) {
         std::cerr << "[Gaussian Mapper] No keyframes in scene; skipping shutdown render/PLY export." << std::endl;
     } else {
         renderAndRecordAllKeyframes("_shutdown");
         savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
         writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
+    }
+    shutdown_export_seconds_ =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - export_start).count() / 1000.0;
+    if (!append_dir_.empty()) {
+        std::ostringstream os;
+        os << std::fixed << std::setprecision(6) << shutdown_export_seconds_;
+        append_refinement::writeKv(append_dir_ / "append_summary.txt",
+                                   "shutdown_export_seconds", os.str());
+        append_refinement::writeKv(append_dir_ / "append_export_timing.txt",
+                                   "shutdown_export_seconds", os.str());
+        append_refinement::appendLine(append_dir_ / "append_status.txt",
+                                      "shutdown_export_seconds=" + os.str());
     }
 
     // ==========================================================
@@ -3525,7 +3549,10 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
             recordKeyframeRendered(masked_image, gt_image, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
 
         // Densification (frozen-count experiment: count must not change)
-        if (!frozen_fixed_count_ && getIteration() < opt_params_.densify_until_iter_) {
+        // Append phase: this gate disables the ACTUAL densify/clone/split/
+        // prune path, extra anisotropic/tiny prunes and opacity reset.
+        if (!frozen_fixed_count_ && !append_phase_ &&
+            getIteration() < opt_params_.densify_until_iter_) {
             // Keep track of max radii in image-space for pruning
             gaussians_->max_radii2D_.index_put_(
                 {visibility_filter},
@@ -3615,14 +3642,23 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
         // Optimizer step
         if (getIteration() < opt_params_.iterations_) {
             writeAdamAudit("step_entry");
+            if (append_phase_ && append_completed_steps_ == 0)
+                appendRecordFirstStepAudit("first_step_before");
             gaussians_->optimizer_->step();
             ++frozen_opt_steps_;   // real optimizer-step counter (ablation)
+            if (append_phase_) {
+                ++append_completed_steps_;
+                if (append_completed_steps_ == append_config_.steps)
+                    appendRecordFirstStepAudit("last_step_after");
+            }
             gaussians_->optimizer_->zero_grad(true);
             // Keep rotation quaternions unit-norm: the raw rotation_ norm is
             // unconstrained (losses only see the normalized quaternion), so it
             // can drift to zero and degenerate the normalize() backward.
+            // Append phase normalizes in place so the optimizer parameter and
+            // Adam moments are not replaced/reset during the measured window.
             if (getIteration() % 50 == 0)
-                gaussians_->normalizeRotationQuaternions();
+                gaussians_->normalizeRotationQuaternions(append_phase_);
         }
         writeAdamAudit("after_update");
         if (recovery_diag_hook_) recovery_diag_hook_("after_update");
@@ -3631,7 +3667,508 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
     g_gpu_prof.endIteration(prof_refine_phase_);
 }
 
+// ---------------------------------------------------------------------------
+// Append refinement (line build)
+// ---------------------------------------------------------------------------
 
+bool GaussianMapperLine::appendRefinementEnabled()
+{
+    append_config_ = append_refinement::readConfig();
+    return append_config_.enabled();
+}
+
+long long GaussianMapperLine::appendValidatedCount()
+{
+    if (!gaussians_ || !gaussians_->xyz_.defined())
+        return -1;
+    return static_cast<long long>(gaussians_->xyz_.size(0));
+}
+
+long long GaussianMapperLine::appendValidatedLineCount()
+{
+    if (!gaussians_ || !gaussians_->is_line_.defined() ||
+        gaussians_->is_line_.numel() == 0)
+        return 0;
+    return static_cast<long long>(
+        gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>());
+}
+
+bool GaussianMapperLine::appendPreflight(std::string& reason,
+                                         int& drained_batches)
+{
+    if (!pSLAM_) {
+        reason = "no_pSLAM";
+        return false;
+    }
+    if (!pSLAM_->isShutDown()) {
+        reason = "slam_not_shutdown";
+        return false;
+    }
+    auto has_ops = [this]() {
+        return pSLAM_->getAtlas()->hasMappingOperation();
+    };
+    auto drain_one = [this]() {
+        combineMappingOperations_withLine();
+    };
+    if (!append_refinement::drainAndSettleQueue(
+            has_ops, drain_one,
+            append_config_.queue_timeout_ms,
+            append_config_.queue_quiet_ms,
+            drained_batches, reason))
+        return false;
+    if (!pSLAM_->isShutDown()) {
+        reason = "slam_shutdown_revoked";
+        return false;
+    }
+    if (scene_->keyframes().empty()) {
+        reason = "empty_scene";
+        return false;
+    }
+    return true;
+}
+
+void GaussianMapperLine::prepareAppendViewSequence()
+{
+    append_view_seq_.clear();
+    append_actual_views_.clear();
+    append_view_cursor_ = 0;
+    if (!scene_) return;
+
+    std::vector<unsigned long> fids;
+    std::vector<int> remaining;
+    fids.reserve(scene_->keyframes().size());
+    remaining.reserve(scene_->keyframes().size());
+    for (auto& kv : scene_->keyframes()) {
+        fids.push_back(static_cast<unsigned long>(kv.second->fid_));
+        remaining.push_back(kv.second->remaining_times_of_use_);
+    }
+
+    append_view_seq_ = append_refinement::buildViewSequence(
+        fids.size(), append_config_.steps, append_config_.seed);
+
+    std::filesystem::create_directories(append_dir_);
+    std::ofstream out(append_dir_ / "append_views_planned.csv");
+    out << "step,map_index,fid,remaining_times_of_use_at_entry\n";
+    for (std::size_t i = 0; i < append_view_seq_.size(); ++i) {
+        const std::size_t idx = append_view_seq_[i];
+        out << i << ',' << idx << ',' << fids[idx] << ','
+            << remaining[idx] << '\n';
+    }
+    out.flush();
+
+    long long sum_rem = 0, min_rem = 0, max_rem = 0;
+    if (!remaining.empty()) {
+        min_rem = remaining.front();
+        max_rem = remaining.front();
+        for (int v : remaining) {
+            sum_rem += v;
+            min_rem = std::min<long long>(min_rem, v);
+            max_rem = std::max<long long>(max_rem, v);
+        }
+    }
+
+    std::ostringstream os;
+    os << "append_view_sequence=independent_precomputed_seed_" << append_config_.seed
+       << " planned_steps=" << append_view_seq_.size()
+       << " keyframes=" << fids.size()
+       << " remaining_times_of_use_entry_sum=" << sum_rem
+       << " min=" << min_rem << " max=" << max_rem
+       << " budget_reset=none"
+       << " note=append_scheduler_does_not_inherit_remaining_budget"
+       << " lr_input=kfs_used_times_continues_from_natural_training";
+    append_refinement::appendLine(append_dir_ / "append_summary.txt", os.str());
+}
+
+std::shared_ptr<GaussianKeyframeLine> GaussianMapperLine::useOneAppendKeyframe()
+{
+    if (append_view_cursor_ >= append_view_seq_.size())
+        return nullptr;
+    const std::size_t map_idx = append_view_seq_[append_view_cursor_];
+    auto it = scene_->keyframes().begin();
+    for (std::size_t i = 0; i < map_idx && it != scene_->keyframes().end(); ++i)
+        ++it;
+    if (it == scene_->keyframes().end())
+        return nullptr;
+
+    auto kf = it->second;
+    const long long append_step = static_cast<long long>(append_view_cursor_);
+    ++append_view_cursor_;
+
+    const auto fid = kf->fid_;
+    auto found = kfs_used_times_.find(fid);
+    if (found == kfs_used_times_.end())
+        kfs_used_times_[fid] = 1;
+    else
+        ++found->second;
+
+    append_actual_views_.push_back(
+        {append_step, static_cast<long long>(map_idx),
+         static_cast<long long>(fid)});
+    return kf;
+}
+
+void GaussianMapperLine::appendRecordFirstStepAudit(const char* stage)
+{
+    if (!append_adam_audit_ || !gaussians_ || !gaussians_->optimizer_)
+        return;
+    const auto info =
+        append_refinement::captureGroupGradInfo(*gaussians_->optimizer_);
+    if (std::string(stage) == "first_step_before")
+        append_first_step_grads_ = info;
+    for (const auto& g : info) {
+        *append_adam_audit_ << stage << ',' << getIteration() << ','
+                            << append_completed_steps_ << ','
+                            << g.group_index << ','
+                            << append_refinement::boolStr(g.has_param) << ','
+                            << append_refinement::boolStr(g.grad_defined) << ','
+                            << g.grad_l2 << ',' << g.adam_step << ','
+                            << g.impl_ptr << ',' << g.data_ptr << '\n';
+    }
+    append_adam_audit_->flush();
+}
+
+void GaussianMapperLine::appendWriteBoundary(const std::filesystem::path& file,
+                                             const char* stage)
+{
+    if (!gaussians_ || !gaussians_->optimizer_)
+        return;
+    const bool first = std::string(stage) == "before";
+    std::ofstream out(file, std::ios::out | (first ? std::ios::trunc : std::ios::app));
+    if (first)
+        out << "stage,group,has_param,grad_defined,grad_l2,adam_step,impl_ptr,data_ptr\n";
+    const auto info =
+        append_refinement::captureGroupGradInfo(*gaussians_->optimizer_);
+    for (const auto& g : info) {
+        out << stage << ',' << g.group_index << ','
+            << append_refinement::boolStr(g.has_param) << ','
+            << append_refinement::boolStr(g.grad_defined) << ','
+            << g.grad_l2 << ',' << g.adam_step << ','
+            << g.impl_ptr << ',' << g.data_ptr << '\n';
+    }
+    out.flush();
+}
+
+void GaussianMapperLine::appendWriteStatus(bool ok, const std::string& reason)
+{
+    append_ok_ = ok;
+    append_fail_reason_ = reason;
+    std::filesystem::create_directories(append_dir_);
+    std::ofstream out(append_dir_ / "append_status.txt",
+                      std::ios::out | std::ios::trunc);
+    out << std::fixed << std::setprecision(6);
+    out << "ok=" << (ok ? 1 : 0) << '\n';
+    out << "fail_reason=" << reason << '\n';
+    out << "append_steps_requested=" << append_config_.steps << '\n';
+    out << "append_completed_steps=" << append_completed_steps_ << '\n';
+    out << "natural_completed_steps=" << natural_completed_steps_ << '\n';
+    out << "raw_iteration=" << getIteration() << '\n';
+    out << "append_start_iteration=" << append_start_iteration_ << '\n';
+    out << "iteration_cap=" << opt_params_.iterations_ << '\n';
+    out << "gaussians=" << appendValidatedCount() << '\n';
+    out << "gaussians_at_entry=" << append_gaussian_count_before_ << '\n';
+    out << "line_gaussians=" << appendValidatedLineCount() << '\n';
+    out << "line_gaussians_at_entry=" << append_line_count_before_ << '\n';
+    out << "natural_train_seconds=" << natural_train_seconds_ << '\n';
+    out << "append_train_seconds=" << append_train_seconds_ << '\n';
+    out << "append_preflight_seconds=" << append_preflight_seconds_ << '\n';
+    out << "append_validation_seconds=" << append_validation_seconds_ << '\n';
+    out << "line_loss_every=" << lineLossEvery() << '\n';
+    out << "line_loss_disabled_in_append=1\n";
+    const char* backend = std::getenv("PHOTO_SLAM_RASTER_BACKEND");
+    out << "raster_backend=" << (backend ? backend : "unset") << '\n';
+    out << "timestamp=" << append_refinement::nowStamp() << '\n';
+    out.flush();
+}
+
+void GaussianMapperLine::runAppendRefinement()
+{
+    append_dir_ = result_dir_ / "append";
+    std::filesystem::create_directories(append_dir_);
+    append_phase_ = false;
+    append_ok_ = false;
+    append_fail_reason_.clear();
+    append_completed_steps_ = 0;
+    append_start_iteration_ = 0;
+    append_gaussian_count_before_ = -1;
+    append_line_count_before_ = -1;
+
+    {
+        std::ofstream s(append_dir_ / "append_summary.txt",
+                        std::ios::out | std::ios::trunc);
+        s << "# append refinement (line build)\n";
+        s << "enabled=1\n";
+        s << "build=L_target\n";
+        s << "config_steps=" << append_config_.steps << '\n';
+        s << "seed=" << append_config_.seed << '\n';
+        s << "line_loss_disabled_in_append=1\n";
+        s << "started=" << append_refinement::nowStamp() << '\n';
+    }
+
+    const auto preflight_start = std::chrono::steady_clock::now();
+    std::string reason;
+    int drained_batches = 0;
+    if (!appendPreflight(reason, drained_batches)) {
+        std::cerr << "[APPEND][FAIL] preflight: " << reason << std::endl;
+        append_preflight_seconds_ =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - preflight_start).count() / 1000.0;
+        appendWriteStatus(false, reason);
+        return;
+    }
+    append_preflight_seconds_ =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - preflight_start).count() / 1000.0;
+    std::ostringstream pre;
+    pre << std::fixed << std::setprecision(6)
+        << "slam_shutdown=1 queue_settled=1 drained_operation_batches="
+        << drained_batches
+        << " preflight_seconds=" << append_preflight_seconds_;
+    append_refinement::appendLine(append_dir_ / "append_summary.txt", pre.str());
+
+    append_start_iteration_ = getIteration();
+    natural_completed_steps_ = frozen_opt_steps_;
+    natural_train_seconds_ = total_training_time_ms_ / 1000.0;
+
+    if (static_cast<long long>(append_start_iteration_) + append_config_.steps >
+        static_cast<long long>(opt_params_.iterations_)) {
+        reason = "iteration_cap_would_block_real_updates";
+        std::cerr << "[APPEND][FAIL] " << reason
+                  << " (start_iteration=" << append_start_iteration_
+                  << " steps=" << append_config_.steps
+                  << " cap=" << opt_params_.iterations_ << ")" << std::endl;
+        appendWriteStatus(false, reason);
+        return;
+    }
+
+    append_param_snapshot_ =
+        append_refinement::captureParamSnapshot(*gaussians_->optimizer_);
+    append_adam_steps_before_ =
+        append_refinement::captureAdamSteps(*gaussians_->optimizer_);
+    append_kf_before_ = append_refinement::snapshotKeyframeStates(*scene_);
+    append_camera_hash_before_ = append_refinement::cameraFingerprint(*scene_);
+    append_gaussian_count_before_ = appendValidatedCount();
+    append_line_count_before_ = appendValidatedLineCount();
+    appendWriteBoundary(append_dir_ / "append_optimizer_boundary.csv", "before");
+
+    prepareAppendViewSequence();
+
+    append_adam_audit_ = std::make_unique<std::ofstream>(
+        append_dir_ / "append_step_audit.csv",
+        std::ios::out | std::ios::trunc);
+    *append_adam_audit_
+        << "stage,iteration,append_completed_steps,group,has_param,"
+           "grad_defined,grad_l2,adam_step,impl_ptr,data_ptr\n";
+
+    // ---- real append training: SAME trainForOneIterationErrorGuided() -----
+    append_phase_ = true;
+    const auto train_start = std::chrono::steady_clock::now();
+    int no_progress = 0;
+    bool failed = false;
+
+    while (append_completed_steps_ < append_config_.steps) {
+        if (static_cast<long long>(getIteration()) >=
+            static_cast<long long>(opt_params_.iterations_)) {
+            reason = "iteration_cap_reached_during_append";
+            failed = true;
+            break;
+        }
+        if (append_view_cursor_ >= append_view_seq_.size()) {
+            reason = "append_view_sequence_exhausted";
+            failed = true;
+            break;
+        }
+
+        const long long before = append_completed_steps_;
+        try {
+            trainForOneIterationErrorGuided();
+        }
+        catch (const std::exception& e) {
+            reason = std::string("append_training_exception:") + e.what();
+            failed = true;
+            break;
+        }
+        catch (...) {
+            reason = "append_training_exception:unknown";
+            failed = true;
+            break;
+        }
+
+        if (device_type_ == torch::kCUDA)
+            torch::cuda::synchronize();
+
+        if (append_completed_steps_ == before) {
+            ++no_progress;
+            if (no_progress >= append_config_.max_no_progress) {
+                reason = "no_progress_no_optimizer_step";
+                failed = true;
+                break;
+            }
+        }
+        else {
+            no_progress = 0;
+        }
+    }
+    if (device_type_ == torch::kCUDA)
+        torch::cuda::synchronize();
+    append_train_seconds_ =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - train_start).count() / 1000.0;
+    append_phase_ = false;
+    if (append_adam_audit_)
+        append_adam_audit_->flush();
+
+    const auto validation_start = std::chrono::steady_clock::now();
+    const auto param_diff = append_refinement::diffParamSnapshot(
+        append_param_snapshot_, *gaussians_->optimizer_);
+    const auto detailed = append_refinement::diffParamSnapshotDetailed(
+        append_param_snapshot_, *gaussians_->optimizer_);
+    const auto adam_steps_after =
+        append_refinement::captureAdamSteps(*gaussians_->optimizer_);
+    const auto kf_after = append_refinement::snapshotKeyframeStates(*scene_);
+    const auto kf_cmp =
+        append_refinement::compareKeyframeStates(append_kf_before_, kf_after);
+    const auto camera_hash_after = append_refinement::cameraFingerprint(*scene_);
+    const long long gaussian_count_after = appendValidatedCount();
+    const long long line_count_after = appendValidatedLineCount();
+    const bool slam_shutdown_after = pSLAM_ && pSLAM_->isShutDown();
+    const bool queue_empty_after =
+        pSLAM_ && !pSLAM_->getAtlas()->hasMappingOperation();
+
+    long long adam_expected_groups = 0;
+    long long adam_advanced_groups = 0;
+    std::ostringstream adam_detail;
+    for (std::size_t gi = 0; gi < append_first_step_grads_.size(); ++gi) {
+        const auto& g = append_first_step_grads_[gi];
+        if (!g.grad_defined)
+            continue;
+        ++adam_expected_groups;
+        long long before_step = (gi < append_adam_steps_before_.size())
+                                    ? append_adam_steps_before_[gi] : -1;
+        long long after_step = (gi < adam_steps_after.size())
+                                   ? adam_steps_after[gi] : -1;
+        const long long delta = after_step - before_step;
+        if (delta == append_config_.steps)
+            ++adam_advanced_groups;
+        adam_detail << " group" << gi << "_step_delta=" << delta;
+    }
+
+    bool adam_ok = (adam_expected_groups > 0) &&
+                   (adam_advanced_groups == adam_expected_groups);
+    const bool steps_ok = append_completed_steps_ == append_config_.steps;
+    const bool params_updated = param_diff.changed_elements > 0;
+    const bool params_finite =
+        param_diff.nan_elements == 0 && param_diff.inf_elements == 0;
+    const bool identity_ok =
+        param_diff.identity_preserved && param_diff.shape_preserved;
+    const bool count_ok =
+        gaussian_count_after == append_gaussian_count_before_ &&
+        line_count_after == append_line_count_before_;
+    const bool geometry_ok =
+        (kf_cmp[0] <= 1e-12) && (kf_cmp[1] <= 1e-12) &&
+        (kf_cmp[2] == 0.0) &&
+        (append_camera_hash_before_ == camera_hash_after) &&
+        (append_kf_before_.size() == kf_after.size()) &&
+        slam_shutdown_after && queue_empty_after &&
+        (append_actual_views_.size() ==
+         static_cast<std::size_t>(append_config_.steps));
+
+    append_validation_seconds_ =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - validation_start).count() / 1000.0;
+
+    {
+        std::ofstream out(append_dir_ / "append_param_diff.csv",
+                          std::ios::out | std::ios::trunc);
+        out << "group,param_index,count,changed,max_abs_delta,l2_delta,"
+               "nan,inf,identity_ok,shape_ok\n";
+        for (const auto& d : detailed)
+            out << d.group_index << ',' << d.param_index << ',' << d.count << ','
+                << d.changed << ',' << d.max_abs_delta << ',' << d.l2_delta
+                << ',' << d.nan_elements << ',' << d.inf_elements << ','
+                << (d.identity_ok ? 1 : 0) << ',' << (d.shape_ok ? 1 : 0) << '\n';
+    }
+    {
+        std::ofstream out(append_dir_ / "append_views_actual.csv",
+                          std::ios::out | std::ios::trunc);
+        out << "step,map_index,fid\n";
+        for (const auto& v : append_actual_views_)
+            out << v[0] << ',' << v[1] << ',' << v[2] << '\n';
+    }
+    appendWriteBoundary(append_dir_ / "append_optimizer_boundary.csv", "after");
+
+    {
+        std::ostringstream os;
+        os << std::fixed << std::setprecision(6);
+        os << "boundary_validation"
+           << " natural_completed_steps=" << natural_completed_steps_
+           << " append_completed_steps=" << append_completed_steps_
+           << " raw_iteration=" << getIteration()
+           << " natural_train_seconds=" << natural_train_seconds_
+           << " append_train_seconds=" << append_train_seconds_
+           << " append_preflight_seconds=" << append_preflight_seconds_
+           << " append_validation_seconds=" << append_validation_seconds_
+           << " gaussians_entry=" << append_gaussian_count_before_
+           << " gaussians_end=" << gaussian_count_after
+           << " line_gaussians_entry=" << append_line_count_before_
+           << " line_gaussians_end=" << line_count_after
+           << " params_changed_elements=" << param_diff.changed_elements
+           << " params_total_elements=" << param_diff.total_elements
+           << " params_changed_tensors=" << param_diff.changed_param_tensors
+           << " params_max_abs_delta=" << param_diff.max_abs_delta
+           << " params_l2_delta=" << param_diff.l2_delta
+           << " params_nan=" << param_diff.nan_elements
+           << " params_inf=" << param_diff.inf_elements
+           << " optimizer_identity_preserved="
+           << append_refinement::boolStr(identity_ok)
+           << " adam_groups_expected=" << adam_expected_groups
+           << " adam_groups_advanced_by_" << append_config_.steps << "="
+           << adam_advanced_groups
+           << " pose_max_delta=" << kf_cmp[0]
+           << " intrinsics_max_delta=" << kf_cmp[1]
+           << " changed_keyframes=" << kf_cmp[2]
+           << " camera_fingerprint_entry=" << append_camera_hash_before_
+           << " slam_shutdown_after="
+           << append_refinement::boolStr(slam_shutdown_after)
+           << " pending_operations_after="
+           << append_refinement::boolStr(!queue_empty_after)
+           << " camera_fingerprint_end=" << camera_hash_after
+           << " append_views_used=" << append_actual_views_.size()
+           << adam_detail.str();
+        append_refinement::appendLine(append_dir_ / "append_summary.txt", os.str());
+    }
+
+    const bool ok = !failed && steps_ok && params_updated && params_finite &&
+                    identity_ok && count_ok && geometry_ok && adam_ok;
+    if (!ok && reason.empty()) {
+        if (!steps_ok) reason = "append_step_count_mismatch";
+        else if (!params_updated) reason = "no_parameter_update";
+        else if (!params_finite) reason = "non_finite_parameter";
+        else if (!identity_ok) reason = "optimizer_identity_changed";
+        else if (!count_ok) reason = "gaussian_count_changed";
+        else if (!geometry_ok) reason = "camera_or_keyframe_changed";
+        else if (!adam_ok) reason = "adam_step_not_advanced";
+        else reason = "unknown";
+    }
+    appendWriteStatus(ok, ok ? "none" : reason);
+
+    std::cerr << "[APPEND] " << (ok ? "OK" : "FAIL")
+              << " build=L steps=" << append_completed_steps_ << "/"
+              << append_config_.steps
+              << " natural_steps=" << natural_completed_steps_
+              << " raw_iteration=" << getIteration()
+              << " gaussians=" << gaussian_count_after
+              << " line_gaussians=" << line_count_after
+              << " changed_elements=" << param_diff.changed_elements
+              << " nan=" << param_diff.nan_elements
+              << " pose_delta=" << kf_cmp[0]
+              << " adam_groups=" << adam_advanced_groups << "/"
+              << adam_expected_groups
+              << " train_seconds=" << append_train_seconds_
+              << " reason=" << (ok ? "none" : reason) << std::endl;
+    if (!ok)
+        std::cerr << "[APPEND][FAIL] see " << (append_dir_ / "append_status.txt")
+                  << std::endl;
+}
 
 /**
  * @brief The training iteration body
@@ -7272,6 +7809,12 @@ GaussianMapperLine::useOneTrainingErrorSlidingWindowKeyframe()
 {
     if (scene_->keyframes().empty())
         return nullptr;
+
+    // Append phase: use the independent, recorded append schedule. The natural
+    // error-guided sampler and its remaining budget are NOT re-used/reset;
+    // only kfs_used_times_ (LR schedule input) continues to advance.
+    if (append_phase_)
+        return useOneAppendKeyframe();
 
     // Frozen-geometry ablation: replay the pre-generated keyframe sampling
     // sequence so that every condition and every repeat sees an identical

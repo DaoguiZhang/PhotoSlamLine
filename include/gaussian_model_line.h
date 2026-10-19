@@ -72,7 +72,9 @@ public:
     // Re-normalize rotation quaternions in-place (optimizer-aware). Keeps the
     // quaternion unit-norm so the normalize() backward in the line losses /
     // rasterizer never degenerates (avoids NaN gradients -> NaN rotation_).
-    void normalizeRotationQuaternions();
+    // in_place=true (append phase) keeps the SAME parameter tensor and Adam
+    // moment buffers; the default false preserves the original behaviour.
+    void normalizeRotationQuaternions(bool in_place = false);
     torch::Tensor getXYZ();
     torch::Tensor getFeatures();
     torch::Tensor getOpacityActivation();

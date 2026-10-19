@@ -361,12 +361,18 @@ torch::Tensor GaussianModelLine::getRotationActivation()
     return this->rotation_ / torch::sqrt(norm_sq);
 }
 
-void GaussianModelLine::normalizeRotationQuaternions()
+void GaussianModelLine::normalizeRotationQuaternions(bool in_place)
 {
     if (this->rotation_.size(0) == 0) return;
     torch::NoGradGuard no_grad;
     auto norm_sq = torch::sum(this->rotation_ * this->rotation_, 1, true).clamp_min(1e-16f);
     auto normalized = this->rotation_ / torch::sqrt(norm_sq);
+    if (in_place) {
+        // Append phase: keep parameter identity and Adam moments untouched.
+        // Mathematically identical normalization, no tensor replacement.
+        this->rotation_.copy_(normalized);
+        return;
+    }
     this->rotation_ = replaceTensorToOptimizer(normalized, 5);
     this->Tensor_vec_rotation_ = {this->rotation_};
 }
