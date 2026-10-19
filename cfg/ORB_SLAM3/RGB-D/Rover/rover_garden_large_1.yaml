@@ -1,0 +1,56 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters. 来自你发掘出的无价标定数据！
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+Camera.type: "PinHole"
+
+# 相机内参 (fx, fy, cx, cy)
+Camera1.fx: 596.1950425915236
+Camera1.fy: 593.1411835433107
+Camera1.cx: 327.0463454538411
+Camera1.cy: 245.16142133264628
+
+# 畸变参数 (k1, k2,k3, p1, p2)
+Camera1.k1: 0.07561607662577634
+Camera1.k2: -0.2088729975389971
+Camera1.k3: 0.0
+Camera1.p1: -0.0023347441072184756
+Camera1.p2: 0.004010356017731083
+
+Camera.fps: 30
+Camera.RGB: 1
+
+# 根据内参中心点逆推确定的真实分辨率
+Camera.width: 640
+Camera.height: 480
+
+Stereo.ThDepth: 40.0
+Stereo.b: 0.05
+
+# 针对 D435i 深度图的标准缩放因子
+RGBD.DepthMapFactor: 1000.0
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters (针对室外大场景优化的抗丢追踪参数)
+#--------------------------------------------------------------------------------------------
+ORBextractor.nFeatures: 3500
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 10
+ORBextractor.minThFAST: 5
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

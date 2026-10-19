@@ -1,0 +1,57 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters. 必须根据 ETH3D 对应场景的 calibration.txt 修改！
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+Camera.type: "PinHole"
+
+# 相机内参 (fx, fy, cx, cy) - 请打开 cables_2/calibration.txt 查看真实的数字填在这里
+# 你的全新相机内参
+Camera1.fx: 726.21081542969
+Camera1.fy: 726.21081542969
+Camera1.cx: 359.2048034668
+Camera1.cy: 202.47247314453
+
+# 畸变参数 (ETH3D 通常已经去畸变了，全填 0)
+Camera1.k1: 0.0
+Camera1.k2: 0.0
+Camera1.k3: 0.0
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+
+Camera.fps: 30
+Camera.RGB: 1
+
+# 图像分辨率
+Camera.width: 743
+Camera.height: 465
+
+Stereo.ThDepth: 40.0
+Stereo.b: 0.0666667
+
+# 深度图缩放因子 (ETH3D 默认是 5000.0)
+RGBD.DepthMapFactor: 5000.0
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+ORBextractor.nFeatures: 2000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0
