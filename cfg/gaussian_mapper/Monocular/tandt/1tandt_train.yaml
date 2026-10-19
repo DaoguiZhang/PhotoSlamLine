@@ -1,0 +1,63 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters. 完美融入你发掘出的 D435i 真实标定数据
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+Camera.type: "PinHole"
+
+# 相机内参 (fx, fy, cx, cy)
+Camera1.fx: 1344.0
+Camera1.fy: 1344.0
+Camera1.cx: 960.0
+Camera1.cy: 540.0
+
+# 畸变参数 (k1, k2, k3, p1, p2) - 标准 RadTan 模型
+Camera1.k1: 0.0
+Camera1.k2: 0.0
+Camera1.k3: 0.0
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+
+# 相机帧率
+Camera.fps: 5
+
+# 图像色彩通道顺序 (0: BGR, 1: RGB)
+Camera.RGB: 1
+
+# 图像真实分辨率
+Camera.width: 1920
+Camera.height: 1080
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters (针对室外单目 Rover 运动特性的强力抗丢优化)
+#--------------------------------------------------------------------------------------------
+
+# 每一帧提取的特征点数：从 TUM 默认的 2000 提升到 3500
+# 理由：单目模式没有初始深度，必须靠海量的特征点确保在草坪、道路等弱纹理区域成功初始化并防止转弯时跟丢
+ORBextractor.nFeatures: 3500
+
+# 金字塔层级之间的缩放比例
+ORBextractor.scaleFactor: 1.2
+
+# 图像金字塔的层数
+ORBextractor.nLevels: 8
+
+# FAST 角点检测阈值：从 TUM 默认的 20 降到 12
+# 理由：室外路面和草坪的局部对比度较低，降低阈值能强行抠出更多可追踪的细微特征点
+ORBextractor.iniThFAST: 12
+ORBextractor.minThFAST: 5
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0
