@@ -3,6 +3,8 @@
 Date: 2026-10-26  
 Scope: room1 only. This is a configuration correction, not a new acceleration algorithm.
 
+Eight-scene follow-up: see `docs/REPLICA_A_PYRAMID2_BATCH.md`.
+
 ## Source and binary provenance
 
 - Repository source commit used as the base: `ec85e80886e2f0494acb87781e075334bcf2ba58`
