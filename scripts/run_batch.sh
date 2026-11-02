@@ -75,11 +75,11 @@ run_one() {
   local t0 t1 rc
   t0=$(date +%s.%N)
   if [ "$mod" = "rgbd" ]; then
-    PHOTO_SLAM_LINE_MODE=$(arm_mode "$arm") PHOTO_SLAM_PO_LINE=1 PHOTO_SLAM_LBA_LINE=1 \
+    EVAL_ARM="$arm" PHOTO_SLAM_LINE_MODE=$(arm_mode "$arm") PHOTO_SLAM_PO_LINE=1 PHOTO_SLAM_LBA_LINE=1 \
       PHOTO_SLAM_LINE_RESCUE=0 PHOTO_SLAM_SLAM_ONLY=1 \
       "$BIN" "$VOCAB" "$TREE/$cfg" "$GAUSS" "$seq" "$dir" rgbd "$assoc" > "$log" 2>&1
   else
-    PHOTO_SLAM_LINE_MODE=$(arm_mode "$arm") PHOTO_SLAM_PO_LINE=1 PHOTO_SLAM_LBA_LINE=1 \
+    EVAL_ARM="$arm" PHOTO_SLAM_LINE_MODE=$(arm_mode "$arm") PHOTO_SLAM_PO_LINE=1 PHOTO_SLAM_LBA_LINE=1 \
       PHOTO_SLAM_LINE_RESCUE=0 PHOTO_SLAM_SLAM_ONLY=1 \
       "$BIN" "$VOCAB" "$TREE/$cfg" "$GAUSS" "$seq" "$dir" mono > "$log" 2>&1
   fi

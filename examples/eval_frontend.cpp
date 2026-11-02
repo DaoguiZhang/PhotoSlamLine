@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -62,6 +63,12 @@ static std::string EnvOr(const char *k, const char *d)
 {
     const char *v = std::getenv(k);
     return v ? std::string(v) : std::string(d);
+}
+
+static double Ms(std::chrono::steady_clock::time_point a,
+                 std::chrono::steady_clock::time_point b)
+{
+    return std::chrono::duration_cast<std::chrono::duration<double>>(b - a).count() * 1e3;
 }
 
 // association file: "ts rgb/xxx.png ts depth/xxx.png"
@@ -117,12 +124,52 @@ int main(int argc, char **argv)
     const std::string slamCfg = argv[2];
     const std::string seqDir = argv[4];
     const fs::path outDir(argv[5]);
-    const std::string mode = argv[6];
+    const std::string modeArg = argv[6];
+
+    // "replica-mono"/"replica-rgbd" reuse the whole mono/rgbd path; only the
+    // frame list differs (Replica ships numbered images, no timestamp file).
+    const bool replica = (modeArg.rfind("replica-", 0) == 0);
+    const std::string mode = (modeArg == "replica-rgbd") ? "rgbd"
+                             : (modeArg == "replica-mono") ? "mono"
+                                                            : modeArg;
+    if (mode != "mono" && mode != "rgbd")
+    {
+        std::cerr << "mode must be mono|rgbd|replica-mono|replica-rgbd\n";
+        return 1;
+    }
+
+    // ---- explicit arm dispatch -------------------------------------------
+    // The arm is taken from EVAL_ARM, NOT inferred from PHOTO_SLAM_LINE_MODE.
+    // T0 must call the pure-point tracking API (no line code path is entered at
+    // all); P1/P2 call the WithLine API and differ only by the line edges that
+    // PHOTO_SLAM_LINE_MODE enables inside the optimizers.
+    const std::string arm = EnvOr("EVAL_ARM", "");
+    if (arm != "T0" && arm != "P1" && arm != "P2")
+    {
+        std::cerr << "EVAL_ARM must be T0|P1|P2 (got '" << arm << "')\n";
+        return 1;
+    }
+    const std::string lineMode = EnvOr("PHOTO_SLAM_LINE_MODE", "2");
+    const std::string want = (arm == "T0" ? "0" : (arm == "P1" ? "1" : "2"));
+    if (lineMode != want)
+    {
+        std::cerr << "arm/mode mismatch: EVAL_ARM=" << arm << " wants "
+                  << "PHOTO_SLAM_LINE_MODE=" << want << " but got " << lineMode
+                  << "\n";
+        return 1;
+    }
+    const bool useLineApi = (arm != "T0");
 
     fs::create_directories(outDir);
     std::ofstream banner(outDir / "eval_entry.txt");
     banner << "entry=eval_frontend.cpp (SLAM-only, no Gaussian mapper)\n";
     banner << "mode=" << mode << "\n";
+    banner << "arm=" << arm << "\n";
+    banner << "line_api=" << (useLineApi ? "WithLine" : "pure-point") << "\n";
+    banner << "api=" << (mode == "rgbd"
+                            ? (useLineApi ? "TrackRGBDWithLine" : "TrackRGBD")
+                            : (useLineApi ? "TrackMonocularWithLine" : "TrackMonocular"))
+           << "\n";
     banner << "vocab=" << vocab << "\n";
     banner << "slam_cfg=" << slamCfg << "\n";
     banner << "gauss_cfg_ignored=" << argv[3] << "\n";
@@ -140,10 +187,50 @@ int main(int argc, char **argv)
 
     std::vector<std::string> vRGB, vD;
     std::vector<double> vTs;
-    if (mode == "rgbd")
+    if (replica)
+    {
+        // Replica: <seq>/results/frame%06d.jpg and depth%06d.png, no timestamps.
+        // A synthetic time base of 1/30 s per index is recorded in eval_entry.txt;
+        // the values are indices, not measurements.
+        const std::string res = seqDir + "/results";
+        char buf[64];
+        for (int i = 0;; i++)
+        {
+            snprintf(buf, sizeof(buf), "/frame%06d.jpg", i);
+            if (!fs::exists(res + buf)) break;
+            vRGB.push_back(std::string("results") + buf);
+            snprintf(buf, sizeof(buf), "results/depth%06d.png", i);
+            vD.push_back(buf);
+            vTs.push_back(i / 30.0);
+        }
+        if (vRGB.empty())
+        {
+            std::cerr << "no Replica frames under " << res << "/frameNNNNNN.jpg\n";
+            return 1;
+        }
+        if (mode == "rgbd")
+        {
+            for (size_t k = 0; k < vD.size(); k++)
+                if (!fs::exists(seqDir + "/" + vD[k]))
+                {
+                    std::cerr << "missing depth for frame " << k << ": " << vD[k] << "\n";
+                    return 1;
+                }
+        }
+    }
+    else if (mode == "rgbd")
     {
         if (argc != 8) { std::cerr << "rgbd needs assoc_file\n"; return 1; }
         LoadAssoc(argv[7], vRGB, vD, vTs);
+        // Reject a non-monotonic association list instead of silently feeding
+        // frames out of order (this exact defect invalidated an earlier batch).
+        for (size_t k = 1; k < vTs.size(); k++)
+            if (vTs[k] <= vTs[k - 1])
+            {
+                std::cerr << "association file is not time-ordered at line " << k
+                          << " (" << vTs[k - 1] << " then " << vTs[k] << ")\n";
+                return 1;
+            }
     }
     else if (mode == "mono")
     {
@@ -182,6 +269,13 @@ int main(int argc, char **argv)
 
     std::cerr << "[EVAL-ENTRY] mode=" << mode << " frames=" << nImages
               << " seq=" << seqDir << " out=" << outDir.string() << std::endl;
+    std::cerr << "[EVAL-DISPATCH] arm=" << arm << " line_mode=" << lineMode
+              << " use_line_api=" << (useLineApi ? 1 : 0)
+              << " api="
+              << (mode == "rgbd"
+                      ? (useLineApi ? "TrackRGBDWithLine" : "TrackRGBD")
+                      : (useLineApi ? "TrackMonocularWithLine" : "TrackMonocular"))
+              << std::endl;
 
     auto pSLAM = std::make_shared<ORB_SLAM3::System>(
         vocab, slamCfg,
@@ -193,12 +287,17 @@ int main(int argc, char **argv)
 
     std::vector<float> vTimesTrack(nImages, 0.f);
     std::vector<double> vState(nImages, -2.0);
+    // Entry-level stage timing (wall clock, non-overlapping buckets).
+    double t_read = 0, t_cvt = 0, t_depth = 0, t_track = 0, t_drain = 0, t_pace = 0;
 
     for (int ni = 0; ni < nImages; ni++)
     {
         if (pSLAM->isShutDown()) break;
 
+        auto c0 = std::chrono::steady_clock::now();
         cv::Mat im = cv::imread(seqDir + "/" + vRGB[ni], cv::IMREAD_UNCHANGED);
+        auto c1 = std::chrono::steady_clock::now();
+        t_read += Ms(c0, c1);
         if (im.empty())
         {
             std::cerr << "Failed to load image: " << seqDir << "/" << vRGB[ni]
@@ -206,11 +305,16 @@ int main(int argc, char **argv)
             return 1;
         }
         cv::cvtColor(im, im, cv::COLOR_BGR2RGB);
+        auto c2 = std::chrono::steady_clock::now();
+        t_cvt += Ms(c1, c2);
 
         cv::Mat imD;
         if (mode == "rgbd")
         {
+            auto d0 = std::chrono::steady_clock::now();
             imD = cv::imread(seqDir + "/" + vD[ni], cv::IMREAD_UNCHANGED);
+            auto d1 = std::chrono::steady_clock::now();
+            t_depth += Ms(d0, d1);
             if (imD.empty())
             {
                 std::cerr << "Failed to load depth: " << seqDir << "/" << vD[ni]
@@ -230,18 +334,33 @@ int main(int argc, char **argv)
         auto t1 = std::chrono::steady_clock::now();
 
         if (mode == "rgbd")
-            pSLAM->TrackRGBDWithLine(im, imD, tframe,
-                                     std::vector<ORB_SLAM3::IMU::Point>(), vRGB[ni]);
+        {
+            if (useLineApi)
+                pSLAM->TrackRGBDWithLine(im, imD, tframe,
+                                         std::vector<ORB_SLAM3::IMU::Point>(), vRGB[ni]);
+            else
+                pSLAM->TrackRGBD(im, imD, tframe,
+                                 std::vector<ORB_SLAM3::IMU::Point>(), vRGB[ni]);
+        }
         else
-            pSLAM->TrackMonocularWithLine(im, tframe,
-                                          std::vector<ORB_SLAM3::IMU::Point>(), vRGB[ni]);
+        {
+            if (useLineApi)
+                pSLAM->TrackMonocularWithLine(im, tframe,
+                                              std::vector<ORB_SLAM3::IMU::Point>(), vRGB[ni]);
+            else
+                pSLAM->TrackMonocular(im, tframe,
+                                      std::vector<ORB_SLAM3::IMU::Point>(), vRGB[ni]);
+        }
 
         auto t2 = std::chrono::steady_clock::now();
+        t_track += Ms(t1, t2);
 
         // SLAM-only: nothing consumes the mapping-operation queue.
         if (pSLAM->getAtlas() != nullptr) pSLAM->getAtlas()->clearMappingOperation();
+        auto t3 = std::chrono::steady_clock::now();
+        t_drain += Ms(t2, t3);
 
-        const double ttrack = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
+        const double ttrack = Ms(t1, t2) * 1e-3;
         vTimesTrack[ni] = (float)ttrack;
 
         const int st = pSLAM->GetTrackingState();
@@ -255,7 +374,12 @@ int main(int argc, char **argv)
         else if (ni > 0) T = tframe - vTs[ni - 1];
 
         const bool skipPacing = (EnvOr("PHOTO_SLAM_NO_PACING", "0") == "1");
-        if (!skipPacing && ttrack < T) usleep((T - ttrack) * 1e6);
+        if (!skipPacing && ttrack < T)
+        {
+            const auto p0 = std::chrono::steady_clock::now();
+            usleep((T - ttrack) * 1e6);
+            t_pace += Ms(p0, std::chrono::steady_clock::now());
+        }
     }
 
     fsCsv.close();
@@ -282,6 +406,12 @@ int main(int argc, char **argv)
         else if ((int)s == 4) nLost++;
         else nOther++;
     }
+    const double tot = t_read + t_cvt + t_depth + t_track + t_drain + t_pace;
+    std::cerr << "[EVAL-TIMING] frames=" << nImages
+              << " read_rgb_ms=" << t_read << " cvt_ms=" << t_cvt
+              << " read_depth_ms=" << t_depth << " track_ms=" << t_track
+              << " drain_ms=" << t_drain << " pace_ms=" << t_pace
+              << " sum_ms=" << tot << std::endl;
     std::cerr << "[EVAL-ENTRY] done frames_processed=" << nImages
               << " final_state=" << (nImages ? (int)vState[nImages - 1] : -2)
               << " ok=" << nOk << " lost=" << nLost << " other=" << nOther << std::endl;

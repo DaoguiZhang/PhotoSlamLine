@@ -17,29 +17,50 @@ has loaders for TUM-style `rgb.txt` (mono) and TUM/ETH3D-style association files
 That work was not done in this round. **No numbers are reported for these four
 categories.**
 
-## D2. RGB-D arms are n=1, not n=3 — measured 57 min/run
+## D2. [RETRACTED] "RGB-D is slow, ~3 s per frame" — it was the pacing sleep
 
-Observed wall time per run (from `meta.txt` / `status.txt` ISO stamps):
+**This section's original attribution was wrong and is retracted.**
 
-| run | frames | wall |
-|---|---|---|
-| cabinet mono T0 rep1 | 1147 | 47 s |
-| cabinet mono P1 rep1 | 1147 | 46 s |
-| cabinet mono P2 rep1 | 1147 | 47 s |
-| cabinet rgbd T0 rep1 | 1112 | 3400 s (57 min) |
-| cabinet rgbd P1 rep1 | 1112 | 3399 s |
-| cabinet rgbd P2 rep1 | 1112 | 3399 s |
-| large_cabinet mono T0/P1/P2 rep1 | 1011 | 41 s / 42 s / 41 s |
+The original text said the 3400 s/run was "the baseline RGB-D path of this
+build". That conclusion is withdrawn. Evidence from the staged entry-level
+timing on the verified build (60 associated pairs, cabinet RGB-D, serial,
+`PHOTO_SLAM_NO_PACING` unset):
 
-The RGB-D cost is **3.06 s per frame** and is *identical across all three arms*
-(3400 / 3399 / 3399 s). Since T0 performs no line extraction, matching or line
-edges at all, this cost is not attributable to the line pipeline: it is the
-baseline RGB-D path of this build. It is reported as a finding, not explained.
+| arm | api | read_rgb | cvt | read_depth | track | drain | **pace** | sum |
+|---|---|---|---|---|---|---|---|---|
+| T0 | `TrackRGBD` | 570 ms | 10 ms | 150 ms | 373 ms | 0.03 ms | **177 866 ms** | 178 968 ms |
+| P1 | `TrackRGBDWithLine` | 537 ms | 11 ms | 159 ms | 615 ms | 0.05 ms | **177 651 ms** | 178 974 ms |
+| P2 | `TrackRGBDWithLine` | 545 ms | 12 ms | 156 ms | 652 ms | 0.06 ms | **177 625 ms** | 178 991 ms |
 
-Consequence: 18 RGB-D runs would need ~17 h, so the batch was stopped after
-`rep1`. RGB-D is therefore reported with **n = 1 per cell** and no median/range
-claim. This is a deviation from the protocol's `n = 3` design and it is not
-fixed by re-running.
+99.4 % of the wall clock is the real-time pacing sleep. Tracking is 2–4 ms per
+frame; image and depth reading are ~10 ms per frame combined. So RGB-D is **not**
+slow — the *input list was not in time order* (see D9), and the entry sleeps
+`ts[i+1] - ts[i]` per frame. With a scrambled list that difference is tens of
+seconds, which reproduces the 3 s/frame average and the "identical across arms"
+pattern (identical because the sleep, not the line pipeline, dominated).
+
+The old claim "identical for T0/P1/P2, therefore a baseline cost" is exactly the
+kind of inference that the corrected timing falsifies.
+
+## D9. `gen_assoc.py` wrote the association file out of time order
+
+The greedy acceptance in `gen_assoc.py` walks candidate pairs in order of
+increasing time difference, so the accepted list was **not** sorted by timestamp.
+The pair *set* was correct (1112/1147 and 984/1011) but the *order* was not, and
+every sequential reader — including this entry's pacing and any ORB-SLAM3 example
+loader — assumes strictly increasing timestamps.
+
+Consequences that were measured, not assumed:
+* the RGB-D runs consumed frames in a non-chronological order, so their
+trajectories are not meaningful and are excluded from results;
+* pacing slept tens of seconds per frame (D2), which is what "slow RGB-D" was.
+
+Fix: sort the accepted pairs by RGB timestamp before writing
+(`scripts/gen_assoc.py`), verified with an explicit monotonicity check
+(`out_of_order=0` for both sequences). New hashes:
+`fr3_cabinet.txt` `c2523114…`, `fr3_large_cabinet.txt` `5c3b70a3…`
+(previously `fcecb5c9…` and `509277a7…`). All RGB-D runs on the corrected file
+are a separate version.
 
 ## D3. `bc` is not installed — `wall_s=` is empty in rep-1 `status.txt`
 

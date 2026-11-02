@@ -63,6 +63,13 @@ def main():
         used2.add(t2)
         lines.append((t1, f1, t2, f2))
 
+    # The greedy pass accepts pairs in order of smallest time difference, so the
+    # accepted list is NOT in time order. ORB-SLAM3 (and any sequential reader)
+    # requires strictly increasing timestamps, and the entry's real-time pacing
+    # computes ts[i+1]-ts[i]: an out-of-order list makes it sleep for tens of
+    # seconds per frame. Sort by the RGB timestamp before writing.
+    lines.sort(key=lambda x: x[0])
+
     with open(a.out, "w") as f:
         for t1, f1, t2, f2 in lines:
             f.write("%.6f %s %.6f %s\n" % (t1, f1, t2, f2))
