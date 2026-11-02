@@ -1,0 +1,56 @@
+# derived from sfm_house_loop/calibration.txt (fx fy cx cy) and the actual RGB frame
+# size 743x465; all other keys copied verbatim from the official
+# Monocular/ETH3D/eth3d_desk_3.yaml. Monocular: no depth factor involved.
+%YAML:1.0
+
+#-------------------------------------------------------------------------------
+# Camera Parameters. ETH3D monocular (desk_3; shared ETH3D pinhole camera)
+# Copied from the sibling ETH3D monocular configs (e.g. eth3d_table_7.yaml):
+# the ETH3D sequences share the same pinhole camera and resolution, and this
+# matches cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml so that the monocular and
+# RGB-D runs of desk_3 differ only in the entry point, not in the camera model
+# or the ORB extractor settings.
+#-------------------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "PinHole"
+
+Camera1.fx: 726.21081542969
+Camera1.fy: 726.21081542969
+Camera1.cx: 359.2048034668
+Camera1.cy: 202.47247314453
+
+Camera1.k1: 0.0
+Camera1.k2: 0.0
+Camera1.k3: 0.0
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+
+Camera.fps: 30
+Camera.RGB: 1
+
+Camera.width: 743
+Camera.height: 465
+
+#-------------------------------------------------------------------------------
+# ORB Parameters
+#-------------------------------------------------------------------------------
+ORBextractor.nFeatures: 2000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#-------------------------------------------------------------------------------
+# Viewer Parameters
+#-------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0
