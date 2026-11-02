@@ -19,8 +19,11 @@
 
 
 #include "System.h"
+#include "MapEventLog.h"
+#include "TrackStageTrace.h"
 #include "Converter.h"
 #include <thread>
+#include <chrono>
 #include <iomanip>
 #include <cstdlib>
 #include <fstream>
@@ -855,6 +858,8 @@ bool System::MapChanged()
 
 void System::Reset()
 {
+    if(map_events::Enabled())
+        map_events::Emit("MAP_RESET", -1, -1, "System::Reset");
     unique_lock<mutex> lock(mMutexReset);
     mbReset = true;
 }
@@ -863,25 +868,56 @@ void System::ResetActiveMap()
 {
     unique_lock<mutex> lock(mMutexReset);
     mbResetActiveMap = true;
+    if(map_events::Enabled())
+    {
+        // Record the CALLER, not just the API. Without this the event only says
+        // "somebody asked for a reset", which is not a reason.
+        const char* site = track_stage::PendingResetSite();
+        map_events::Emit("MAP_RESET", -1, -1, site ? site : "unknown");
+        track_stage::PendingResetSite() = "unknown";
+    }
 }
+
+namespace {
+bool shutdownDiagEnabled()
+{
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_SHUTDOWN_DIAG");
+        return e && *e && std::atoi(e) != 0;
+    }();
+    return v;
+}
+void shutdownDiag(const char* stage)
+{
+    if (!shutdownDiagEnabled()) return;
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+    std::cerr << "[ShutdownDiag] " << stage << " t_ms=" << ms << std::endl;
+}
+} // namespace
 
 void System::Shutdown()
 {
+    shutdownDiag("system_shutdown_enter");
     {
         unique_lock<mutex> lock(mMutexReset);
         mbShutDown = true;
     }
 
     cout << "Shutdown" << endl;
+    shutdownDiag("system_shutdown_flag_set");
 
     mpLocalMapper->RequestFinish();
     mpLoopCloser->RequestFinish();
+    shutdownDiag("system_request_finish_done");
     if(mpViewer)
     {
         mpViewer->RequestFinish();
         while(!mpViewer->isFinished())
             usleep(5000);
     }
+    shutdownDiag("system_viewer_finished");
 
     // Wait until the mapping threads have effectively stopped, then JOIN them.
     // In this fork the wait below was commented out and mptLocalMapping /
@@ -893,13 +929,34 @@ void System::Shutdown()
     // SIGABRT (exit 134). Observed on desk_3 drop-50% condition P.
     // isRunningGBA() is part of the condition because the GBA thread is detached
     // (see LoopClosing.cc) and therefore cannot be joined here.
+    auto last_report = std::chrono::steady_clock::now();
     while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
+    {
+        if (shutdownDiagEnabled() &&
+            std::chrono::steady_clock::now() - last_report >
+                std::chrono::seconds(2))
+        {
+            last_report = std::chrono::steady_clock::now();
+            std::cerr << "[ShutdownDiag] waiting_local_mapper_finished="
+                      << (mpLocalMapper->isFinished() ? 1 : 0)
+                      << " loop_closer_finished="
+                      << (mpLoopCloser->isFinished() ? 1 : 0)
+                      << " running_gba="
+                      << (mpLoopCloser->isRunningGBA() ? 1 : 0)
+                      << " finished_gba="
+                      << (mpLoopCloser->isFinishedGBA() ? 1 : 0)
+                      << std::endl;
+        }
         usleep(5000);
+    }
+    shutdownDiag("system_wait_loop_done");
 
     if(mptLocalMapping && mptLocalMapping->joinable())
         mptLocalMapping->join();
+    shutdownDiag("system_local_mapping_joined");
     if(mptLoopClosing && mptLoopClosing->joinable())
         mptLoopClosing->join();
+    shutdownDiag("system_loop_closing_joined");
 
     /*if(!mStrSaveAtlasToFile.empty())
     {

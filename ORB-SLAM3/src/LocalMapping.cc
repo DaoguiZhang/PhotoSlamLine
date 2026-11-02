@@ -26,6 +26,8 @@
 #include "MapExporter.h"
 #include "LineMode.h"
 #include "AuditTrail.h"
+#include "LineReprojGeometry.h"
+#include "LineLifecycleStats.h"
 
 #include<mutex>
 #include<chrono>
@@ -1001,6 +1003,11 @@ void LocalMapping::MapLineCulling()
         if(pML->GetFoundRatio() < 0.25f)
         {
             pML->SetBadFlag();
+            if (line_lifecycle::Enabled())
+            {
+                ++line_lifecycle::C().cull_set_bad;   // FoundRatio
+                ++line_lifecycle::C().cull_erased;
+            }
             lit = mlpRecentAddedMapLines.erase(lit);
             continue;
         }
@@ -1010,6 +1017,11 @@ void LocalMapping::MapLineCulling()
             pML->Observations() <= cnThObs)
         {
             pML->SetBadFlag();
+            if (line_lifecycle::Enabled())
+            {
+                ++line_lifecycle::C().cull_set_bad;   // too few observations
+                ++line_lifecycle::C().cull_erased;
+            }
             lit = mlpRecentAddedMapLines.erase(lit);
             continue;
         }
@@ -1017,6 +1029,7 @@ void LocalMapping::MapLineCulling()
         // 4. 加入超过 3 帧，还没有足够观测，直接移除
         if(((int)nCurrentKFid - (int)pML->mnFirstKFid) >= 3)
         {
+            if (line_lifecycle::Enabled()) ++line_lifecycle::C().cull_erased;
             lit = mlpRecentAddedMapLines.erase(lit);
             continue;
         }
@@ -1579,9 +1592,19 @@ void LocalMapping::CreateNewMapLines()
 
 void LocalMapping::CreateNewMapLines()
 {
+    // --- diagnostic counters (no-op unless PHOTO_SLAM_LINE_LIFECYCLE_CSV set)
+    if (line_lifecycle::Enabled())
+    {
+        line_lifecycle::RegisterExitSummary();
+        ++line_lifecycle::C().kf_calls;
+    }
+
     // --- 1. neighbor keyframes (same as points) ---
     int nn = mbMonocular ? 30 : 10;
     vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
+
+    if (line_lifecycle::Enabled() && vpNeighKFs.empty())
+        ++line_lifecycle::C().kf_no_neighbour;
 
     if (mbInertial)
     {
@@ -1618,7 +1641,12 @@ void LocalMapping::CreateNewMapLines()
     // Iterate neighbors
     for (KeyFrame* pKF2 : vpNeighKFs)
     {
-        if (CheckNewKeyFrames()) return;
+        if (CheckNewKeyFrames())
+        {
+            if (line_lifecycle::Enabled()) ++line_lifecycle::C().kf_early_newkf;
+            return;
+        }
+        if (line_lifecycle::Enabled()) ++line_lifecycle::C().neigh_examined;
 
         Sophus::SE3f Tcw2 = pKF2->GetPose();
         Eigen::Matrix<float,3,4> eigTcw2 = Tcw2.matrix3x4();
@@ -1630,13 +1658,28 @@ void LocalMapping::CreateNewMapLines()
         float baseline = (Ow2 - Ow1).norm();
         if (!mbMonocular)
         {
-            if (baseline < pKF2->mb) continue;
+            if (baseline < pKF2->mb)
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_base_lt_mb;
+                continue;
+            }
         }
         else
         {
+            // NOTE: ComputeSceneMedianDepth() is POINT based and returns -1.0
+            // when the neighbour has no MapPoint. med<=0 therefore means
+            // "neighbour has no points", not "line depth invalid".
             float med = pKF2->ComputeSceneMedianDepth(2);
-            if (med <= 0) continue;
-            if (baseline / med < 0.01f) continue;
+            if (med <= 0)
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_median_nopts;
+                continue;
+            }
+            if (baseline / med < 0.01f)
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_base_over_med;
+                continue;
+            }
         }
 
         // get candidate matches
@@ -1644,7 +1687,12 @@ void LocalMapping::CreateNewMapLines()
         line_matcher.SearchForTriangulationLinesRobust(mpCurrentKeyFrame, pKF2, vMatchedIdx);
         // 可视化
         //         //line_matcher.DebugShowTriangulationMatchesKF(mpCurrentKeyFrame, pKF2, vMatchedIdx);
-        if (vMatchedIdx.empty()) continue;
+        if (vMatchedIdx.empty())
+        {
+            if (line_lifecycle::Enabled()) ++line_lifecycle::C().pair_empty;
+            continue;
+        }
+        if (line_lifecycle::Enabled()) line_lifecycle::C().pair_matched += (long long)vMatchedIdx.size();
 
         // prepare camera intrinsics (for epipolar F if needed)
         Eigen::Matrix3f K1 = cam1_base->toK_();
@@ -1667,16 +1715,28 @@ void LocalMapping::CreateNewMapLines()
             const cv::line_descriptor::KeyLine &le1 = mpCurrentKeyFrame->mvKeyLines[idx1];
             const cv::line_descriptor::KeyLine &le2 = pKF2->mvKeyLines[idx2];
             // reject too short lines
-            if (le1.lineLength < minLinePixels || le2.lineLength < minLinePixels) continue;
+            if (le1.lineLength < minLinePixels || le2.lineLength < minLinePixels)
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_pair_short;
+                continue;
+            }
             // length & angle checks
             float len1 = le1.lineLength;
             float len2 = le2.lineLength;
             float lenRatio = fabs(len1 - len2) / max(len1, len2);
-            if (lenRatio > maxLenRatioHard) continue;
+            if (lenRatio > maxLenRatioHard)
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_pair_lenratio;
+                continue;
+            }
             float a1 = atan2(le1.endPointY - le1.startPointY, le1.endPointX - le1.startPointX);
             float a2 = atan2(le2.endPointY - le2.startPointY, le2.endPointX - le2.startPointX);
             float angDiff = fabs(a1 - a2); if (angDiff > M_PI) angDiff = 2*M_PI - angDiff;
-            if (angDiff > maxAngleDiff) continue;
+            if (angDiff > maxAngleDiff)
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_pair_angle;
+                continue;
+            }
             // pixel endpoints
             cv::Point2f p1s(le1.startPointX, le1.startPointY), p1e(le1.endPointX, le1.endPointY);
             cv::Point2f p2s(le2.startPointX, le2.startPointY), p2e(le2.endPointX, le2.endPointY);
@@ -1812,12 +1872,32 @@ void LocalMapping::CreateNewMapLines()
                     // 2. 反投影为归一化射线
                     Eigen::Vector3f xu1 = cam1_base->unprojectEig(mid1);
                     Eigen::Vector3f xu2 = cam2_base->unprojectEig(mid2);
-                    xu1.normalize(); xu2.normalize();
+
+                    // [FIXED 2026-10-30] NO .normalize() HERE.
+                    //
+                    // GeometricTools::Triangulate() reads ONLY x_c(0) and
+                    // x_c(1) and builds
+                    //     row = x_c(0) * Tc.row(2) - Tc.row(0)
+                    // which is the DLT constraint for u = X/Z, v = Y/Z. It
+                    // therefore requires NORMALIZED PLANE coordinates, not a
+                    // unit 3-vector and not an arbitrary homogeneous scale
+                    // (the third component is never read).
+                    // unprojectEig() already returns exactly (u, v, 1), which
+                    // is what the point path passes at :1213/:1240. The
+                    // previous xu1.normalize() made the ray unit length, and
+                    // because only the first term of each row is a function of
+                    // x_c, the rows stopped being uniformly scaled and the
+                    // solution was biased (measured: 38.5 mm at 5 m).
+                    // The separate rayS/rayE below still use unnormalized
+                    // unprojectEig() output and are normalized explicitly
+                    // where a direction is needed - those are unaffected.
                     
                     Eigen::Vector3f x3Dmid;
                     // 3. 几何三角化中点
+                    if (line_lifecycle::Enabled()) ++line_lifecycle::C().tri_attempt;
                     if (GeometricTools::Triangulate(xu1, xu2, eigTcw1, eigTcw2, x3Dmid))
                     {
+                        if (line_lifecycle::Enabled()) ++line_lifecycle::C().tri_success;
                         // 4. 确定 3D 线段方向和长度
                         // [MODIFIED] 原来的注释代码 dir = (x3Dmid - Ow1) 是错误的（那是视线方向）。
                         // 修正逻辑：计算图像上线段的方向，旋转到世界坐标系。
@@ -1844,6 +1924,10 @@ void LocalMapping::CreateNewMapLines()
                             created = true;
                             // std::cerr << "Debug: Created line via Mono-Midpoint!" << std::endl;
                         }
+                    }
+                    else
+                    {
+                        if (line_lifecycle::Enabled()) ++line_lifecycle::C().tri_fail;
                     }
                 }
 
@@ -1905,7 +1989,11 @@ void LocalMapping::CreateNewMapLines()
             if (dist1 <= 0 || dist2 <= 0) continue;
 
             // optional: avoid extremely far points if you have mThFarPoints like points code
-            if (mbFarPoints && (dist1 >= mThFarPoints || dist2 >= mThFarPoints)) continue;
+            if (mbFarPoints && (dist1 >= mThFarPoints || dist2 >= mThFarPoints))
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_far;
+                continue;
+            }
 
             // possible scale consistency check (soft)
             const float ratioFactor = 1.5f * mpCurrentKeyFrame->mfScaleFactor;
@@ -1916,7 +2004,10 @@ void LocalMapping::CreateNewMapLines()
 
             float ratioDist = dist2 / dist1;
             if (ratioDist * ratioFactor < ratioOctave || ratioDist > ratioOctave * ratioFactor)
+            {
+                if (line_lifecycle::Enabled()) ++line_lifecycle::C().rej_ratio_dist;
                 continue;
+            }
 
             // sample color from current KF endpoints (clamped)
             try {
@@ -1948,6 +2039,14 @@ void LocalMapping::CreateNewMapLines()
             mpAtlas->AddMapLine(pML);
             mlpRecentAddedMapLines.push_back(pML);
 
+            if (line_lifecycle::Enabled())
+            {
+                // unique object level: once per CONSTRUCTED MapLine
+                ++line_lifecycle::C().ml_created;
+                ++line_lifecycle::C().ml_added_atlas;
+                line_lifecycle::C().ml_obs_links += 2;   // two AddLineObservation
+            }
+
 
             // 🌟 [新增初始化刷新] 刚出生的单目/RGB-D线段，立刻利用多帧深度信息进行骨架和端点纠正
             pML->UpdateEndpointsFromPluckerAndObservations();
@@ -1958,7 +2057,26 @@ void LocalMapping::CreateNewMapLines()
     // debug visualization
     int created_map_line_num = (int)mlpRecentAddedMapLines.size();
     std::cerr << " created_map_line_num: " << created_map_line_num << std::endl;
-    // if(created_map_line_num < 10)
+
+    // --- per-keyframe census (one row per PROCESSED keyframe, never per frame)
+    if (line_lifecycle::Enabled())
+    {
+        line_lifecycle::Counters &c = line_lifecycle::C();
+        long long atlasLines = 0, localLines = 0, curKfLines = 0;
+        if (mpAtlas)
+            atlasLines = (long long)mpAtlas->GetAllMapLines().size();
+        if (mpCurrentKeyFrame)
+        {
+            curKfLines = (long long)mpCurrentKeyFrame->GetMapLines().size();
+            std::vector<KeyFrame*> vpLocal = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+            for (KeyFrame* pK : vpLocal)
+                if (pK && !pK->isBad()) localLines += (long long)pK->GetMapLines().size();
+        }
+        c.atlas_lines  = atlasLines;
+        c.local_lines  = localLines;
+        c.cur_kf_lines = curKfLines;
+        line_lifecycle::Emit("KF", mpCurrentKeyFrame ? (long long)mpCurrentKeyFrame->mnId : -1);
+    }    // if(created_map_line_num < 10)
     // {
     //     DebugRecentAddedMapLinesProjection();
     // }
@@ -2089,46 +2207,76 @@ bool LocalMapping::CheckLineReprojection(
         const Eigen::Vector3f &X3De,
         const cv::line_descriptor::KeyLine &kline)
 {
-    // Step 1: 投影 3D 端点到像素坐标
-    Eigen::Vector2f pxStart = pKF->mpCamera->project(X3Ds);
-    Eigen::Vector2f pxEnd   = pKF->mpCamera->project(X3De);
+    // ------------------------------------------------------------------
+    // [FIXED 2026-10-30] X3Ds / X3De are WORLD points.
+    //
+    // Geometry of the contract:
+    //   * KeyFrame::UnprojectDepthLine()  ->  mRwc * Xc + Ow        (world)
+    //   * GeometricTools::Triangulate(x_c1, x_c2, Tc1w, Tc2w, x3D)  ->  world
+    //     and the mono fallback builds S3D/E3D = x3Dmid -+ half*dirWorld,
+    //     dirWorld = Rwc1 * dirCam                                  (world)
+    //   * GeometricCamera::project() = K * (X/Z, Y/Z), no pose      (camera)
+    //
+    // The previous code projected the world points directly, so every
+    // endpoint was transformed by a bogus translation equal to the camera
+    // centre in world coordinates. Both live callers (RGB-D ~1786, mono
+    // ~1841) were affected. The pose is now applied exactly once, here.
+    //
+    // Thresholds are untouched: 15 px perpendicular, cos(20 deg), 1 px min.
+    // ------------------------------------------------------------------
+    const Sophus::SE3f Tcw = pKF->GetPose();
+    const Eigen::Matrix<float,3,4> eigTcw = Tcw.matrix3x4();
+    const Eigen::Matrix3f Rcw = eigTcw.block<3,3>(0,0);
+    const Eigen::Vector3f tcw = eigTcw.block<3,1>(0,3);
 
-    // Step 2: KeyLine 的中点和方向
-    Eigen::Vector2f lMid(kline.pt.x, kline.pt.y);
-    Eigen::Vector2f lDir(std::cos(kline.angle), std::sin(kline.angle));
+    const Eigen::Vector2f lMid(kline.pt.x, kline.pt.y);
+    const Eigen::Vector2f lDir(std::cos(kline.angle), std::sin(kline.angle));
 
-    // Step 3: 计算端点到线段的垂直距离
-    auto pointLineDistance = [](const Eigen::Vector2f &pt, 
-                                const Eigen::Vector2f &lineMid,
-                                const Eigen::Vector2f &lineDir) -> float
+    GeometricCamera* pCam = pKF->mpCamera;
+    auto project = [pCam](const Eigen::Vector3f &pC) { return pCam->project(pC); };
+
+    const line_reproj::Params params;   // defaults == the original thresholds
+    const line_reproj::Result r =
+        line_reproj::Evaluate(Rcw, tcw, X3Ds, X3De, lMid, lDir, project, params);
+
+    // ---- shadow comparison: same pose snapshot, pure, never controls flow
+    if (line_lifecycle::ShadowEnabled())
     {
-        Eigen::Vector2f v = pt - lineMid;
-        Eigen::Vector2f perp = v - v.dot(lineDir) * lineDir;
-        return perp.norm();
-    };
+        line_lifecycle::Counters &c = line_lifecycle::C();
+        const line_reproj::Result oldR =
+            line_reproj::EvaluateLegacy(X3Ds, X3De, lMid, lDir, project, params);
+        ++c.shadow_pairs;
+        if (oldR.ok == r.ok)
+        {
+            ++c.shadow_agree;
+        }
+        else if (oldR.ok && !r.ok)
+        {
+            ++c.shadow_old_pass_new_fail;
+            if (c.shadow_first_diff_kf < 0)
+            {
+                c.shadow_first_diff_kf = mpCurrentKeyFrame ? (long long)mpCurrentKeyFrame->mnId : -1;
+                c.shadow_first_diff_code = r.code;
+            }
+        }
+        else
+        {
+            ++c.shadow_old_fail_new_pass;
+            if (c.shadow_first_diff_kf < 0)
+            {
+                c.shadow_first_diff_kf = mpCurrentKeyFrame ? (long long)mpCurrentKeyFrame->mnId : -1;
+                c.shadow_first_diff_code = oldR.code;
+            }
+        }
+    }
 
-    float dStart = pointLineDistance(pxStart, lMid, lDir);
-    float dEnd   = pointLineDistance(pxEnd,   lMid, lDir);
-
-    // Step 4: 判断重投影误差阈值
-    const float reprojTh = 15.0f; // 像素级, 和ORBSLAM的顶点类似，多了0.5倍
-    if (dStart > reprojTh || dEnd > reprojTh)
-        return false;
-
-    // Step 5: 检查方向误差
-    Eigen::Vector2f projDir = (pxEnd - pxStart).normalized();
-    float cosAngle = projDir.dot(lDir);
-    const float cosAngleTh = std::cos(20.0f * M_PI / 180.0f); // 方向差 20°
-    if (fabs(cosAngle) < cosAngleTh) 
-        return false;
-
-    // Step 6: 可选：投影线长度太短过滤
-    float lenProj = (pxEnd - pxStart).norm();
-    if (lenProj < 1.0f)
-        return false;
-
-    return true;
+    if (!r.ok)
+    {
+        ++line_lifecycle::C().rej_reproj_new;
+    }
+    return r.ok;
 }
+
 
 
 

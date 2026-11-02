@@ -16,6 +16,8 @@
 * If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "MonoTraceContext.h"
+#include <iomanip>
 #include "TwoViewReconstruction.h"
 
 #include "Converter.h"
@@ -139,6 +141,94 @@ namespace ORB_SLAM3
                       << " SH=" << SH << " SF=" << SF << " RH=" << RH
                       << " model=" << reconModel
                       << " ok=" << (reconOK ? 1 : 0) << std::endl;
+        }
+        // ------------------------------------------------------------------
+        // Attempt-bound trace (default OFF, PHOTO_SLAM_MONO_TRACE=1).
+        //
+        // Read-only. Nothing here changes the RANSAC schedule: mvSets is the
+        // schedule that this instance ALREADY generated and the H/F RANSAC
+        // already consumed, so recording it cannot add, drop or reorder a
+        // sample. H and F run in two parallel threads (see the thread objects
+        // above), so every field below is bound to this call's attempt id and
+        // never inferred from stderr line order.
+        //
+        // Fingerprints are computed over VALID FIELDS ONLY (the keypoints that
+        // actually take part in the reconstruction, the calibration matrix and
+        // the image bounds) - never over a raw memory image of an object that
+        // may contain uninitialised padding.
+        // ------------------------------------------------------------------
+        static long long gAttemptId = 0;
+        const long long attemptId = gAttemptId++;
+        const char* traceEnv = std::getenv("PHOTO_SLAM_MONO_TRACE");
+        if(traceEnv != nullptr && std::string(traceEnv) == "1")
+        {
+            auto fnv = [](const void* data, size_t bytes, unsigned long long h) {
+                const unsigned char* p = (const unsigned char*)data;
+                for(size_t k = 0; k < bytes; ++k) { h ^= (unsigned long long)p[k]; h *= 1099511628211ULL; }
+                return h;
+            };
+            // --- G1: split the old composite inCk into four actionable parts -
+            //   camCk   camera intrinsics + image extents
+            //   refCk   reference-frame keypoint coordinates actually consumed
+            //   curCk   current-frame keypoint coordinates actually consumed
+            //   matchCk the matcher output (index pairs), order-sensitive
+            // inCk is still emitted (composite of the four) so previous rounds
+            // remain comparable.
+            unsigned long long camCk   = 1469598103934665603ULL;
+            unsigned long long refCk   = 1469598103934665603ULL;
+            unsigned long long curCk   = 1469598103934665603ULL;
+            unsigned long long matchCk = 1469598103934665603ULL;
+
+            float k9[9];
+            for(int r = 0; r < 3; ++r) for(int c = 0; c < 3; ++c) k9[r*3+c] = mK(r,c);
+            camCk = fnv(k9, sizeof(k9), camCk);
+            int bounds[3] = {(int)mvKeys1.size(), (int)mvKeys2.size(), (int)mvMatches12.size()};
+            camCk = fnv(bounds, sizeof(bounds), camCk);
+
+            for(size_t i = 0; i < mvMatches12.size(); ++i)
+            {
+                const size_t i1 = mvMatches12[i].first, i2 = mvMatches12[i].second;
+                int m2[2] = {(int)i1, (int)i2};
+                matchCk = fnv(m2, sizeof(m2), matchCk);
+                if(i1 >= mvKeys1.size() || i2 >= mvKeys2.size()) continue;
+                float a1[2] = {mvKeys1[i1].pt.x, mvKeys1[i1].pt.y};
+                float a2[2] = {mvKeys2[i2].pt.x, mvKeys2[i2].pt.y};
+                refCk = fnv(a1, sizeof(a1), refCk);
+                curCk = fnv(a2, sizeof(a2), curCk);
+            }
+            unsigned long long inCk = 1469598103934665603ULL;
+            inCk = fnv(&refCk, sizeof(refCk), inCk);
+            inCk = fnv(&curCk, sizeof(curCk), inCk);
+            inCk = fnv(&camCk, sizeof(camCk), inCk);
+            inCk = fnv(&matchCk, sizeof(matchCk), inCk);
+
+            unsigned long long schedCk = 1469598103934665603ULL;
+            for(size_t i = 0; i < mvSets.size(); ++i)
+                schedCk = fnv(mvSets[i].data(), mvSets[i].size() * sizeof(size_t), schedCk);
+
+            int nInH = 0, nInF = 0; unsigned long long maskHCk = 1469598103934665603ULL;
+            unsigned long long maskFCk = 1469598103934665603ULL;
+            for(size_t i = 0; i < vbMatchesInliersH.size(); ++i) { if(vbMatchesInliersH[i]) ++nInH; }
+            for(size_t i = 0; i < vbMatchesInliersF.size(); ++i) { if(vbMatchesInliersF[i]) ++nInF; }
+            for(size_t i = 0; i < vbMatchesInliersH.size(); ++i) { unsigned char b = vbMatchesInliersH[i] ? 1 : 0; maskHCk = fnv(&b, 1, maskHCk); }
+            for(size_t i = 0; i < vbMatchesInliersF.size(); ++i) { unsigned char b = vbMatchesInliersF[i] ? 1 : 0; maskFCk = fnv(&b, 1, maskFCk); }
+
+            const mono_trace::Context id = mono_trace::Snapshot();
+            std::cerr << "[RECON-TRACE] attempt=" << attemptId
+                      << " episode=" << id.episode << " round=" << id.initRound
+                      << " refId=" << id.refFrameId << " refTs=" << std::setprecision(9) << id.refTs
+                      << " curId=" << id.curFrameId << " curTs=" << std::setprecision(9) << id.curTs
+                      << " idValid=" << (id.valid ? 1 : 0)
+                      << " refFile=" << (id.refFile[0] ? id.refFile : "NA")
+                      << " curFile=" << (id.curFile[0] ? id.curFile : "NA")
+                      << " N=" << N << " nInH=" << nInH << " nInF=" << nInF
+                      << " inCk=" << inCk << " schedCk=" << schedCk
+                      << " camCk=" << camCk << " refCk=" << refCk
+                      << " curCk=" << curCk << " matchCk=" << matchCk
+                      << " maskH=" << maskHCk << " maskF=" << maskFCk
+                      << " schedSets=" << mvSets.size()
+                      << " model=" << reconModel << " SH=" << SH << " SF=" << SF
+                      << " RH=" << RH << " ok=" << (reconOK ? 1 : 0) << std::endl;
         }
         return reconOK;
     }

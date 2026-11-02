@@ -17,6 +17,8 @@
 */
 
 #include "Atlas.h"
+#include "LineLifecycleLedger.h"
+#include "MapEventLog.h"
 #include "Viewer.h"
 #include "AuditTrail.h"
 
@@ -77,18 +79,33 @@ void Atlas::CreateNewMap()
     mpCurrentMap = new Map(mnLastInitKFidMap);
     mpCurrentMap->SetCurrentMap();
     mspMaps.insert(mpCurrentMap);
+
+    if(map_events::Enabled())
+        map_events::Emit("MAP_CREATE", (long long)mpCurrentMap->GetId(),
+                         mnLastInitKFidMap, "Atlas::CreateNewMap");
 }
 
 void Atlas::ChangeMap(Map* pMap)
 {
     unique_lock<mutex> lock(mMutexAtlas);
     cout << "Change to map with id: " << pMap->GetId() << endl;
+    const long long prevId = mpCurrentMap ? (long long)mpCurrentMap->GetId() : -1LL;
     if(mpCurrentMap){
         mpCurrentMap->SetStoredMap();
     }
 
     mpCurrentMap = pMap;
     mpCurrentMap->SetCurrentMap();
+
+    if(map_events::Enabled())
+    {
+        if(prevId >= 0 && prevId != (long long)pMap->GetId())
+            map_events::Emit("MAP_STORED", prevId, -1, "Atlas::ChangeMap");
+        map_events::Emit("MAP_SWITCH", (long long)pMap->GetId(), -1,
+                         "Atlas::ChangeMap");
+        map_events::Emit("MAP_CURRENT", (long long)pMap->GetId(), -1,
+                         "Atlas::ChangeMap");
+    }
 }
 
 unsigned long int Atlas::GetLastInitKFid()
@@ -118,6 +135,9 @@ void Atlas::AddMapPoint(MapPoint* pMP)
 void Atlas::AddMapLine(MapLine* pML)
 {
     Map* pMapML = pML->GetMap();
+    if(pML && line_ledger::Enabled())
+        line_ledger::OnAtlasAdd(pMapML ? (long long)pMapML->GetId() : -1LL,
+                                (long long)pML->mnId);
     pMapML->AddMapLine(pML);
 }
 

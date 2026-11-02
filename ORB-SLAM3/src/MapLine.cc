@@ -18,6 +18,7 @@
 
 #include "MapLine.h"
 #include "LSDmatcher.h"
+#include "LineLifecycleLedger.h"
 //#include "ORBmatcher.h"
 
 #include<mutex>
@@ -92,6 +93,8 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos, con
     // MapLines can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
     unique_lock<mutex> lock(mpMap->mMutexLineCreation);//指的是啥？我暂且忘记了？？？
     mnId=nNextId++;
+    line_ledger::Touch();
+    line_ledger::OnCreate(mpMap ? (long long)mpMap->GetId() : -1LL, (long long)mnId);
 }
 
 /*
@@ -161,6 +164,8 @@ MapLine::MapLine(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos,  Ma
     // MapLines can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
     unique_lock<mutex> lock(mpMap->mMutexLineCreation);
     mnId=nNextId++;
+    line_ledger::Touch();
+    line_ledger::OnCreate(mpMap ? (long long)mpMap->GetId() : -1LL, (long long)mnId);
 }
 
 void MapLine::SetLineWorldPos(const Eigen::Vector3f &LsPos, const Eigen::Vector3f &LePos) {
@@ -271,6 +276,10 @@ void MapLine::AddLineObservation(KeyFrame* pKF, int idx)
         nObs+=2;
     else
         nObs++;
+
+    if(line_ledger::Enabled())
+        line_ledger::OnObsAdd(mpMap ? (long long)mpMap->GetId() : -1LL,
+                              (long long)mnId);
 }
 
 void MapLine::EraseLineObservation(KeyFrame* pKF)
@@ -307,6 +316,9 @@ void MapLine::EraseLineObservation(KeyFrame* pKF)
                 bBad=true;
         }
     }
+    if(line_ledger::Enabled())
+        line_ledger::OnObsErase(mpMap ? (long long)mpMap->GetId() : -1LL,
+                                (long long)mnId, (int)nObs, bBad);
     if(bBad)
         SetBadFlag();
 }
@@ -327,6 +339,7 @@ int MapLine::Observations()
 
 void MapLine::SetBadFlag()
 {
+    line_ledger::OnSetBad(mpMap ? (long long)mpMap->GetId() : -1LL, (long long)mnId);
     std::map<KeyFrame*, tuple<int,int>> obs;
     {
         unique_lock<mutex> lock1(mMutexFeatures);
@@ -469,6 +482,11 @@ void MapLine::Replace(MapLine* pML)
 {
     if(pML->mnId==this->mnId)
         return;
+
+    if(line_ledger::Enabled())
+        line_ledger::OnReplace(mpMap ? (long long)mpMap->GetId() : -1LL, (long long)mnId,
+                               (pML->mpMap ? (long long)pML->mpMap->GetId() : -1LL),
+                               (long long)pML->mnId);
 
     int nvisible, nfound;
     map<KeyFrame*,tuple<int,int>> obs;
@@ -707,6 +725,10 @@ Map* MapLine::GetMap()
 void MapLine::UpdateMap(Map* pMap)
 {
     unique_lock<mutex> lock(mMutexMap);
+    if(line_ledger::Enabled())
+        line_ledger::OnUpdateMap(mpMap ? (long long)mpMap->GetId() : -1LL,
+                                 pMap ? (long long)pMap->GetId() : -1LL,
+                                 (long long)mnId);
     mpMap = pMap;
 }
 

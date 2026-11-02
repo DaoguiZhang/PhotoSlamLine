@@ -18,6 +18,7 @@
 
 
 #include "Optimizer.h"
+#include "PoCapture.h"
 
 
 #include <cassert>
@@ -1737,8 +1738,111 @@ void Optimizer::FullInertialBA(Map *pMap, int its, const bool bFixLocal, const l
 }
 
 
+
+// ---------------------------------------------------------------------------
+// Diagnostic state pack at the pose-optimisation ENTRY (read-only).
+// Written once per (tag, timestamp) so repeated calls on the same frame cannot
+// interleave. Fields below are exactly what the optimisers read; nothing that
+// they do not read is recorded, and nothing is written back.
+// ---------------------------------------------------------------------------
+static void PoCaptureWrite(const char* tag, const char* fn, Frame* pFrame)
+{
+    if (!pFrame) return;
+    if (!po_capture::Wants(pFrame->mTimeStamp)) return;
+    std::lock_guard<std::mutex> lk(po_capture::Mtx());
+    po_capture::Gate& gate = po_capture::G();
+
+    // Register the summary exactly once, so a write failure can never be
+    // mistaken for a successful capture.
+    static bool sSummary = false;
+    if (!sSummary)
+    {
+        sSummary = true;
+        std::atexit([]() {
+            const po_capture::Gate& g = po_capture::G();
+            const bool ok = (g.writeFailures == 0);
+            std::fprintf(stderr,
+                         "[PO-CAPTURE-SUMMARY] written=%lld failures=%lld duplicates=%lld status=%s\n",
+                         g.written, g.writeFailures, g.duplicates, ok ? "OK" : "FAIL");
+        });
+    }
+
+    const std::string path = po_capture::PathFor(tag, pFrame->mTimeStamp);
+
+    // Never overwrite an existing pack: a repeated (tag,timestamp) is a
+    // duplicate, not a rewrite.
+    {
+        std::ifstream probe(path.c_str());
+        if (probe.good()) { ++gate.duplicates; return; }
+    }
+
+    std::ofstream os(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!os.good())
+    {
+        ++gate.writeFailures;
+        std::fprintf(stderr, "[PO-CAPTURE-ERROR] cannot open %s for writing (errno=%d)\n",
+                     path.c_str(), errno);
+        return;
+    }
+    os.setf(std::ios::fixed);
+    os.precision(9);
+    const Sophus::SE3f T = pFrame->GetPose();
+    const Eigen::Quaternionf q = T.unit_quaternion();
+    const Eigen::Vector3f t = T.translation();
+    os << "PO-CAPTURE 1\n";
+    os << "source_fn " << fn << "\n";
+    os << "frame_id " << pFrame->mnId << "\n";
+    os << "timestamp " << pFrame->mTimeStamp << "\n";
+    os << "N " << pFrame->N << " NL " << pFrame->NL
+       << " Nleft " << pFrame->Nleft << " NLleft " << pFrame->NLleft << "\n";
+    os << "has_camera2 " << (pFrame->mpCamera2 ? 1 : 0) << "\n";
+    os << "pose " << q.x() << ' ' << q.y() << ' ' << q.z() << ' ' << q.w()
+       << ' ' << t.x() << ' ' << t.y() << ' ' << t.z() << "\n";
+    os << "sigma2";
+    for (size_t i = 0; i < pFrame->mvInvLevelSigma2.size(); ++i)
+        os << ' ' << pFrame->mvInvLevelSigma2[i];
+    os << "\n";
+    for (int i = 0; i < pFrame->N; ++i)
+    {
+        MapPoint* pMP = pFrame->mvpMapPoints[i];
+        os << "pt " << i << ' ' << (pMP ? 1 : 0);
+        if (pMP)
+        {
+            const Eigen::Vector3f X = pMP->GetWorldPos();
+            os << ' ' << X.x() << ' ' << X.y() << ' ' << X.z()
+               << ' ' << (long)pMP->Observations()
+               << ' ' << (pMP->isBad() ? 1 : 0);
+        }
+        else
+        {
+            os << " 0 0 0 0 0";
+        }
+        os << ' ' << pFrame->mvKeysUn[i].pt.x << ' ' << pFrame->mvKeysUn[i].pt.y
+           << ' ' << pFrame->mvKeysUn[i].octave
+           << ' ' << (i < (int)pFrame->mvuRight.size() ? pFrame->mvuRight[i] : -1.f)
+           << ' ' << (i < (int)pFrame->mvbOutlier.size() && pFrame->mvbOutlier[i] ? 1 : 0)
+           << "\n";
+    }
+    for (int i = 0; i < pFrame->NL; ++i)
+    {
+        MapLine* pML = (i < (int)pFrame->mvpMapLines.size()) ? pFrame->mvpMapLines[i] : nullptr;
+        os << "ln " << i << ' ' << (pML ? 1 : 0) << "\n";
+    }
+    os << "end\n";
+    os.flush();
+    if (!os.good())
+    {
+        ++gate.writeFailures;
+        std::fprintf(stderr, "[PO-CAPTURE-ERROR] write failed for %s\n", path.c_str());
+        return;
+    }
+    ++gate.written;
+    gate.wroteAny = true;
+}
+
 int Optimizer::PoseOptimization(Frame *pFrame)
 {
+    PoCaptureWrite("point", "PoseOptimization", pFrame);
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
 
@@ -2446,6 +2550,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
 int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
 {
+    PoCaptureWrite("line", "PoseOptimizationWithLine", pFrame);
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
     linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
@@ -2774,6 +2879,15 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesMono[i];
             size_t idx = vnIndexEdgeMono[i];
+            // [FIXED] Re-evaluate the residual of an edge that was an OUTLIER in
+            // the previous iteration. It sits at level 1, so optimize() does not
+            // touch it and chi2() returns the STALE error. PoseOptimization()
+            // does exactly this (3 sites); this line-aware copy omitted it, which
+            // can keep a re-admitted inlier classified as an outlier. Proven by
+            // tests/test_pose_opt_outlier_reeval.cpp.
+#ifndef PO_LINE_NO_OUTLIER_REEVAL
+            if (pFrame->mvbOutlier[idx]) e->computeError();
+#endif
             const float chi2 = e->chi2();
             if (chi2 > chi2Mono[it]) {
                 pFrame->mvbOutlier[idx] = true;
@@ -2790,6 +2904,15 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesStereo[i];
             size_t idx = vnIndexEdgeStereo[i];
+            // [FIXED] Re-evaluate the residual of an edge that was an OUTLIER in
+            // the previous iteration. It sits at level 1, so optimize() does not
+            // touch it and chi2() returns the STALE error. PoseOptimization()
+            // does exactly this (3 sites); this line-aware copy omitted it, which
+            // can keep a re-admitted inlier classified as an outlier. Proven by
+            // tests/test_pose_opt_outlier_reeval.cpp.
+#ifndef PO_LINE_NO_OUTLIER_REEVAL
+            if (pFrame->mvbOutlier[idx]) e->computeError();
+#endif
             const float chi2 = e->chi2();
             if (chi2 > chi2Stereo[it]) {
                 pFrame->mvbOutlier[idx] = true;
@@ -2807,6 +2930,14 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesLineMono[i];
             size_t idx = vnIndexEdgeLineMono[i];
+            // [FIXED] Re-evaluate the residual of an edge that was an OUTLIER in
+#ifndef PO_LINE_NO_LINE_OUTLIER_REEVAL
+            // Same defect class as the point side, with the LINE array: a line
+            // edge demoted to level 1 is not touched by optimize(), so chi2()
+            // is stale. Index is vnIndexEdgeLine*, the Frame array is
+            // mvbLineOutlier -- point and line arrays are never mixed.
+            if (pFrame->mvbLineOutlier[idx]) e->computeError();
+#endif
             const float chi2 = e->chi2();
             if (chi2 > chi2LineMono[it]) {
                 pFrame->mvbLineOutlier[idx] = true;
@@ -2824,6 +2955,13 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesLineStereo[i];
             size_t idx = vnIndexEdgeLineStereo[i];
+#ifndef PO_LINE_NO_LINE_OUTLIER_REEVAL
+            // Same defect class as the point side, with the LINE array: a line
+            // edge demoted to level 1 is not touched by optimize(), so chi2()
+            // is stale. Index is vnIndexEdgeLine*, the Frame array is
+            // mvbLineOutlier -- point and line arrays are never mixed.
+            if (pFrame->mvbLineOutlier[idx]) e->computeError();
+#endif
             const float chi2 = e->chi2();
             if (chi2 > chi2LineStereo[it]) {
                 pFrame->mvbLineOutlier[idx] = true;
@@ -5690,6 +5828,20 @@ void Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(
     list<MapLine*> lLocalMapLines;
     // Ablation gate: PHOTO_SLAM_LINE_MODE >= 2 adds line vertices/edges to Local BA.
     // PHOTO_SLAM_LBA_LINE=0 disables line vertices/edges here independently.
+    //
+    // [MEASUREMENT FIX] Emit an explicit ZERO row BEFORE the gate when the
+    // diagnostic is on but the gate is closed. Previously Q1 produced no
+    // [LineEdgeDiag] LBA line at all, so "0 line edges" was indistinguishable
+    // from "diagnostic not reached" -- that is a measurement gap, not a result.
+    // This row is written before any line data is touched and performs no extra
+    // work: it only reports the gate state.
+    if (IsLineEdgeDiag() && !(GetLineMode() >= 2 && GetLbaLineEnabled()))
+    {
+        std::cerr << "[LineEdgeDiag] LBA gated=1 lnEdges=0 lnEdgesGated=0"
+                  << " mapLines=NA lineMode=" << GetLineMode()
+                  << " lbaLineEnabled=" << (GetLbaLineEnabled() ? 1 : 0)
+                  << " note=gate_closed_before_line_data" << std::endl;
+    }
     if (GetLineMode() >= 2 && GetLbaLineEnabled())
     {
     for (KeyFrame* pKFi : lLocalKeyFrames) {

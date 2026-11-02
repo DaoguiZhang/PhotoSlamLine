@@ -26,6 +26,9 @@
 #include "G2oTypes.h"
 #include "Optimizer.h"
 #include "AuditTrail.h"
+#include "MonoTraceContext.h"
+#include "TrackStageTrace.h"
+#include "MapEventLog.h"
 #include "Pinhole.h"
 #include "KannalaBrandt8.h"
 #include "MLPnPsolver.h"
@@ -55,6 +58,11 @@ namespace ORB_SLAM3
 // Enabled via PHOTO_SLAM_TRACK_CSV=<path>. Dormant when unset.
 // Columns: frame_id,timestamp,state,ref_kf,tx,ty,tz,matches_inliers,need_kf,queue_len,accept_kf
 // ============================================================================
+// Set by TrackOffice1Csv() so the Grab* fallback knows whether this input frame
+// already produced a row. The in-Track call carries bNeedKF; the fallback does
+// not. Coverage of the FAILURE frames matters more than that one column.
+static bool sOffice1RowWritten = false;
+
 static void TrackCsvAppend(Frame* pFrame, int state, unsigned long refKfId,
                            int matchesInliers, bool bNeedKF, int queueLen, bool acceptKF)
 {
@@ -108,14 +116,17 @@ void Tracking::TrackOffice1Csv(bool bNeedKF)
                 << "point_matches_before_po,line_matches_before_po,"
                 << "point_inliers_after_po,line_inliers_after_po,mnMatchesInliers,"
                 << "local_map_points,local_map_lines,need_new_kf,local_mapping_accept,"
-                << "local_mapping_queue,new_kf_inserted,pose_tx,pose_ty,pose_tz\n";
+                << "local_mapping_queue,new_kf_inserted,pose_tx,pose_ty,pose_tz,"
+                << "map_id,fail_stage,fail_stage_name,pose_qx,pose_qy,pose_qz,pose_qw\n";
         }
     }
     if (!enabled) return;
+    sOffice1RowWritten = true;      // exactly one row per input frame
 
     std::lock_guard<std::mutex> lk(mtx);
     const Sophus::SE3f Tcw = mCurrentFrame.GetPose();
     const Eigen::Vector3f t = Tcw.translation();
+    const Eigen::Quaternionf q = Tcw.unit_quaternion();   // live pose, full
     ofs << mCurrentFrame.mnId << ',' << std::fixed << std::setprecision(6)
         << mCurrentFrame.mTimeStamp << ','
         << (int)mState << ','
@@ -129,7 +140,11 @@ void Tracking::TrackOffice1Csv(bool bNeedKF)
         << (mpLocalMapper->AcceptKeyFrames()?1:0) << ','
         << mpLocalMapper->KeyframesInQueue() << ','
         << (mbNewKfInserted?1:0) << ','
-        << t.x() << ',' << t.y() << ',' << t.z() << '\n';
+        << t.x() << ',' << t.y() << ',' << t.z() << ','
+        << (long)(mpAtlas->GetCurrentMap() ? (long)mpAtlas->GetCurrentMap()->GetId() : -1)
+        << ',' << track_stage::LastFrameStage()
+        << ',' << track_stage::Name(track_stage::LastFrameStage()) << ','
+        << q.x() << ',' << q.y() << ',' << q.z() << ',' << q.w() << '\n';
 }
 
 // ============================================================================
@@ -138,8 +153,32 @@ void Tracking::TrackOffice1Csv(bool bNeedKF)
 // These helpers do not change any algorithmic behavior; when the env var is
 // unset they are completely dormant (a single static check).
 // ============================================================================
-static bool MonoInitLineDebug()
+// Shared point-initialisation selector. DEFAULT OFF: unset (or any other value)
+// keeps the native dispatch (mode 0 -> point init, mode>=1 -> line init).
+// The entry point (TrackMonocular vs TrackMonocularWithLine) is NOT changed by
+// this switch; it only decides which initialisation function runs.
+static bool SharedPointInitEnabled()
 {
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_MONO_INIT");
+        return e != nullptr && std::string(e) == "shared_point";
+    }();
+    return v;
+}
+
+// Identity of the entry that is actually driving tracking, read from the
+// environment the example sets (never inferred from a function name).
+static const char* MonoEntryName()
+{
+    static const char* name = []() -> const char* {
+        const char* e = std::getenv("PHOTO_SLAM_MONO_ENTRY");
+        if (e == nullptr) return "line";
+        return (std::string(e) == "point") ? "point" : "line";
+    }();
+    return name;
+}
+
+static bool MonoInitLineDebug(){
     static bool initialized = false;
     static bool enabled = false;
     if (!initialized)
@@ -151,8 +190,7 @@ static bool MonoInitLineDebug()
     return enabled;
 }
 
-static void MonoInitLinePrintDistribution(const std::vector<float>& v, const char* name)
-{
+static void MonoInitLinePrintDistribution(const std::vector<float>& v, const char* name){
     if (v.empty())
     {
         std::cerr << "[MONO-INIT-DBG] " << name << " n=0" << std::endl;
@@ -167,6 +205,78 @@ static void MonoInitLinePrintDistribution(const std::vector<float>& v, const cha
               << " max=" << s.back() << std::endl;
 }
 
+
+// ---------------------------------------------------------------------------
+// Monocular initialisation diagnostic. Default OFF (PHOTO_SLAM_DEBUG_MONO_INIT=1).
+// Read-only: changes no threshold, matcher, optimiser or state transition.
+//
+// Line fields distinguish four DIFFERENT things and must not be conflated:
+//   nLineDet  line segments detected in the current frame
+//   nLineMat  line matches against the reference frame
+//   nLineTri  MapLines actually created at commit
+//   lineEst   1 iff line edges are enabled inside the initialisation pose BA
+//             (code gate: GetLineMode()>=2 && GetPoseOptLineEnabled()). It is a
+//             CONFIGURATION fact, NOT evidence that lines estimated the pose.
+// For the point entry (T0) every line field is written as NA.
+// ---------------------------------------------------------------------------
+static void MonoInitDbg(const char* event, const char* initFn, int initId, int curId,
+                        int baseline, int nPtMat, int recon, int nTri,
+                        int nLineDet, int nLineMat, const char* reason,
+                        int kf, int mp, int ml)
+{
+    if (!MonoInitLineDebug())
+        return;
+    // "arm" is no longer hard-coded: the entry identity and the initialisation
+    // function are recorded as two separate fields, because the same function can
+    // be reached from either entry (mode 0, and the shared-point-init option).
+    const bool pointInitFn = (std::string(initFn) == "MonocularInitialization");
+    std::cerr << "[MONO-INIT-DBG] " << event
+              << " entry=" << MonoEntryName()
+              << " initFn=" << initFn
+              << " initId=" << initId
+              << " curId=" << curId
+              << " baselineFrames=" << baseline
+              << " nPtMat=" << nPtMat
+              << " recon=" << recon
+              << " nTri=" << nTri
+              << " nLineDet=" << (pointInitFn ? std::string("NA") : std::to_string(nLineDet))
+              << " nLineMat=" << (pointInitFn ? std::string("NA") : std::to_string(nLineMat))
+              << " nLineCreated=" << (pointInitFn ? std::string("NA") : std::to_string(ml))
+              << " lineInInitBA=" << (pointInitFn ? std::string("NA")
+                                                 : std::to_string((GetLineMode() >= 2 && GetPoseOptLineEnabled()) ? 1 : 0))
+              << " reason=" << reason
+              << " kf=" << kf << " mp=" << mp << " ml=" << ml
+              << std::endl;
+}
+
+// ---------------------------------------------------------------------------
+// G1: publish the identity of the frame PAIR that the next synchronously-called
+// TwoViewReconstruction::Reconstruct() will consume. Diagnostic only.
+//
+// The reconstructor has no frame access, so without this the [RECON-TRACE]
+// attempt id cannot be mapped back to a concrete frame pair or initialisation
+// episode, and "attempt #99 diverged" is unusable for causal analysis.
+// Episode increments when the reference frame changes; round counts attempts
+// within the episode. Both are process-local by design (one System per run).
+// ---------------------------------------------------------------------------
+static void PublishMonoTraceIdentity(const Frame& ref, const Frame& cur)
+{
+    if (!mono_trace::Enabled())
+        return;
+    static long long sEpisode = 0;
+    static long long sRound   = 0;
+    static long long sLastRef = -1;
+    if ((long long)ref.mnId != sLastRef)
+    {
+        ++sEpisode;
+        sRound = 0;
+        sLastRef = (long long)ref.mnId;
+    }
+    ++sRound;
+    mono_trace::Set(sEpisode, (int)sRound,
+                    (long long)ref.mnId, ref.mTimeStamp, ref.mNameFile,
+                    (long long)cur.mnId, cur.mTimeStamp, cur.mNameFile);
+}
 
 Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Atlas *pAtlas, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor, Settings* settings, const string &_nameSeq):
     mState(NO_IMAGES_YET), mSensor(sensor), mTrackedFr(0), mbStep(false),
@@ -2124,7 +2234,9 @@ Sophus::SE3f Tracking::GrabImageMonocular(const cv::Mat &im, const double &times
 #endif
 
     lastID = mCurrentFrame.mnId;
+    sOffice1RowWritten = false;
     Track();
+    if (!sOffice1RowWritten) { track_stage::Commit(); TrackOffice1Csv(false); }
 
     return mCurrentFrame.GetPose();
 }
@@ -2210,7 +2322,9 @@ Sophus::SE3f Tracking::GrabImageMonocularWithLine(const cv::Mat &im, const doubl
     lastID = mCurrentFrame.mnId;
     
     // Switch to line-based tracking pipeline
+    sOffice1RowWritten = false;
     TrackWithLine();
+    if (!sOffice1RowWritten) { track_stage::Commit(); TrackOffice1Csv(false); }
 
     return mCurrentFrame.GetPose();
 }
@@ -2409,7 +2523,7 @@ void Tracking::Track()
     if(mpLocalMapper->mbBadImu)
     {
         cout << "TRACK: Reset map because local mapper set the bad imu flag " << endl;
-        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
         return;
     }
 
@@ -2441,7 +2555,7 @@ void Tracking::Track()
                     cout << "Timestamp jump detected. State set to LOST. Reseting IMU integration..." << endl;
                     if(!pCurrentMap->GetIniertialBA2())
                     {
-                        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                     }
                     else
                     {
@@ -2451,7 +2565,7 @@ void Tracking::Track()
                 else
                 {
                     cout << "Timestamp jump detected, before IMU initialization. Reseting..." << endl;
-                    mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                 }
                 return;
             }
@@ -2622,7 +2736,7 @@ void Tracking::Track()
 
                     if (pCurrentMap->KeyFramesInMap()<10)
                     {
-                        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                         Verbose::PrintMess("Reseting current map...", Verbose::VERBOSITY_NORMAL);
                     }else
                         CreateMapInAtlas();
@@ -2753,7 +2867,7 @@ void Tracking::Track()
                 if(!pCurrentMap->isImuInitialized() || !pCurrentMap->GetIniertialBA2())
                 {
                     cout << "IMU is not or recently initialized. Reseting active map..." << endl;
-                    mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                 }
 
                 mState=RECENTLY_LOST;
@@ -2879,14 +2993,14 @@ void Tracking::Track()
         {
             if(pCurrentMap->KeyFramesInMap()<=10)
             {
-                mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                 return;
             }
             if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
                 if (!pCurrentMap->isImuInitialized())
                 {
                     Verbose::PrintMess("Track lost before IMU initialisation, reseting...", Verbose::VERBOSITY_QUIET);
-                    mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                     return;
                 }
 
@@ -2964,7 +3078,7 @@ void Tracking::TrackWithLine()
     if(mpLocalMapper->mbBadImu)
     {
         std::cout << "TRACK: Reset map because local mapper set the bad imu flag " << std::endl;
-        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
         return;
     }
 
@@ -2978,6 +3092,7 @@ void Tracking::TrackWithLine()
     mnPointMatchesBeforePO = 0;
     mnLineMatchesBeforePO = 0;
     mnPointInliersAfterPO = 0;
+    track_stage::Reset();          // diagnostic: new frame, clear decisive stage
     mnLineInliersAfterPO = 0;
     mbNewKfInserted = false;
     mGateTrkRefOldFail = -1;
@@ -3010,7 +3125,7 @@ void Tracking::TrackWithLine()
                     std::cout << "Timestamp jump detected. State set to LOST. Reseting IMU integration..." << std::endl;
                     if(!pCurrentMap->GetIniertialBA2())
                     {
-                        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                     }
                     else
                     {
@@ -3020,7 +3135,7 @@ void Tracking::TrackWithLine()
                 else
                 {
                     std::cout << "Timestamp jump detected, before IMU initialization. Reseting..." << std::endl;
-                    mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                 }
                 return;
             }
@@ -3099,7 +3214,24 @@ void Tracking::TrackWithLine()
         else
         {
             std::cerr << "----------MonocularInitializationWithLine ---------- " << std::endl; //NOT LOADED
-            MonocularInitializationWithLine();
+            // ------------------------------------------------------------------
+            // Shared point-initialisation experiment (DEFAULT OFF).
+            //
+            //   PHOTO_SLAM_MONO_INIT=shared_point  -> this arm runs the NATIVE
+            //   point initialisation (MonocularInitialization) even though it
+            //   entered through the WithLine pipeline. Only that ONE line of
+            //   initialisation code differs; the subsequent tracking is the
+            //   normal WithLine pipeline, and PHOTO_SLAM_LINE_MODE still
+            //   controls whether line edges enter pose optimisation / local BA.
+            //
+            // Nothing is copied: the same function is reused, so the point
+            // initialisation algorithm and its point parameters are identical
+            // by construction to the T0/Q0 arm.
+            // ------------------------------------------------------------------
+            if (SharedPointInitEnabled())
+                MonocularInitialization();
+            else
+                MonocularInitializationWithLine();
         }
 
         //mpFrameDrawer->Update(this);
@@ -3221,7 +3353,7 @@ void Tracking::TrackWithLine()
 
                     if (pCurrentMap->KeyFramesInMap()<10)
                     {
-                        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                         Verbose::PrintMess("Reseting current map...", Verbose::VERBOSITY_NORMAL);
                     }else
                         CreateMapInAtlas();
@@ -3380,7 +3512,7 @@ void Tracking::TrackWithLine()
                 if(!pCurrentMap->isImuInitialized() || !pCurrentMap->GetIniertialBA2())
                 {
                     cout << "IMU is not or recently initialized. Reseting active map..." << endl;
-                    mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                 }
 
                 mState=RECENTLY_LOST;
@@ -3504,6 +3636,7 @@ void Tracking::TrackWithLine()
                 mbNewKfInserted = true;
                 //std::cerr <<" --------- CreateNewKeyFrameWithLine->CreateNewKeyFrame() end -------------" << std::endl;
             }
+            track_stage::Commit();     // diagnostic: freeze this frame's stage
             TrackOffice1Csv(bNeedKF);
                 
 
@@ -3535,14 +3668,14 @@ void Tracking::TrackWithLine()
         {
             if(pCurrentMap->KeyFramesInMap()<=10)
             {
-                mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                 return;
             }
             if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
                 if (!pCurrentMap->isImuInitialized())
                 {
                     Verbose::PrintMess("Track lost before IMU initialisation, reseting...", Verbose::VERBOSITY_QUIET);
-                    mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
                     return;
                 }
 
@@ -3923,6 +4056,21 @@ void Tracking::StereoInitializationWithLine()
 
 void Tracking::MonocularInitialization()
 {
+    // Monocular initialisation diagnostic (default OFF, read-only).
+    // One line per frame processed during initialisation: the sliding reference
+    // frame id, the current frame id, the baseline in frames, the keypoint count
+    // of the current frame, and whether a reference was already chosen. Nothing
+    // here changes a threshold, a matcher or a state transition.
+    if (MonoInitLineDebug())
+    {
+        MonoInitDbg(mbReadyToInitializate ? "attempt" : "set_reference", "MonocularInitialization",
+                    mInitialFrame.mnId, mCurrentFrame.mnId,
+                    (int)(mCurrentFrame.mnId - mInitialFrame.mnId),
+                    (int)mCurrentFrame.mvKeys.size(), -1, -1, -1, -1,
+                    mbReadyToInitializate ? "attempt" : "pick_reference",
+                    (int)mpAtlas->KeyFramesInMap(), (int)mpAtlas->MapPointsInMap(),
+                    (int)mpAtlas->MapLinesInMap());
+    }
 
     if(!mbReadyToInitializate)
     {
@@ -3977,6 +4125,7 @@ void Tracking::MonocularInitialization()
         Sophus::SE3f Tcw;
         vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
 
+        PublishMonoTraceIdentity(mInitialFrame, mCurrentFrame);
         if(mpCamera->ReconstructWithTwoViews(mInitialFrame.mvKeysUn,mCurrentFrame.mvKeysUn,mvIniMatches,Tcw,mvIniP3D,vbTriangulated))
         {
             mvIniColorRGB.resize(mvIniMatches.size());
@@ -4065,6 +4214,7 @@ void Tracking::MonocularInitializationWithLine()
         Sophus::SE3f Tcw;
         vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
 
+        PublishMonoTraceIdentity(mInitialFrame, mCurrentFrame);
         if(mpCamera->ReconstructWithTwoViews(mInitialFrame.mvKeysUn,mCurrentFrame.mvKeysUn,mvIniMatches,Tcw,mvIniP3D,vbTriangulated))
         {
             mvIniColorRGB.resize(mvIniMatches.size());
@@ -4180,8 +4330,10 @@ void Tracking::MonocularInitializationWithLine()
         vector<bool> vbTriangulated; // 用于标记点是否被成功三角化
 
         // 3. 利用点特征计算初始两视图重建 (恢复 Tcw 和 点的初始 3D 坐标)
+        PublishMonoTraceIdentity(mInitialFrame, mCurrentFrame);
         const bool reconOK = mpCamera->ReconstructWithTwoViews(
             mInitialFrame.mvKeysUn, mCurrentFrame.mvKeysUn, mvIniMatches, Tcw, mvIniP3D, vbTriangulated);
+        mono_trace::Clear();
         if (MonoInitLineDebug())
         {
             // Diagnostic only (PHOTO_SLAM_DEBUG_MONO_INIT=1): exposes the reference
@@ -4319,7 +4471,7 @@ void Tracking::CreateInitialMapMonocular()
     if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<50) // TODO Check, originally 100 tracks
     {
         Verbose::PrintMess("Wrong initialization, reseting...", Verbose::VERBOSITY_QUIET);
-        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
         return;
     }
 
@@ -4614,7 +4766,7 @@ void Tracking::CreateInitialMapMonocularWithLine()
     if(medianDepth<0 || pKFcur->TrackedMapPoints(1)<50) 
     {
         Verbose::PrintMess("Wrong initialization, reseting...", Verbose::VERBOSITY_QUIET);
-        mpSystem->ResetActiveMap();
+        { static const std::string _site = std::string("Tracking.cc:") + std::to_string(__LINE__); track_stage::PendingResetSite() = _site.c_str(); mpSystem->ResetActiveMap(); }
         return;
     }
 
@@ -4810,6 +4962,7 @@ bool Tracking::TrackReferenceKeyFrame()
 
     int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
 
+    mnPointMatchesBeforePO = nmatches;   // diagnostic: matches before PO
     if(nmatches<15)
     {
         cout << "TRACK_REF_KF: Less than 15 matches!!\n";
@@ -4853,10 +5006,11 @@ bool Tracking::TrackReferenceKeyFrame()
         }
     }
 
+    mnPointInliersAfterPO = nmatchesMap;
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
     else
-        return nmatchesMap>=10;
+        { track_stage::Set(nmatchesMap>=10 ? 13 : 12); return nmatchesMap>=10; }
 }
 
 bool Tracking::TrackReferenceKeyFrameWithLine()
@@ -5250,7 +5404,10 @@ bool Tracking::TrackWithMotionModel()
         if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
             return true;
         else
+        {
+            track_stage::Set(21);
             return false;
+        }
     }
 
     // Optimize frame pose with all matches
@@ -5282,16 +5439,17 @@ bool Tracking::TrackWithMotionModel()
         }
     }
 
+    mnPointInliersAfterPO = nmatchesMap;   // diagnostic: inliers after PO
     if(mbOnlyTracking)
     {
         mbVO = nmatchesMap<10;
-        return nmatches>20;
+        { track_stage::Set(nmatches>20 ? 23 : 21); return nmatches>20; }
     }
 
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
     else
-        return nmatchesMap>=10;
+        { track_stage::Set(nmatchesMap>=10 ? 23 : 22); return nmatchesMap>=10; }
 }
 
 bool Tracking::TrackWithMotionModelWithLine()
@@ -5519,13 +5677,13 @@ bool Tracking::TrackWithMotionModelWithLine()
     if(mbOnlyTracking)
     {
         mbVO = nmatchesMap<10;
-        return ApplyLineRescue("MotionModelVO", nmatches>20);
+        { track_stage::Set(51); return ApplyLineRescue("MotionModelVO", nmatches>20); }
     }
 
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
     else
-        return ApplyLineRescue("MotionModel", nmatchesMap>=10);
+        { track_stage::Set(52); return ApplyLineRescue("MotionModel", nmatchesMap>=10); }
 }
 
 
@@ -5638,7 +5796,7 @@ bool Tracking::TrackLocalMap()
     else
     {
         if(mnMatchesInliers<30)
-            return false;
+        { track_stage::Set(31); return false; }
         else
             return true;
     }
@@ -6017,7 +6175,7 @@ bool Tracking::TrackLocalMapWithLine()
     else
     {
         if(mnMatchesInliers<30)
-            return ApplyLineRescue("LocalMapVisual", false);
+        { track_stage::Set(61); return ApplyLineRescue("LocalMapVisual", false); }
         else
             return true;
     }

@@ -1,0 +1,81 @@
+/**
+* Map lifecycle event log (G4) — diagnostic only.
+*
+* GATE: PHOTO_SLAM_MAP_EVENTS_CSV=<path>   (unset => no I/O, no allocation)
+*
+* Records the events that change the meaning of a trajectory row:
+*   MAP_CREATE   a new Map object exists (new world frame origin)
+*   MAP_STORED   current map demoted to stored (an implicit switch)
+*   MAP_CURRENT  a map becomes the active map
+*   MAP_SWITCH   Atlas::ChangeMap (relocalisation / loop)
+*   MAP_RESET    System::Reset or ResetActiveMap, with the reason
+*
+* Every row carries the wall-clock-free monotonic sequence plus the current
+* keyframe id, so a trajectory row can be attributed to the map that produced
+* it without stitching independent world frames together.
+*/
+
+#ifndef ORB_SLAM3_MAP_EVENT_LOG_H
+#define ORB_SLAM3_MAP_EVENT_LOG_H
+
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <string>
+
+namespace ORB_SLAM3
+{
+namespace map_events
+{
+
+inline bool Enabled()
+{
+    static const char* p = std::getenv("PHOTO_SLAM_MAP_EVENTS_CSV");
+    return p != nullptr && p[0] != '\0';
+}
+
+inline std::mutex& Mtx()
+{
+    static std::mutex* m = new std::mutex();
+    return *m;
+}
+
+inline std::ofstream& Sink()
+{
+    static std::ofstream* s = nullptr;
+    if (s == nullptr)
+    {
+        s = new std::ofstream(std::getenv("PHOTO_SLAM_MAP_EVENTS_CSV"),
+                              std::ios::out | std::ios::trunc);
+        if (s->good())
+        {
+            (*s) << "# map lifecycle events; seq is monotonic per process\n";
+            (*s) << "seq,event,map_id,kf_id,reason\n";
+            s->flush();
+        }
+    }
+    return *s;
+}
+
+inline void Emit(const char* event, long long mapId, long long kfId,
+                 const char* reason)
+{
+    if (!Enabled()) return;
+    static long long seq = 0;
+    std::lock_guard<std::mutex> g(Mtx());
+    std::ofstream& o = Sink();
+    if (!o.good()) return;
+    o << (seq++) << ',' << event << ',' << mapId << ',' << kfId << ','
+      << (reason ? reason : "") << '\n';
+    o.flush();
+    std::cerr << "[MAP-EVENT] " << event << " map=" << mapId
+              << " kf=" << kfId
+              << (reason && reason[0] ? " reason=" : "")
+              << (reason ? reason : "") << std::endl;
+}
+
+} // namespace map_events
+} // namespace ORB_SLAM3
+
+#endif // ORB_SLAM3_MAP_EVENT_LOG_H

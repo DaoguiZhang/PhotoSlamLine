@@ -18,6 +18,7 @@
 
 
 #include "Map.h"
+#include "LineLifecycleLedger.h"
 #include "AuditTrail.h"
 
 #include<mutex>
@@ -153,6 +154,8 @@ void Map::EraseMapLine(MapLine* pML)
 {
     if (!pML)
         return;
+    if (line_ledger::Enabled())
+        line_ledger::OnErase((long long)mnId, (long long)pML->mnId);
     std::unique_lock<std::mutex> lock(mMutexMap);
     auto it = mspMapLines.find(pML);
     if (it != mspMapLines.end())

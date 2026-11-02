@@ -1,5 +1,9 @@
 #include"LSDextractor.h"
 #include "LSDVisualizer.h"
+#include "LineLifecycleStats.h"
+#include <cstdlib>   // getenv (LSD detection counter)
+#include <iostream>  // std::cerr
+#include <string>
 
 namespace ORB_SLAM3
 {
@@ -13,10 +17,42 @@ namespace ORB_SLAM3
         //detectAndCompute(img, keylines, _descriptors.getMatRef());
         detectAndComputeFiltered(img, keylines, _descriptors.getMatRef());  // 使用过滤后的检测
         int line_number = static_cast<int>(keylines.size());
+
+        // -----------------------------------------------------------------
+        // REAL LSD detection counter. operator() is the entry that is actually
+        // invoked (verified by [LSD-COUNT] firing on this line in a live run);
+        // detectAndCompute() below is never called and must not carry counters.
+        // The raw (pre-NMS) count is recorded inside detectAndComputeFiltered().
+        // -----------------------------------------------------------------
+        {
+            static long long sCalls = 0;
+            static long long sOut   = 0;
+            ++sCalls;
+            sOut += line_number;
+            line_lifecycle::C().lsd_calls     = sCalls;
+            line_lifecycle::C().lsd_out_lines = sOut;
+
+            static bool sRegistered = false;
+            const char* env = std::getenv("PHOTO_SLAM_MONO_TRACE");
+            const bool on = (env != nullptr && std::string(env) == "1");
+            if (on && !sRegistered)
+            {
+                sRegistered = true;
+                std::atexit([]() {
+                    const line_lifecycle::Counters &c = line_lifecycle::C();
+                    std::cerr << "[LSD-COUNT] operator() calls=" << sCalls
+                              << " out_lines=" << sOut
+                              << " raw_lines=" << c.lsd_raw_lines << std::endl;
+                });
+            }
+        }
+
         return line_number;
     }
 
     // 检测并提取描述符
+    // NOTE: this entry is NOT called by operator(); all detection goes through
+    // detectAndComputeFiltered(). Counters must never live here.
     void LSDextractor::detectAndCompute(const cv::Mat& img, std::vector<cv::line_descriptor::KeyLine>& keylines, cv::Mat& descriptors) {
         if(img.empty())
         {
@@ -79,6 +115,7 @@ namespace ORB_SLAM3
         // 1. 原始检测
         std::vector<cv::line_descriptor::KeyLine> allKeylines;
         lld->detect(gray_u, allKeylines);
+        line_lifecycle::C().lsd_raw_lines += (long long)allKeylines.size();
 
         // 2. 针对百叶窗：执行基于网格的非极大值抑制 (NMS)
         // 目的：在局部密集区域只保留最具有代表性的长线段
