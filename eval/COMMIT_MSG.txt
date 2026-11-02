@@ -1,0 +1,43 @@
+eval: cross-dataset front-end evaluation entry, cabinet configs and frozen protocol
+
+Adds the evaluation harness used for the front-end robustness experiment on the
+TUM fr3 cabinet / large_cabinet sequences, without touching the SLAM pipeline.
+
+New files only; no existing source, config or threshold is modified.
+
+* examples/eval_frontend.cpp
+  Unified SLAM-only entry. Calls the same
+  System::TrackMonocularWithLine / TrackRGBDWithLine that examples/tum_mono.cpp
+  and examples/tum_rgbd.cpp call with PHOTO_SLAM_SLAM_ONLY=1, drains the
+  mapping-operation queue that the absent Gaussian mapper would have consumed,
+  and writes final_state.csv next to the usual trajectory exports. Link line
+  deliberately excludes the Gaussian mapper, viewer, imgui, simple-knn, CUDA
+  rasterizer and torch, so front-end numbers cannot depend on the learned
+  backend.
+
+* cfg/ORB_SLAM3/{Monocular,RGB-D}/TUM/tum_freiburg3_{,large_}cabinet.yaml
+  Verbatim copies of the same-dataset, same-modality fr3 templates
+  (Monocular/..._near_lowfast.yaml and RGB-D/..._near.yaml). Zero keys changed;
+  calibration (fx=535.4 fy=539.2 cx=320.1 cy=247.6, zero distortion, 640x480)
+  and RGBD.DepthMapFactor=5000 were verified against the actual cabinet data.
+
+* cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_{,large_}cabinet.txt
+  RGB/depth associations at max_difference=0.02 (1112/1147 and 984/1011 pairs,
+  TUM greedy best-difference semantics).
+
+* scripts/gen_assoc.py     association generator (the vendored associate.py is
+                           Python 2 and raises TypeError under python3)
+* scripts/build_eval_orb.sh    independent build of libORB_SLAM3 (new variant)
+* scripts/build_eval_entry.sh  independent build of the SLAM-only entry
+* scripts/run_batch.sh         serialised, resumable, refuse-to-overwrite runner
+* eval/PROTOCOL.md   metric definitions frozen BEFORE the batch
+* eval/INVENTORY.md  dataset/category inventory with explicit NOT RUN markers
+* eval/DEVIATIONS.md everything that deviated, including the RGB-D throughput
+                     anomaly and the discarded first build
+* eval/REPORT.md     results table and interpretation
+* eval/metrics.py    metric computation from run artefacts
+* eval/README.md     build/run/metric reproduction steps
+
+Build note: build_eval_orb.sh must glob src/*.cpp as well as src/*.cc, otherwise
+src/OptimizableTypes.cpp is silently dropped and the shared library links with
+undefined EdgeSE3ProjectXYZ / VertexSim3Expmap / MLPnPsolver symbols.
