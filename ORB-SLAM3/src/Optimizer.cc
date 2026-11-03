@@ -58,6 +58,25 @@
 
 namespace ORB_SLAM3
 {
+// Line-endpoint vertex IDs must not be inferred from container SIZES: MapPoint
+// IDs are sparse (mnId keeps increasing while vpMP.size() counts survivors), so
+// "maxKFid + vpMP.size()" can land on an ID that is already registered. The ID
+// must come from the vertices the optimizer actually holds.
+// Overflow: the result is computed in long long and refused if it would not fit
+// in the int used by g2o ids.
+static bool NextFreeVertexId(const g2o::OptimizableGraph& opt, int reserve,
+                             int& out_first)
+{
+    long long mx = -1;
+    const g2o::HyperGraph::VertexIDMap& vs = opt.vertices();
+    for (g2o::HyperGraph::VertexIDMap::const_iterator it = vs.begin();
+         it != vs.end(); ++it)
+        if ((long long)it->first > mx) mx = (long long)it->first;
+    const long long first = mx + 1;
+    if (first + reserve > 2147483647LL) return false;
+    out_first = (int)first;
+    return true;
+}
 
 // --- thresholds (tweak if needed) ---
 static const double CHI2_MONO_HARD = 7.0; // point chi2 hard threshold (conservative)
@@ -276,7 +295,13 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
 
     // Compute offset to avoid ID collision. MP vertex ids are mnId+maxKFid+1
     // (sparse mnId), so line ids must start after maxMPid, NOT after vpMP.size().
-    int nextVertexId = (int)maxKFid + (int)maxMPid + 2; 
+    int nextVertexId = 0;
+    if (!NextFreeVertexId(optimizer, 2 * (int)vpML.size() + 8, nextVertexId)) {
+        std::cerr << "[LBA-LINE] vertex id space exhausted, line vertices skipped"
+                  << std::endl;
+        nextVertexId = -1;
+    }
+    if (nextVertexId >= 0) --nextVertexId;
 
     // Store G2O IDs for endpoints
     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
@@ -1057,7 +1082,13 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
     std::vector<ORB_SLAM3::EdgeSE3ProjectPointToLine2D*> vpEdgesLineMono;
 
     // Compute offset to avoid ID collision
-    int nextVertexId = (int)maxKFid + vpMP.size() + 2; 
+    int nextVertexId = 0;
+    if (!NextFreeVertexId(optimizer, 2 * (int)vpML.size() + 8, nextVertexId)) {
+        std::cerr << "[GBA-LINE] vertex id space exhausted, line vertices skipped"
+                  << std::endl;
+        nextVertexId = -1;
+    }
+    if (nextVertexId >= 0) --nextVertexId;
 
     // Store G2O IDs for endpoints
     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;

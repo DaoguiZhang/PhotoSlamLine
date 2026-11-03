@@ -194,12 +194,16 @@ def main():
     hole_a, hole_b = est_ts[40], est_ts[59]
     run, gt = build_run(os.path.join(tmp, "t4"), est_ts, gt_ts, skip_est_idx=skip)
     r = run_eval(run, gt)
-    check("inputs > gt-evaluable", r["n_input"] > r["n_gt_evaluable"],
-          "%d vs %d" % (r["n_input"], r["n_gt_evaluable"]))
-    check("undetermined_frac == 20/n", abs(r["undetermined_frac"] - 20.0 / len(est_ts)) < 1e-9,
-          "%.4f" % r["undetermined_frac"])
-    check("correct@0.05 == 1 on evaluated subset",
-          abs(r["correct_cov_0.05"] - 1.0) < 1e-9)
+    # Corrected definition (T10): the denominator is every GT-evaluable INPUT,
+    # so a missing estimate lowers the ratio instead of leaving it at 1.0.
+    check("gt-evaluable == n_input (every input has GT)",
+          r["n_gt_evaluable"] == r["n_input"],
+          "%d vs %d" % (r["n_gt_evaluable"], r["n_input"]))
+    check("undetermined_frac == 0 (hole is missing ESTIMATE, not missing GT)",
+          abs(r["undetermined_frac"]) < 1e-12, "%.4f" % r["undetermined_frac"])
+    check("correct@0.05 == (n-20)/n", 
+          abs(r["correct_cov_0.05"] - (len(est_ts) - 20.0) / len(est_ts)) < 1e-9,
+          "%.4f" % r["correct_cov_0.05"])
     check("lower bound < full", r["correct_lower_bound_0.05"] < 1.0,
           "%.3f" % r["correct_lower_bound_0.05"])
     total = est_ts[-1] - est_ts[0]
@@ -298,6 +302,19 @@ def main():
             print("    mismatch %s: agg=%.9f ate=%.9f"
                   % (name, agg, r["ate_rmse_m"]))
     check("clean cases agree within dump precision", ok)
+
+    print("T10 denominator = all GT-evaluable INPUTS (10 inputs, 4 poses)")
+    t10 = np.arange(0.0, 1.0, 0.1)          # 10 input frames
+    run, gt = build_run(os.path.join(tmp, "t10"), t10, gt_ts,
+                        skip_est_idx=set(range(4, 10)))
+    r = run_eval(run, gt)
+    check("n_input == 10", r["n_input"] == 10, str(r["n_input"]))
+    check("n_gt_evaluable == 10 (not 4)", r["n_gt_evaluable"] == 10,
+          str(r["n_gt_evaluable"]))
+    check("correct@0.05 == 0.4 (not 1.0)",
+          abs(r["correct_cov_0.05"] - 0.4) < 1e-9,
+          "%.4f" % r["correct_cov_0.05"])
+    check("consistency OK", r.get("consistency") == "OK", str(r.get("consistency")))
 
     print()
     if FAILS:

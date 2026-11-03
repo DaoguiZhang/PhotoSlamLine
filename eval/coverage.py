@@ -48,6 +48,40 @@ OK = 2
 NO_IMAGES_YET = 0
 
 
+def nearest(sorted_ts, t, max_dt):
+    """Index of the closest GT sample within max_dt, else None."""
+    lo, hi = 0, len(sorted_ts) - 1
+    if hi < 0:
+        return None
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if sorted_ts[mid] < t:
+            lo = mid + 1
+        else:
+            hi = mid
+    best = None
+    for i in (lo - 1, lo, lo + 1):
+        if 0 <= i < len(sorted_ts):
+            d = abs(sorted_ts[i] - t)
+            if best is None or d < best[0]:
+                best = (d, i)
+    if best is None or best[0] > max_dt:
+        return None
+    return best[1]
+
+
+def read_gt_timestamps(path):
+    ts = []
+    with open(path) as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            ts.append(float(s.split()[0]))
+    ts.sort()
+    return ts
+
+
 def read_final_state(path):
     rows = []
     with open(path) as f:
@@ -59,15 +93,34 @@ def read_final_state(path):
 
 
 def read_perframe(path):
+    """Per-estimate-frame errors, read by COLUMN NAME.
+
+    Positional parsing is unsafe: an older dump had no rot_deg column, so index
+    4 was the translation component ex and would have been consumed as a
+    rotation angle. The header is parsed and the required names are resolved
+    explicitly.
+    """
     out = {}
+    cols = None
     with open(path) as f:
         for line in f:
             if line.startswith("#"):
+                if cols is None:
+                    names = line.lstrip("#").split()
+                    if "err_m" in names:
+                        cols = (names.index("err_m"), names.index("ts_est"),
+                                names.index("rot_deg") if "rot_deg" in names
+                                else None)
                 continue
+            if cols is None:
+                raise SystemExit("perframe dump has no header: %s" % path)
             p = line.split()
-            if len(p) < 5:
-                continue
-            out[round(float(p[1]), 6)] = (float(p[3]), float(p[4]))
+            ie, it, ir = cols
+            if ir is None:
+                raise SystemExit("perframe dump lacks rot_deg, refusing to "
+                                 "read a translation component as rotation: %s"
+                                 % path)
+            out[round(float(p[it]), 6)] = (float(p[ie]), float(p[ir]))
     return out
 
 
@@ -150,11 +203,19 @@ def evaluate_run(run_dir, gt, mode, max_dt, gap_max, rot_tol, verbose=False):
     n_input = len(states)
     n_ok = sum(1 for s in states if s[2] == OK)
     n_exported = sum(1 for s in states if round(s[1], 6) in pf)
-    n_eval = len(pf)
+    # Denominator of correct coverage = every INPUT frame that has a GT sample
+    # within max_dt, whether or not the system exported a pose for it. Using the
+    # exported/matched count instead would silently drop the frames the system
+    # failed on and inflate the ratio (10 inputs, 4 correct would read 1.0).
+    gt_ts_all = read_gt_timestamps(gt)
+    n_gt_inputs = sum(1 for _, ts, _ in states
+                      if nearest(gt_ts_all, ts, max_dt) is not None)
+    n_eval = n_gt_inputs
     res.update({
         "n_input": n_input, "n_accepted": n_ok,
         "n_exported_and_matched": n_exported,
         "n_gt_evaluable": n_eval,
+        "n_gt_evaluable_with_pose": len(pf),
         "accepted_cov": n_ok / n_input if n_input else 0.0,
         "gt_evaluable_cov": n_eval / n_input if n_input else 0.0,
         "undetermined_frac": (n_input - n_eval) / n_input if n_input else 1.0,
@@ -240,6 +301,21 @@ def evaluate_run(run_dir, gt, mode, max_dt, gap_max, rot_tol, verbose=False):
         else:
             cur_n = 0
     res["longest_continuous_trans_only_s"] = best_t
+
+    # ---- automatic consistency checks (fail loudly, never silently) ------
+    problems = []
+    for tol in TOLS:
+        j = res.get("correct_cov_%.2f" % tol)
+        t = res.get("correct_trans_only_%.2f" % tol)
+        if j is not None and t is not None and j > t + 1e-12:
+            problems.append("joint>translation at tol %.2f" % tol)
+        if j is not None and j > res["accepted_cov"] + 1e-12:
+            problems.append("correct>accepted at tol %.2f" % tol)
+    if res.get("longest_continuous_frames", 0) == 0 and best_s > 1e-9:
+        problems.append("joint longest>0 while joint frames==0")
+    if res.get("longest_continuous_trans_only_s", 0) > 0 and best_t == 0:
+        problems.append("translation-only longest inconsistent")
+    res["consistency"] = "OK" if not problems else "; ".join(problems)
     res["status"] = "OK" if res.get("exit_code", 0) == 0 else "NONZERO_EXIT"
     return res
 
