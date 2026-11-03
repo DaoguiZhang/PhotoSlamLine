@@ -948,7 +948,7 @@ namespace ORB_SLAM3
         double cost=0;
         static int c=0;
         c++;
-        assert(ptr->pts.size()==n);
+        assert(dptr->pts.size()==n);
         for(int i=0; i<dptr->pts.size(); ++i)
             cost+=error[i]*error[i];
         //	cout<<cost<<"\t";
