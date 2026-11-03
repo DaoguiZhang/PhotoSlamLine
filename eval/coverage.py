@@ -254,35 +254,57 @@ def main():
     ap.add_argument("--max-dt", type=float, default=0.02)
     a = ap.parse_args()
 
-    gt_map = {
-        "cabinet": os.path.join(a.data, "rgbd_dataset_freiburg3_cabinet",
-                                "groundtruth.txt"),
-        "large_cabinet": os.path.join(a.data, "rgbd_dataset_freiburg3_large_cabinet",
-                                      "groundtruth.txt"),
-    }
+    DS = "/workspace/code/SEGS-SLAM/datasets"
+    TUM_DIRS = {"freiburg1_desk": "rgbd_dataset_freiburg1_desk",
+                "freiburg1_room": "rgbd_dataset_freiburg1_room",
+                "freiburg2_xyz": "rgbd_dataset_freiburg2_xyz"}
+
+    def gt_for(dataset, scene):
+        if dataset == "TUM":
+            d = TUM_DIRS.get(scene, "rgbd_dataset_freiburg3_" + scene)
+            return os.path.join(DS, "tum", d, "groundtruth.txt")
+        if dataset == "ETH3D":
+            return os.path.join(DS, "eth3d", scene, "groundtruth.txt")
+        if dataset == "Replica":
+            # pose_TUM.txt timestamps are frame indices; the run's time base is
+            # i/30. The cached copy maps index k -> k/30 (content unchanged).
+            c = "/workspace/eval_runs/gt_cache/replica_%s.txt" % scene
+            return c if os.path.exists(c) else os.path.join(DS, "replica", scene,
+                                                            "pose_TUM.txt")
+        raise SystemExit("unknown dataset " + dataset)
     rows = []
-    for scene in sorted(os.listdir(a.root)):
-        sdir = os.path.join(a.root, scene)
-        if not os.path.isdir(sdir):
+    for dataset in sorted(os.listdir(a.root)):
+        droot = os.path.join(a.root, dataset)
+        if not os.path.isdir(droot) or dataset == "UPSTREAM":
             continue
-        for mod in sorted(os.listdir(sdir)):
-            for arm in sorted(os.listdir(os.path.join(sdir, mod))):
-                adir = os.path.join(sdir, mod, arm)
-                if not os.path.isdir(adir):
+        for scene in sorted(os.listdir(droot)):
+            sdir = os.path.join(droot, scene)
+            if not os.path.isdir(sdir):
+                continue
+            gt = gt_for(dataset, scene)
+            if not os.path.exists(gt):
+                continue
+            for mod in sorted(os.listdir(sdir)):
+                pmod = os.path.join(sdir, mod)
+                if not os.path.isdir(pmod):
                     continue
-                for rep in sorted(os.listdir(adir)):
-                    rd = os.path.join(adir, rep)
-                    if not os.path.isdir(rd):
+                for arm in sorted(os.listdir(pmod)):
+                    adir = os.path.join(pmod, arm)
+                    if not os.path.isdir(adir):
                         continue
-                    r = evaluate_run(rd, gt_map[scene],
-                                     "sim3" if mod == "mono" else "se3",
-                                     a.max_dt, a.gap_max, a.rot_tol)
-                    r.update({"scene": scene, "modality": mod, "arm": arm,
-                              "repeat": rep})
-                    rows.append(r)
+                    for rep in sorted(os.listdir(adir)):
+                        rd = os.path.join(adir, rep)
+                        if not os.path.isdir(rd):
+                            continue
+                        r = evaluate_run(rd, gt,
+                                         "sim3" if mod == "mono" else "se3",
+                                         a.max_dt, a.gap_max, a.rot_tol)
+                        r.update({"dataset": dataset, "scene": scene,
+                                  "modality": mod, "arm": arm, "repeat": rep})
+                        rows.append(r)
 
     os.makedirs(a.out, exist_ok=True)
-    keys = ["scene", "modality", "arm", "repeat", "status", "exit_code",
+    keys = ["dataset", "scene", "modality", "arm", "repeat", "status", "exit_code",
             "n_input", "n_accepted", "n_gt_evaluable", "accepted_cov",
             "gt_evaluable_cov", "undetermined_frac",
             "correct_cov_0.05", "correct_cov_0.10", "correct_cov_0.20",
@@ -300,8 +322,8 @@ def main():
     with open(os.path.join(a.out, "coverage.json"), "w") as f:
         json.dump(rows, f, indent=1)
     for r in rows:
-        print("%-14s %-5s %-3s %-5s %-6s cov=%s correct0.20=%s longest=%ss ate=%s"
-              % (r["scene"], r["modality"], r["arm"], r["repeat"], r["status"],
+        print("%-8s %-18s %-5s %-3s %-5s %-6s cov=%s correct0.20=%s longest=%ss ate=%s"
+              % (r.get("dataset",""), r["scene"], r["modality"], r["arm"], r["repeat"], r["status"],
                  ("%.3f" % r["accepted_cov"]) if "accepted_cov" in r else "NA",
                  ("%.3f" % r.get("correct_cov_0.20", float("nan"))),
                  ("%.1f" % r.get("longest_continuous_s", float("nan"))),

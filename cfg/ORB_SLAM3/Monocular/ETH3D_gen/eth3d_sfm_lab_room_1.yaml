@@ -1,7 +1,6 @@
-# derived from sfm_lab_room_1/calibration.txt (fx fy cx cy) and the actual RGB frame
-# size 743x465; all other keys copied verbatim from the official
-# Monocular/ETH3D/eth3d_desk_3.yaml. Monocular: no depth factor involved.
 %YAML:1.0
+# derived: sfm_lab_room_1/calibration.txt (fx fy cx cy) + actual frame 743x465
+# all other keys copied verbatim from Monocular/ETH3D/eth3d_desk_3.yaml
 
 #-------------------------------------------------------------------------------
 # Camera Parameters. ETH3D monocular (desk_3; shared ETH3D pinhole camera)

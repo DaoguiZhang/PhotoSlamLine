@@ -76,7 +76,8 @@ TUM = [
      "RGB-D/TUM/tum_freiburg1_desk.yaml", "RGB-D/TUM/associations/fr1_desk.txt"),
     ("freiburg1_room", "rgbd_dataset_freiburg1_room",
      "Monocular/TUM/tum_freiburg1_room.yaml",
-     None, "RGB-D/TUM/associations/fr1_room.txt"),
+     "RGB-D/TUM/tum_freiburg1_room.yaml",
+     "RGB-D/TUM/associations/fr1_room.txt"),
     ("freiburg2_xyz", "rgbd_dataset_freiburg2_xyz",
      "Monocular/TUM/tum_freiburg2_xyz.yaml",
      "RGB-D/TUM/tum_freiburg2_xyz.yaml", "RGB-D/TUM/associations/fr2_xyz.txt"),
@@ -234,7 +235,26 @@ def run():
     with open(MANIFEST) as f:
         rows = list(csv.DictReader(f))
     prog = open(PROGRESS, "a")
-    todo = [r for r in rows if r["status"] in ("PENDING", "FAILED", "PARTIAL")]
+    # Policy: a crash (SIGSEGV/SIGABRT) is NOT retried until it is attributed.
+    # 19 SIGSEGV have been traced to Optimizer.cc:17472
+    # (LocalBundleAdjustmentWithLine: delete vP1; delete vP2;) reached from
+    # LoopClosing::MergeLocalWithLine, so those cells are left as FAILED rather
+    # than burned on a retry that cannot succeed.
+    def crash_only(r):
+        st = os.path.join(r["out_dir"], "status.txt")
+        if not os.path.exists(st):
+            return False
+        for line in open(st):
+            if line.startswith("exit_code="):
+                try:
+                    return int(line.split("=")[1]) in (-11, -6)
+                except ValueError:
+                    return False
+        return False
+
+    todo = [r for r in rows
+            if r["status"] == "PENDING"
+            or (r["status"] in ("FAILED", "PARTIAL") and not crash_only(r))]
     print("to execute: %d" % len(todo), flush=True)
     n = 0
     for r in todo:
