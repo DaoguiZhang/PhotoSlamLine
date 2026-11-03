@@ -17468,8 +17468,12 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
         bool ok2 = optimizer.addVertex(vP2);
 
         if (!ok1 || !ok2) {
-            if (ok1) optimizer.removeVertex(vP1);
-            delete vP1; delete vP2;
+            // g2o::HyperGraph::removeVertex() TAKES OWNERSHIP and deletes the
+            // vertex (ASan: freed by g2o::HyperGraph::removeVertex, then used
+            // again a few instructions later). Only a vertex that was never
+            // registered is owned by us.
+            if (ok1) optimizer.removeVertex(vP1); else delete vP1;
+            if (ok2) optimizer.removeVertex(vP2); else delete vP2;
             continue;
         }
 
