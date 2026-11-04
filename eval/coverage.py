@@ -398,6 +398,10 @@ def main():
             "correct_trans_only_0.20", "correct_trans_only_0.50",
             "longest_continuous_s", "longest_continuous_frames",
             "longest_continuous_trans_only_s",
+            # raw counters and the automatic check verdict must reach the file,
+            # otherwise a reader cannot tell a clean run from an unjudged one
+            "n_gt_evaluable_with_pose", "n_accepted_gt_evaluable",
+            "consistency",
             "ate_rmse_m", "rot_rmse_deg", "align_scale"]
     with open(os.path.join(a.out, "coverage_per_run.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")

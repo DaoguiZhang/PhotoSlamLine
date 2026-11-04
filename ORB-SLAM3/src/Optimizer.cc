@@ -17443,6 +17443,19 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
     std::vector<KeyFrame*> vpEdgeKFLineMono;
     std::vector<MapLine*> vpMapLineEdgeMono;
     
+    // ---- P1/P2 contract in the MAP-MERGE bundle adjuster ---------------
+    // This overload previously added line projection edges unconditionally: it
+    // consulted neither PHOTO_SLAM_LINE_MODE nor PHOTO_SLAM_LBA_LINE, so arm P1
+    // (line frontend on, line edges OFF) silently optimised with line edges.
+    // The gate is applied to the EDGE/VERTEX block only; line detection,
+    // matching, MapLines and the merge itself are untouched.
+    const bool lineEdgesEnabledHere =
+        (GetLineMode() >= 2 && GetLbaLineEnabled());
+    if (IsLineEdgeDiag())
+        std::cout << "[LineEdgeDiag] site=LBA_MERGE lineEdges="
+                  << (lineEdgesEnabledHere ? "on" : "gated=1 lineEdges=0")
+                  << " nML=" << vpMLs.size() << std::endl;
+
     // 计算安全的线段顶点ID偏移
     int nextVertexId = 0;
     if (!optids::NextFreeVertexId(optimizer, 2LL * (long long)vpMLs.size() + 8,
@@ -17462,6 +17475,7 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
 
     for (MapLine* pML : vpMLs)
     {
+        if (!lineEdgesEnabledHere) break;  // arm P1: zero line edges
         if (!pML || pML->isBad()) continue;
 
         auto endpoints = pML->GetLineWorldPos();
