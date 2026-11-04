@@ -351,11 +351,19 @@ def main():
         if dataset == "ETH3D":
             return os.path.join(DS, "eth3d", scene, "groundtruth.txt")
         if dataset == "Replica":
-            # pose_TUM.txt timestamps are frame indices; the run's time base is
-            # i/30. The cached copy maps index k -> k/30 (content unchanged).
-            c = "/workspace/eval_runs/gt_cache/replica_%s.txt" % scene
-            return c if os.path.exists(c) else os.path.join(DS, "replica", scene,
-                                                            "pose_TUM.txt")
+            # The repository's pose_TUM.txt carries the frame INDEX in its time
+            # column while the entry feeds frames at i/30 s, so it cannot be used
+            # directly (and the old gt_cache merely relabelled it, which was never
+            # verified). Use the GT derived and checked by eval/derive_replica_gt.py:
+            #   R_cv = R_c2w @ diag(1,-1,-1)   (negate camera y,z columns)
+            #   ts   = i / 30                  (the entry's declared time base)
+            # Positions are bit-identical to pose_TUM.txt; the rule and both
+            # hashes are in eval/REPLICA_GT.md. Refuse to guess if it is absent.
+            d = "/workspace/eval_runs/gt_replica/%s_gt_tum_s.txt" % scene
+            if not os.path.exists(d):
+                raise SystemExit("derived Replica GT missing: %s "
+                                 "(run eval/derive_replica_gt.py first)" % d)
+            return d
         raise SystemExit("unknown dataset " + dataset)
     rows = []
     for dataset in sorted(os.listdir(a.root)):

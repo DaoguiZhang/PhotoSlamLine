@@ -29,13 +29,17 @@ import time
 from collections import Counter
 
 TREE = "/workspace/deliv/cabinet-eval"
-RUNS = "/workspace/eval_runs/v2"
-MANIFEST = "/workspace/eval_runs/MASTER_MANIFEST.csv"
-LOCK = "/workspace/eval_runs/.matrix.lock"
-PROGRESS = "/workspace/eval_runs/matrix_progress.log"
+RUNS = "/workspace/eval_runs/final_runs"
+MANIFEST = os.path.join(RUNS, "MASTER_MANIFEST.csv")
+LOCK = os.path.join(RUNS, ".matrix.lock")
+PROGRESS = os.path.join(RUNS, "matrix_progress.log")
 DS = "/workspace/code/SEGS-SLAM/datasets"
-BIN = os.path.join(TREE, "bin/eval_frontend")
-LIB = os.path.join(TREE, "ORB-SLAM3/lib/libORB_SLAM3.so")
+# Frozen artefacts: the flag-consistent unified Release build, NOT the
+# in-tree bin/ or ORB-SLAM3/lib/ (those were built with a different flag set
+# and are not what the contract runs used).
+BIN = "/workspace/eval_builds/v1/entry_rel/eval_frontend"
+LIB = "/workspace/eval_builds/v1/lib_rel/libORB_SLAM3.so"
+G2O = "/workspace/eval_builds/v1/g2o_rel/lib/libg2o.so"
 VOCAB = os.path.join(TREE, "ORB-SLAM3/Vocabulary/ORBvoc.txt")
 CFG = os.path.join(TREE, "cfg/ORB_SLAM3")
 
@@ -92,6 +96,25 @@ def sha(p):
         for b in iter(lambda: f.read(1 << 20), b""):
             h.update(b)
     return h.hexdigest()
+
+
+EVAL = "/workspace/code/PSL-perf/scripts/eval_tum_se3_v2.py"
+
+
+def gt_for_row(r):
+    """Ground-truth file for a manifest row, from one frozen rule."""
+    DS2 = DS
+    if r["dataset"] == "TUM":
+        d = {"freiburg1_desk": "rgbd_dataset_freiburg1_desk",
+             "freiburg1_room": "rgbd_dataset_freiburg1_room",
+             "freiburg2_xyz": "rgbd_dataset_freiburg2_xyz"}.get(
+                 r["scene"], "rgbd_dataset_freiburg3_" + r["scene"])
+        return os.path.join(DS2, "tum", d, "groundtruth.txt")
+    if r["dataset"] == "ETH3D":
+        return os.path.join(DS2, "eth3d", r["scene"], "groundtruth.txt")
+    if r["dataset"] == "Replica":
+        return "/workspace/eval_runs/gt_replica/%s_gt_tum_s.txt" % r["scene"]
+    return ""
 
 
 def rows_for(dataset, scene, modality, cfg, inp, assoc, blocked=""):
@@ -195,10 +218,14 @@ def build():
                 r["status"] = "PENDING"
         r["build_entry_sha256"] = bh
         r["build_lib_sha256"] = lh
+        r["build_g2o_sha256"] = sha(G2O)
+        r["evaluator_sha256"] = sha(EVAL)
+        r["gt_path"] = gt_for_row(r)
 
     keys = ["id", "dataset", "scene", "modality", "system_arm", "repeat",
             "status", "blocked_reason", "config", "input", "assoc", "out_dir",
-            "build_entry_sha256", "build_lib_sha256"]
+            "build_entry_sha256", "build_lib_sha256", "build_g2o_sha256",
+            "evaluator_sha256", "gt_path"]
     os.makedirs(os.path.dirname(MANIFEST), exist_ok=True)
     with open(MANIFEST, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys)
@@ -255,6 +282,22 @@ def run():
     todo = [r for r in rows
             if r["status"] == "PENDING"
             or (r["status"] in ("FAILED", "PARTIAL") and not crash_only(r))]
+
+    # Pre-declared rotation of the execution order. Cells are grouped by
+    # (dataset, scene, modality); inside a group the 9 arm x repeat cells are
+    # walked in an order rotated left by (group index mod 9). This spreads any
+    # slow drift (thermal, cache, page cache) evenly over arms without looking
+    # at results or at the clock.
+    groups = {}
+    for r in todo:
+        groups.setdefault((r["dataset"], r["scene"], r["modality"]), []).append(r)
+    ordered = []
+    for gi, k in enumerate(sorted(groups)):
+        g = groups[k]
+        g.sort(key=lambda r: (r["system_arm"], r["repeat"]))
+        k2 = gi % len(g) if g else 0
+        ordered += g[k2:] + g[:k2]
+    todo = ordered
     print("to execute: %d" % len(todo), flush=True)
     n = 0
     for r in todo:
@@ -270,7 +313,8 @@ def run():
                     "PHOTO_SLAM_LINE_MODE": LINE_MODE[r["system_arm"]],
                     "PHOTO_SLAM_PO_LINE": "1", "PHOTO_SLAM_LBA_LINE": "1",
                     "PHOTO_SLAM_LINE_RESCUE": "0",
-                    "PHOTO_SLAM_SLAM_ONLY": "1"})
+                    "PHOTO_SLAM_SLAM_ONLY": "1",
+                    "PHOTO_SLAM_DEBUG_LINE_EDGES": "1"})
         if r["dataset"] == "Replica":
             args = [BIN, VOCAB, cfg, "/dev/null", r["input"], out,
                     "replica-" + r["modality"]]
@@ -285,7 +329,8 @@ def run():
                                    ("EVAL_ARM", "PHOTO_SLAM_LINE_MODE",
                                     "PHOTO_SLAM_PO_LINE", "PHOTO_SLAM_LBA_LINE",
                                     "PHOTO_SLAM_LINE_RESCUE",
-                                    "PHOTO_SLAM_SLAM_ONLY")}),
+                                    "PHOTO_SLAM_SLAM_ONLY",
+                                    "PHOTO_SLAM_DEBUG_LINE_EDGES")}),
                        time.strftime("%Y-%m-%dT%H:%M:%S")))
         t0, note = time.time(), ""
         with open(os.path.join(out, "stdout.log"), "w") as lf:
