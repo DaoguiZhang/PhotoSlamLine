@@ -40,7 +40,7 @@ build_orb() {  # $1 = tag, $2 = flags, $3 = g2o lib dir, $4 = dbow lib dir
   local tag=$1 flags=$2 g2o=$3 dbow=$4
   local B=$ROOT/obj_$tag OUT=$ROOT/lib_$tag
   rm -rf "$B" "$OUT"; mkdir -p "$B" "$OUT"
-  local INC="-I$OBR -I$OBR/include -I$OBR/include/CameraModels -I$OBR/Thirdparty/Sophus -I/usr/include/eigen3 -isystem /usr/local/include/opencv4"
+  local INC="-I$OBR -I$OBR/include -I$OBR/include/CameraModels -I$OBR/Thirdparty/Sophus -I$OBR/Thirdparty/g2o -I/usr/include/eigen3 -isystem /usr/local/include/opencv4"
   ls "$OBR"/src/*.cc "$OBR"/src/*.cpp "$OBR"/src/CameraModels/*.cpp | \
     xargs -P 12 -I{} sh -c "/usr/bin/g++ $COMMON_DEFS $INC $flags -c '{}' -o $B/\$(basename '{}' | sed 's/\.[^.]*\$//').o"
   local CV; CV=$(ls /usr/local/lib/libopencv_*.so.4.10.0 | tr '\n' ' ')
@@ -57,7 +57,7 @@ build_orb() {  # $1 = tag, $2 = flags, $3 = g2o lib dir, $4 = dbow lib dir
 build_entry() {  # $1 = tag, $2 = flags, $3 = lib dir
   local tag=$1 flags=$2 lib=$3
   local B=$ROOT/entry_$tag; rm -rf "$B"; mkdir -p "$B"
-  local INC="-I$TREE -I$OBR -I$OBR/include -I$OBR/include/CameraModels -I$OBR/Thirdparty/Sophus -I/usr/include/eigen3 -isystem /usr/local/include/opencv4"
+  local INC="-I$TREE -I$OBR -I$OBR/include -I$OBR/include/CameraModels -I$OBR/Thirdparty/Sophus -I$OBR/Thirdparty/g2o -I/usr/include/eigen3 -isystem /usr/local/include/opencv4"
   local SAN=""; case "$flags" in *sanitize*) SAN="-fsanitize=address";; esac
   /usr/bin/g++ $COMMON_DEFS $INC $flags -c "$TREE/examples/eval_frontend.cpp" -o "$B/eval_frontend.o"
   local CV; CV=$(ls /usr/local/lib/libopencv_*.so.4.10.0 | tr '\n' ' ')

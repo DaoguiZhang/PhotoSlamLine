@@ -18,6 +18,7 @@
 
 
 #include "Optimizer.h"
+#include "OptimizerVertexIds.h"
 #include "PoCapture.h"
 
 
@@ -58,25 +59,6 @@
 
 namespace ORB_SLAM3
 {
-// Line-endpoint vertex IDs must not be inferred from container SIZES: MapPoint
-// IDs are sparse (mnId keeps increasing while vpMP.size() counts survivors), so
-// "maxKFid + vpMP.size()" can land on an ID that is already registered. The ID
-// must come from the vertices the optimizer actually holds.
-// Overflow: the result is computed in long long and refused if it would not fit
-// in the int used by g2o ids.
-static bool NextFreeVertexId(const g2o::OptimizableGraph& opt, int reserve,
-                             int& out_first)
-{
-    long long mx = -1;
-    const g2o::HyperGraph::VertexIDMap& vs = opt.vertices();
-    for (g2o::HyperGraph::VertexIDMap::const_iterator it = vs.begin();
-         it != vs.end(); ++it)
-        if ((long long)it->first > mx) mx = (long long)it->first;
-    const long long first = mx + 1;
-    if (first + reserve > 2147483647LL) return false;
-    out_first = (int)first;
-    return true;
-}
 
 // --- thresholds (tweak if needed) ---
 static const double CHI2_MONO_HARD = 7.0; // point chi2 hard threshold (conservative)
@@ -296,7 +278,8 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
     // Compute offset to avoid ID collision. MP vertex ids are mnId+maxKFid+1
     // (sparse mnId), so line ids must start after maxMPid, NOT after vpMP.size().
     int nextVertexId = 0;
-    if (!NextFreeVertexId(optimizer, 2 * (int)vpML.size() + 8, nextVertexId)) {
+    if (!optids::NextFreeVertexId(optimizer, 2LL * (long long)vpML.size() + 8,
+                                  nextVertexId)) {
         std::cerr << "[LBA-LINE] vertex id space exhausted, line vertices skipped"
                   << std::endl;
         nextVertexId = -1;
@@ -1083,7 +1066,8 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const 
 
     // Compute offset to avoid ID collision
     int nextVertexId = 0;
-    if (!NextFreeVertexId(optimizer, 2 * (int)vpML.size() + 8, nextVertexId)) {
+    if (!optids::NextFreeVertexId(optimizer, 2LL * (long long)vpML.size() + 8,
+                                  nextVertexId)) {
         std::cerr << "[GBA-LINE] vertex id space exhausted, line vertices skipped"
                   << std::endl;
         nextVertexId = -1;
@@ -17460,7 +17444,15 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
     std::vector<MapLine*> vpMapLineEdgeMono;
     
     // 计算安全的线段顶点ID偏移
-    int nextVertexId = (int)maxKFid + vpMPs.size() + 2; 
+    int nextVertexId = 0;
+    if (!optids::NextFreeVertexId(optimizer, 2LL * (long long)vpMLs.size() + 8,
+                                  nextVertexId))
+    {
+        std::cerr << "[LBA-MERGE] vertex id space exhausted, line vertices skipped"
+                  << std::endl;
+        nextVertexId = -1;
+    }
+    --nextVertexId;
 
     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
     mapLineVertexId.reserve(vpMLs.size() * 2);
@@ -17499,12 +17491,7 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
         bool ok2 = optimizer.addVertex(vP2);
 
         if (!ok1 || !ok2) {
-            // g2o::HyperGraph::removeVertex() TAKES OWNERSHIP and deletes the
-            // vertex (ASan: freed by g2o::HyperGraph::removeVertex, then used
-            // again a few instructions later). Only a vertex that was never
-            // registered is owned by us.
-            if (ok1) optimizer.removeVertex(vP1); else delete vP1;
-            if (ok2) optimizer.removeVertex(vP2); else delete vP2;
+            optids::ReleaseEndpointVertices(optimizer, vP1, ok1, vP2, ok2);
             continue;
         }
 
