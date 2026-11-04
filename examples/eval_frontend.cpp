@@ -42,6 +42,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "ORB-SLAM3/include/System.h"
+#include "ORB-SLAM3/include/MapEventLog.h"
 
 namespace fs = std::filesystem;
 
@@ -364,6 +365,11 @@ int main(int argc, char **argv)
         }
 
         const double tframe = vTs[ni];
+        // Publish the input frame index before tracking so any map lifecycle
+        // event emitted during this call is bound to this frame (read-only).
+        {
+            ORB_SLAM3::map_events::SetFrameIndex(ni);
+        }
         auto t1 = std::chrono::steady_clock::now();
 
         if (mode == "rgbd")

@@ -35,6 +35,22 @@ inline bool Enabled()
     return p != nullptr && p[0] != '\0';
 }
 
+// [MEASUREMENT] Input frame index currently being tracked, published by the
+// entry point before each Track* call. Without it an event has only a sequence
+// number, and a merge cannot be bound to a frame boundary: any claim that "this
+// reference-keyframe jump is that merge" would be an inference from jump size.
+// With it, the event names the frame it happened on and the claim is checkable.
+inline int& CurrentFrameIndex()
+{
+    static int f = -1;
+    return f;
+}
+
+inline void SetFrameIndex(int f)
+{
+    CurrentFrameIndex() = f;
+}
+
 inline std::mutex& Mtx()
 {
     static std::mutex* m = new std::mutex();
@@ -51,7 +67,7 @@ inline std::ofstream& Sink()
         if (s->good())
         {
             (*s) << "# map lifecycle events; seq is monotonic per process\n";
-            (*s) << "seq,event,map_id,kf_id,reason\n";
+            (*s) << "seq,event,map_id,kf_id,reason,frame\n";
             s->flush();
         }
     }
@@ -67,10 +83,11 @@ inline void Emit(const char* event, long long mapId, long long kfId,
     std::ofstream& o = Sink();
     if (!o.good()) return;
     o << (seq++) << ',' << event << ',' << mapId << ',' << kfId << ','
-      << (reason ? reason : "") << '\n';
+      << (reason ? reason : "") << ',' << CurrentFrameIndex() << '\n';
     o.flush();
     std::cerr << "[MAP-EVENT] " << event << " map=" << mapId
               << " kf=" << kfId
+              << " frame=" << CurrentFrameIndex()
               << (reason && reason[0] ? " reason=" : "")
               << (reason ? reason : "") << std::endl;
 }

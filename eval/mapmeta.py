@@ -61,6 +61,11 @@ def read_events(run_dir):
         row = {"seq": int(r["seq"]), "event": ev,
                "map_id": int(r["map_id"]), "kf_or_target": int(r["kf_id"]),
                "reason": r.get("reason", "")}
+        # Input frame the event happened on. Files written before the anchor
+        # existed have no such column; they are read as "unanchored" rather than
+        # being given a guessed frame.
+        fr = r.get("frame", "")
+        row["frame"] = int(fr) if str(fr).strip().lstrip("-").isdigit() else None
         if ev == "MAP_MERGE":
             row["other_map_id"] = row["kf_or_target"]   # absorbing map
             row["kf_id"] = None
@@ -121,46 +126,51 @@ def read_maps(run_dir):
     return out
 
 
-def jump_candidates(online, kf_jump_max=25):
-    """(magnitude, index) of backward reference-frame steps inside one map id."""
-    cands = []
-    prev = None
-    for i, r in enumerate(online):
-        if r["pose_valid"] != 1:
-            prev = None
-            continue
-        if prev is not None and prev["map_id"] == r["map_id"]:
-            d = prev["ref_kf"] - r["ref_kf"]
-            if d > kf_jump_max:
-                cands.append((d, i))
-        prev = r
-    cands.sort(reverse=True)
-    return cands
+def merge_split_frames(events):
+    """Frames at which a recorded merge demonstrably happens, and the rest.
 
-
-def align_epochs(online, n_merge=0, gap_max=1.0, kf_jump_max=25):
-    """World-frame eras (see module docstring).
-
-    `n_merge` is the number of MAP_MERGE events recorded for this run; at most
-    that many reference-frame discontinuities are accepted as world-frame
-    changes. A brief invalid stretch does not split an epoch.
+    Returns (exact_frames, unanchored_events). An event is anchored only if the
+    record itself names the input frame it was emitted on; a reference-frame jump
+    is NOT an anchor (re-localisation inside one map produces the same jump), and
+    neither is the sequence number alone.
     """
-    split_at = ({i for _, i in jump_candidates(online, kf_jump_max)[:n_merge]}
-                if n_merge > 0 else set())
+    exact = []
+    unanchored = []
+    for e in events:
+        if e["event"] != "MAP_MERGE":
+            continue
+        if e.get("frame") is None:
+            unanchored.append(e)
+        else:
+            exact.append(e["frame"])
+    return sorted(set(exact)), unanchored
+
+
+def align_epochs(online, split_frames=(), gap_max=None):
+    """World-frame eras.
+
+    A new era starts only on a change of world frame:
+      * a different map id than the previous posed frame,
+      * the state returning to NO_IMAGES_YET (reset),
+      * an input frame named by a map event as the instant of a merge.
+
+    A time gap or a brief loss does NOT start a new era: the system did not get a
+    new world frame, so it must not get a fresh GT alignment. `gap_max` is kept
+    only so callers can pass it explicitly and see that it is ignored; continuity
+    (a different question) is where gaps matter.
+    """
+    split_frames = set(split_frames)
     eps = []
     cur = None
-    prev_ts = None
     prev_state = None
-    for i, r in enumerate(online):
+    for r in online:
         if r["pose_valid"] != 1:
             prev_state = r["state"]
             continue
         start_new = (cur is None
                      or r["map_id"] != cur["map_id"]
                      or prev_state == NO_IMAGES_YET
-                     or (prev_ts is not None
-                         and r["ts"] - prev_ts > gap_max)
-                     or i in split_at)
+                     or r["frame"] in split_frames)
         if start_new:
             if cur is not None:
                 eps.append(cur)
@@ -169,7 +179,6 @@ def align_epochs(online, n_merge=0, gap_max=1.0, kf_jump_max=25):
                    "frame_hi": r["frame"]}
         cur["rows"].append(r)
         cur["frame_hi"] = r["frame"]
-        prev_ts = r["ts"]
         prev_state = r["state"]
     if cur is not None:
         eps.append(cur)

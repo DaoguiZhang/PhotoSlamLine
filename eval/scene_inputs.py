@@ -60,6 +60,59 @@ def _lines(path):
     return n
 
 
+def input_timestamps(dataset, scene, modality):
+    """The exact timestamp list the entry feeds to Track*, from the frozen input.
+
+    This is the denominator source: it does not depend on what a run managed to
+    process, so a crashed run cannot shrink the population it is judged on.
+    """
+    d = seq_dir(dataset, scene)
+    if dataset == "Replica":
+        n = len(glob.glob(os.path.join(d, "results", "frame*.jpg")))
+        return [i / 30.0 for i in range(n)]
+    if modality == "rgbd":
+        path = (os.path.join(ASSOC_ROOT, TUM_ASSOC[scene])
+                if dataset == "TUM" else os.path.join(d, "associated.txt"))
+        ts = []
+        with open(path) as f:
+            for line in f:
+                s = line.split()
+                if not s or s[0].startswith("#"):
+                    continue
+                # association rows: "rgb_ts rgb depth_ts depth"; the entry feeds
+                # the RGB timestamp.
+                ts.append(float(s[0]))
+        return sorted(ts)
+    path = os.path.join(d, "timestamps.txt")
+    if not os.path.exists(path):
+        path = os.path.join(d, "rgb.txt")
+    ts = []
+    with open(path) as f:
+        for line in f:
+            s = line.split()
+            if not s or s[0].startswith("#"):
+                continue
+            ts.append(float(s[0]))
+    return ts
+
+
+def gt_evaluable_count(input_ts, gt_ts, max_dt):
+    """How many INPUT frames have a GT sample within max_dt (binary search)."""
+    import bisect
+    n = 0
+    for t in input_ts:
+        i = bisect.bisect_left(gt_ts, t)
+        best = None
+        for j in (i - 1, i, i + 1):
+            if 0 <= j < len(gt_ts):
+                d = abs(gt_ts[j] - t)
+                if best is None or d < best:
+                    best = d
+        if best is not None and best <= max_dt:
+            n += 1
+    return n
+
+
 def expected_inputs(dataset, scene, modality):
     """Frame count the entry will feed, or None if it cannot be determined."""
     d = seq_dir(dataset, scene)

@@ -148,6 +148,31 @@ def run_eval(est, gt, prefix, mode, max_dt):
         return json.load(f)
 
 
+def decide_metric_status(history, exit_code, n_expected, n_input, bad_epochs,
+                         n_epochs, n_gt, convention_ok):
+    """One place that decides whether a run's numbers may be used.
+
+    Strict ordering: the first failing condition wins and none of them can be
+    overridden by a later branch. Anything other than OK is reported, never
+    averaged into a headline table.
+    """
+    if history == "BROKEN":
+        return "BROKEN_MAP_HISTORY"
+    if history == "AMBIGUOUS":
+        return "UNDETERMINED_MAP_HISTORY"
+    if exit_code not in (0, None):
+        return "CRASHED_PARTIAL"
+    if n_expected and n_input != n_expected:
+        return "INCOMPLETE_INPUT"
+    if n_epochs and bad_epochs == n_epochs:
+        return "EVAL_FAILED"
+    if n_gt == 0:
+        return "NO_GT_EVALUABLE"
+    if not convention_ok:
+        return "CONVENTION_SUSPECT"
+    return "OK"
+
+
 def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
              rot_tol, out_epochs, out_maps):
     gt = gt_for(dataset, scene)
@@ -177,13 +202,15 @@ def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
 
     gts = gt_timestamps(gt)
     n_input = len(states)
-    n_gt = sum(1 for _, ts, _ in states if nearest(gts, ts, max_dt) is not None)
+    # Denominator from the FROZEN input, not from the rows this run wrote.
+    input_ts = scene_inputs.input_timestamps(dataset, scene, modality)
+    n_gt = scene_inputs.gt_evaluable_count(input_ts, gts, max_dt)
     n_valid = sum(1 for r in online if r["pose_valid"] == 1)
 
     # The full input count comes from the frozen input, not from the rows a run
     # managed to write before it died: a crashed run must not shrink the
     # denominator it is judged on.
-    n_expected = scene_inputs.expected_inputs(dataset, scene, modality)
+    n_expected = len(input_ts)
     res.update({"n_input": n_input, "n_input_expected": n_expected,
                 "input_complete": int(n_input == n_expected),
                 "n_gt_evaluable": n_gt, "n_pose_valid": n_valid,
@@ -204,7 +231,9 @@ def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
 
     # ---- ONLINE: per-epoch evaluation ------------------------------------
     # ---- ONLINE: per align-epoch evaluation ------------------------------
-    eps = mapmeta.align_epochs(online, n_merge=n_merge, gap_max=gap_max)
+    # Exact split frames come from the event anchors; there is no heuristic.
+    exact, unanchored = mapmeta.merge_split_frames(events)
+    eps = mapmeta.align_epochs(online, split_frames=exact)
     res["n_epochs"] = len(eps)
     ev_dir = os.path.join(run_dir, "eval")
     os.makedirs(ev_dir, exist_ok=True)
@@ -351,24 +380,9 @@ def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
     # A run whose map history cannot be reconstructed gets numbers but they are
     # labelled UNDETERMINED and excluded from every headline aggregate: an
     # alignment that may span two world frames is not a measurement.
-    if res.get("map_history_verdict") == "AMBIGUOUS":
-        res["metric_status"] = "UNDETERMINED_MAP_HISTORY"
-    elif res.get("exit_code") not in (0, None):
-        res["metric_status"] = "CRASHED_PARTIAL"
-    elif n_gt == 0:
-        res["metric_status"] = "NO_GT_EVALUABLE"
-    else:
-        res["metric_status"] = "OK"
-    # Convention guard: if the axis rule were wrong for this estimator the
-    # rotation error would sit near 180 deg rather than near zero.
-    # Only epochs with enough pairs are informative: a 5-frame epoch can be
-    # aligned with almost any rotation, so its residual says nothing about the
-    # convention. 30 is fixed before looking at any run.
-    worst_rot = max([e.get("rot_rmse_deg") or 0.0 for e in epoch_rows
-                     if e.get("status") == "OK"
-                     and int(e.get("n_pairs") or 0) >= 30] or [0.0])
-    res["rot_rmse_max_epoch_deg"] = worst_rot
-    res["convention_ok"] = int(worst_rot < 90.0)
+    res["metric_status"] = decide_metric_status(
+        res.get("map_history_verdict"), res.get("exit_code"), n_expected,
+        n_input, bad_epochs, len(eps), n_gt, res.get("convention_ok", 1))
     res["n_maps"] = len(maps)
     res["final_kf_ate_rmse_m_map_weighted"] = (
         sum(r.get("ate_rmse_m", 0.0) for r in kf_rows) / len(kf_rows)
