@@ -87,13 +87,17 @@ def extra_tables(out):
                             "online_correct_cov_0.20", "online_correct_cov_0.50",
                             "online_correct_trans_only_0.20",
                             "online_longest_continuous_s",
-                            "ate_rmse_m_frame_weighted_over_epochs",
-                            "rpe1_trans_rms_m_frame_weighted",
-                            "rpe30_trans_rms_m_frame_weighted",
+                            "ate_rmse_pooled_over_epochs",
+                            "ate_rmse_mean_of_epoch_rmse",
+                            "rpe1_trans_rms_pooled", "rpe30_trans_rms_pooled",
                             "pose_valid_frac", "n_epochs") if k in online[0]]
         # per scene x arm: median over repeats
+        # Only runs whose map history is trustworthy enter the headline table;
+        # the others are counted and named instead of being averaged in.
+        usable = [r for r in online if r.get("metric_status") == "OK"]
+        excluded = len(online) - len(usable)
         g = {}
-        for r in online:
+        for r in usable:
             g.setdefault((r["dataset"], r["scene"], r["modality"], r["arm"]),
                          []).append(r)
         per_scene = []
@@ -111,6 +115,8 @@ def extra_tables(out):
             w.writeheader()
             for r in per_scene:
                 w.writerow(r)
+        print("ONLINE headline uses %d runs; %d excluded (map history / crash / "
+              "no GT)" % (len(usable), excluded))
         d = {}
         for r in per_scene:
             d.setdefault((r["dataset"], r["modality"], r["arm"]), []).append(r)
@@ -132,20 +138,58 @@ def extra_tables(out):
     fin = read("FINAL_PER_MAP.csv")
     if fin:
         keys = [k for k in ("n_kf", "n_pairs", "ate_rmse_m", "rot_rmse_deg",
-                            "align_scale", "rpe1_trans_rms_m", "rpe30_trans_rms_m")
+                            "align_scale", "rpe1_trans_rms_m", "rpe30_trans_rms_m",
+                            "rpe1_dt_s", "rpe30_dt_s")
                 if k in fin[0]]
-        g = {}
+        # Step 1: ONE row per run, summarising that run's own maps. Maps inside a
+        # run are not independent repeats, so they are collapsed here (median over
+        # the run's maps, with the map count kept) rather than pooled across
+        # repeats.
+        per_run = {}
         for r in fin:
+            per_run.setdefault((r["dataset"], r["scene"], r["modality"],
+                                r["arm"], r["repeat"]), []).append(r)
+        run_rows = []
+        for k in sorted(per_run):
+            maps = per_run[k]
+            okm = [m for m in maps if m.get("status") == "OK"]
+            rec = {"dataset": k[0], "scene": k[1], "modality": k[2], "arm": k[3],
+                   "repeat": k[4], "scope": "KEYFRAME_CONDITIONAL",
+                   "n_maps": len(maps), "n_maps_evaluable": len(okm),
+                   "n_maps_failed": len(maps) - len(okm)}
+            for m in keys:
+                vals = [fnum(x.get(m)) for x in okm]
+                vals = [v for v in vals if v is not None]
+                rec[m + "_median_over_maps_in_run"] = (
+                    "%.6g" % statistics.median(vals)) if vals else "UNDETERMINED"
+            run_rows.append(rec)
+        with open(os.path.join(out, "FINAL_PER_RUN.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(run_rows[0].keys()))
+            w.writeheader()
+            for r in run_rows:
+                w.writerow(r)
+        # Step 2: median/min/max over the three process repeats of that per-run
+        # value.
+        g = {}
+        for r in run_rows:
             g.setdefault((r["dataset"], r["scene"], r["modality"], r["arm"]),
                          []).append(r)
         rows = []
         for k in sorted(g):
             rec = {"dataset": k[0], "scene": k[1], "modality": k[2], "arm": k[3],
-                   "scope": "KEYFRAME_CONDITIONAL", "n_map_rows": len(g[k])}
+                   "scope": "KEYFRAME_CONDITIONAL", "n_reps": len(g[k])}
             for m in keys:
-                vals = [fnum(r.get(m)) for r in g[k]]
+                col = m + "_median_over_maps_in_run"
+                vals = [fnum(r.get(col)) for r in g[k]]
                 vals = [v for v in vals if v is not None]
-                rec[m + "_median_over_maps"] = ("%.6g" % statistics.median(vals)) if vals else "UNDETERMINED"
+                if vals:
+                    rec[m + "_values"] = "|".join("%.6g" % v for v in vals)
+                    rec[m + "_median"] = "%.6g" % statistics.median(vals)
+                    rec[m + "_min"] = "%.6g" % min(vals)
+                    rec[m + "_max"] = "%.6g" % max(vals)
+                else:
+                    for suffix in ("_values", "_median", "_min", "_max"):
+                        rec[m + suffix] = "UNDETERMINED"
             rows.append(rec)
         with open(os.path.join(out, "FINAL_CONDITIONAL.csv"), "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -157,9 +201,11 @@ def extra_tables(out):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="/workspace/eval_runs/final_runs_v2")
+    ap.add_argument("--out", default=None,
+                    help="table directory; defaults to <root>/metrics")
     a = ap.parse_args()
     root = a.root
-    out = os.path.join(root, "metrics")
+    out = a.out or os.path.join(root, "metrics")
     os.makedirs(out, exist_ok=True)
 
     # 1. per-run metrics, recomputed from the run directories themselves

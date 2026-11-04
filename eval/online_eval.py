@@ -42,7 +42,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import mapmeta  # noqa: E402
+import mapmeta            # noqa: E402
+import map_history_check  # noqa: E402
+import scene_inputs       # noqa: E402
 
 EVAL = "/workspace/code/PSL-perf/scripts/eval_tum_se3_v2.py"
 TOLS = [0.05, 0.10, 0.20, 0.50]
@@ -62,7 +64,13 @@ def gt_for(dataset, scene):
     if dataset == "ETH3D":
         return os.path.join(DS, "eth3d", scene, "groundtruth.txt")
     if dataset == "Replica":
-        p = "/workspace/eval_runs/gt_replica/%s_gt_tum_s.txt" % scene
+        # Pre-declared rule: ORB-SLAM3's reported camera axes match the RAW
+        # rotation stored in traj.txt; the repository's converter applies
+        # diag(1,-1,-1) once more, which leaves a constant 180.0 deg residual
+        # (measured on office0/room0: 179.9 deg constant vs converted, 0.1 deg
+        # median vs raw). Positions are identical in both variants, so only the
+        # rotation-based criteria are affected. See eval/REPLICA_GT.md s.6.
+        p = "/workspace/eval_runs/gt_replica/%s_gt_tum_s_raw.txt" % scene
         if not os.path.exists(p):
             raise SystemExit("derived Replica GT missing: %s" % p)
         return p
@@ -171,17 +179,32 @@ def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
     n_input = len(states)
     n_gt = sum(1 for _, ts, _ in states if nearest(gts, ts, max_dt) is not None)
     n_valid = sum(1 for r in online if r["pose_valid"] == 1)
-    res.update({"n_input": n_input, "n_gt_evaluable": n_gt,
-                "n_pose_valid": n_valid,
+
+    # The full input count comes from the frozen input, not from the rows a run
+    # managed to write before it died: a crashed run must not shrink the
+    # denominator it is judged on.
+    n_expected = scene_inputs.expected_inputs(dataset, scene, modality)
+    res.update({"n_input": n_input, "n_input_expected": n_expected,
+                "input_complete": int(n_input == n_expected),
+                "n_gt_evaluable": n_gt, "n_pose_valid": n_valid,
+                "n_pose_invalid": n_input - n_valid,
+                "n_undetermined_pose": n_input - n_valid,
+                "n_unprocessed": max(0, (n_expected or 0) - n_input),
                 "pose_valid_frac": (n_valid / n_input) if n_input else 0.0})
 
-    # ---- ONLINE: per-epoch evaluation ------------------------------------
-    ev_log = mapmeta.read_events(run_dir) or []
-    n_merge = sum(1 for e in ev_log if e["event"] == "MAP_MERGE")
-    n_reset = sum(1 for e in ev_log if e["event"] == "MAP_RESET")
-    eps = mapmeta.epochs(online, gap_max=gap_max, max_jumps=n_merge)
+    # ---- map history decides whether an alignment can be trusted ----------
+    events = mapmeta.read_events(run_dir) or []
+    summary_ids = set(mapmeta.read_maps(run_dir).keys())
+    verdict = map_history_check.assess(online, events, summary_ids)
+    res["map_history_verdict"] = verdict["verdict"]
+    res["map_history_note"] = "; ".join(verdict["problems"] + verdict["notes"])
+    n_merge = verdict["n_merge"]
     res["n_merge_events"] = n_merge
-    res["n_reset_events"] = n_reset
+    res["n_reset_events"] = sum(1 for e in events if e["event"] == "MAP_RESET")
+
+    # ---- ONLINE: per-epoch evaluation ------------------------------------
+    # ---- ONLINE: per align-epoch evaluation ------------------------------
+    eps = mapmeta.align_epochs(online, n_merge=n_merge, gap_max=gap_max)
     res["n_epochs"] = len(eps)
     ev_dir = os.path.join(run_dir, "eval")
     os.makedirs(ev_dir, exist_ok=True)
@@ -235,15 +258,25 @@ def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
     res["n_epochs_evaluated"] = len(eps) - bad_epochs
     out_epochs.extend(epoch_rows)
 
-    # frame-weighted rollups, explicitly labelled as such
-    def wavg(pairs):
+    # Combined RMSE across epochs must be pooled by sample count:
+    #   rmse = sqrt( sum(n_i * rmse_i^2) / sum(n_i) )
+    # Averaging the per-epoch RMSEs would weight a 5-frame epoch like a
+    # 500-frame one. The unpooled variant is kept but named for what it is.
+    def pooled(pairs):
         tot = sum(n for n, _ in pairs)
         if tot == 0:
             return None
-        return sum(n * v for n, v in pairs) / tot
-    res["ate_rmse_m_frame_weighted_over_epochs"] = wavg(ate_w)
-    res["rpe1_trans_rms_m_frame_weighted"] = wavg(rpe1_w)
-    res["rpe30_trans_rms_m_frame_weighted"] = wavg(rpe30_w)
+        return math.sqrt(sum(n * v * v for n, v in pairs) / tot)
+
+    def mean_of_epoch_rmse(pairs):
+        if not pairs:
+            return None
+        return sum(v for _, v in pairs) / len(pairs)
+
+    res["ate_rmse_pooled_over_epochs"] = pooled(ate_w)
+    res["ate_rmse_mean_of_epoch_rmse"] = mean_of_epoch_rmse(ate_w)
+    res["rpe1_trans_rms_pooled"] = pooled(rpe1_w)
+    res["rpe30_trans_rms_pooled"] = pooled(rpe30_w)
 
     # ---- coverage on the input denominator -------------------------------
     if n_gt == 0:
@@ -266,35 +299,28 @@ def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
     res["online_correct_lower_bound_0.20"] = res.get(
         "online_correct_cov_0.20", 0.0) * n_gt / n_input if n_input else 0.0
 
-    # longest continuous correctly tracked interval, broken at epoch changes
+    # ---- longest continuous run, inside each align epoch ------------------
+    states_by_frame = {}
+    for f, ts, st in states:
+        states_by_frame[f] = st
+        states_by_frame[("ts", f)] = ts
     best_s, best_n = 0.0, 0
-    cur_start, cur_n = None, 0
-    prev_ts, prev_ep = None, None
-    for _, ts, state in states:
-        key = round(ts, 6)
-        v = frame_err.get(key)
-        ep = frame_epoch.get(key)
-        ok = (v is not None and state == OK and v[0] <= LONG_TOL
-              and v[1] <= rot_tol and ep is not None)
-        if prev_ts is not None and ts - prev_ts > gap_max:
-            ok = False
-        if prev_ep is not None and ep is not None and ep != prev_ep:
-            ok = False
-        if ok:
-            if cur_n == 0:
-                cur_start = ts
-            cur_n += 1
-            span = ts - cur_start
-            if span > best_s or (span == best_s and cur_n > best_n):
-                best_s, best_n = span, cur_n
-        else:
-            cur_n = 0
-        prev_ts, prev_ep = ts, ep
+    best_t = 0.0
+    for e in eps:
+        s, n = mapmeta.continuity_intervals(
+            e, states_by_frame, frame_err, LONG_TOL, rot_tol, gap_max)
+        if s > best_s or (s == best_s and n > best_n):
+            best_s, best_n = s, n
+        st_, _ = mapmeta.continuity_intervals(
+            e, states_by_frame, frame_err, LONG_TOL, rot_tol, gap_max,
+            rot_gate=False)
+        best_t = max(best_t, st_)
     res["online_longest_continuous_s"] = best_s
     res["online_longest_continuous_frames"] = best_n
+    res["online_longest_continuous_trans_only_s"] = best_t
 
     # ---- FINAL: conditional per-map keyframe evaluation -------------------
-    maps = mapmeta.read_map_kfs(run_dir)
+    maps = mapmeta.read_maps(run_dir)
     kf_rows = []
     for mid, info in sorted(maps.items()):
         if not info["exists"]:
@@ -321,6 +347,28 @@ def eval_run(run_dir, dataset, scene, modality, arm, rep, max_dt, gap_max,
             })
         kf_rows.append(row)
     out_maps.extend(kf_rows)
+    # ---- metric status ---------------------------------------------------
+    # A run whose map history cannot be reconstructed gets numbers but they are
+    # labelled UNDETERMINED and excluded from every headline aggregate: an
+    # alignment that may span two world frames is not a measurement.
+    if res.get("map_history_verdict") == "AMBIGUOUS":
+        res["metric_status"] = "UNDETERMINED_MAP_HISTORY"
+    elif res.get("exit_code") not in (0, None):
+        res["metric_status"] = "CRASHED_PARTIAL"
+    elif n_gt == 0:
+        res["metric_status"] = "NO_GT_EVALUABLE"
+    else:
+        res["metric_status"] = "OK"
+    # Convention guard: if the axis rule were wrong for this estimator the
+    # rotation error would sit near 180 deg rather than near zero.
+    # Only epochs with enough pairs are informative: a 5-frame epoch can be
+    # aligned with almost any rotation, so its residual says nothing about the
+    # convention. 30 is fixed before looking at any run.
+    worst_rot = max([e.get("rot_rmse_deg") or 0.0 for e in epoch_rows
+                     if e.get("status") == "OK"
+                     and int(e.get("n_pairs") or 0) >= 30] or [0.0])
+    res["rot_rmse_max_epoch_deg"] = worst_rot
+    res["convention_ok"] = int(worst_rot < 90.0)
     res["n_maps"] = len(maps)
     res["final_kf_ate_rmse_m_map_weighted"] = (
         sum(r.get("ate_rmse_m", 0.0) for r in kf_rows) / len(kf_rows)

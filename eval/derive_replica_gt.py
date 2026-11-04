@@ -42,6 +42,21 @@ transpose, or a misaligned index that would still be "a valid rotation").
 
 Usage:
   python3 eval/derive_replica_gt.py --replica-root DIR --out DIR [--fps 30]
+
+Camera-axis convention (verified, see eval/REPLICA_GT.md section 6)
+------------------------------------------------------------------
+Two variants are written, because they differ by exactly one matrix:
+
+  <scene>_gt_tum_s.txt       rotation as the repository's converter writes it
+                             (R_c2w @ diag(1,-1,-1))
+  <scene>_gt_tum_s_raw.txt   rotation as stored in traj.txt (no flip)
+
+Positions are identical in both. Which one is correct is a property of the
+estimator being scored, not a preference: a run evaluated against the wrong one
+shows a CONSTANT 180 deg rotation residual that equals the flip itself, with
+0.1 deg median against the other. eval/online_eval.py picks the variant from a
+recorded, pre-declared rule and reports the measured constant residual for every
+run, so the choice cannot drift unnoticed.
 """
 import argparse
 import hashlib
@@ -224,6 +239,20 @@ def check_scene(scene, root, out_dir, fps):
             f.write("%.9f %.9f %.9f %.9f %.12f %.12f %.12f %.12f\n"
                     % (ts_i[i], pos[i, 0], pos[i, 1], pos[i, 2],
                        quats[i, 0], quats[i, 1], quats[i, 2], quats[i, 3]))
+    # raw variant: same positions, rotation without the axis flip
+    p_raw = os.path.join(out_dir, "%s_gt_tum_s_raw.txt" % scene)
+    quats_raw = np.array([quat_from_R(P[:3, :3]) for P in poses])
+    with open(p_raw, "w") as f:
+        for i in range(n):
+            f.write("%.9f %.9f %.9f %.9f %.12f %.12f %.12f %.12f\n"
+                    % (ts_s[i], pos[i, 0], pos[i, 1], pos[i, 2],
+                       quats_raw[i, 0], quats_raw[i, 1], quats_raw[i, 2],
+                       quats_raw[i, 3]))
+    rec["derived_gt_s_raw"] = p_raw
+    rec["derived_gt_s_raw_sha256"] = sha256(p_raw)
+    worst_flip = max(rot_angle_deg(R_from_quat(quats_raw[i]),
+                                   R_from_quat(quats[i])) for i in range(n))
+    rec["rot_between_variants_deg"] = float(worst_flip)
     rec["derived_gt_s"] = p_s
     rec["derived_gt_s_sha256"] = sha256(p_s)
     rec["derived_gt_index"] = p_i

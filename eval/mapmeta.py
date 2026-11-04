@@ -1,24 +1,39 @@
 #!/usr/bin/env python3
-"""Shared reader for the v_final_2 pose products.
+"""Readers and interval definitions for the v_final_2 pose products.
 
-Two conventions are handled explicitly rather than inferred:
+Two different intervals, deliberately NOT the same thing
+--------------------------------------------------------
+**align_epoch** - a maximal run of frames that share ONE world coordinate
+  frame. Only a change of world frame starts a new one: a different map, a reset
+  (NO_IMAGES_YET after the start), an id that reappears (id reuse), or a merge
+  that can be located in the frame stream. A brief tracking loss does NOT start a
+  new align epoch: the system did not get a new world frame, so it must not get a
+  fresh GT alignment either.
 
-1. `map_events.csv` is `seq,event,map_id,kf_id,reason`. For **MAP_MERGE** the
-   third column is the DISCARDED map and the fourth (`kf_id`) holds the
-   ABSORBING map id -- a merge has two maps and the schema has one id field. The
-   parser therefore exposes `map_id`, `other_map_id` (the absorbing map for
-   MAP_MERGE), and `kf_id` (only meaningful for MAP_CREATE, where it is the
-   initial keyframe id). Anything reading the raw file positionally would read a
-   map id as a keyframe id.
+**continuity_interval** - a maximal run of consecutive input frames inside one
+  align epoch that are accepted AND correct AND close in time. A brief loss
+  breaks continuity but changes no alignment.
 
-2. Map ids are **reused**. `LoopClosing` finishes a merge with
-   `pMergeMap->ChangeId(pCurrentMap->GetId())`, so the surviving map takes the id
-   of the map that was absorbed. An `epoch` is therefore not "a run of equal
-   map_id": it is a maximal run of consecutive frames for which the (map_id,
-   reference keyframe) pair is consistent, additionally split when a map id
-   reappears after being absent, and when the state drops back to
-   NO_IMAGES_YET after the start. Epochs are the unit of alignment; nothing is
-   ever aligned, RPE'd or searched for continuity across two epochs.
+Conventions handled explicitly
+------------------------------
+* `map_events.csv` is `seq,event,map_id,kf_id,reason`. For **MAP_MERGE** the
+  third column is the DISCARDED map and the fourth holds the ABSORBING map id.
+  Exposed as `other_map_id`; nothing reads that column positionally.
+* Map ids are reused: `LoopClosing` ends a merge with
+  `pMergeMap->ChangeId(pCurrentMap->GetId())`, so the survivor takes the id of
+  the map it absorbed. A constant `map_id` therefore does NOT prove a constant
+  world frame.
+
+What a backward reference-frame jump does and does not prove
+------------------------------------------------------------
+A large backward step in `ref_kf_id` inside one map id is *evidence* that the
+frame started using other keyframes - which is what a merge looks like from the
+frame stream - but it is not proof of a coordinate change: plain re-localisation
+inside one map produces the same signature. So the splitter accepts at most one
+such jump per merge that the event log actually recorded, and it never uses a
+jump to *create* evidence. If the log records more merges than the stream can
+locate, the run is reported AMBIGUOUS by `eval/map_history_check.py` and its
+ONLINE numbers are labelled UNDETERMINED instead of being trusted.
 """
 import csv
 import os
@@ -46,7 +61,6 @@ def read_events(run_dir):
         row = {"seq": int(r["seq"]), "event": ev,
                "map_id": int(r["map_id"]), "kf_or_target": int(r["kf_id"]),
                "reason": r.get("reason", "")}
-        # explicit reinterpretation, see module docstring
         if ev == "MAP_MERGE":
             row["other_map_id"] = row["kf_or_target"]   # absorbing map
             row["kf_id"] = None
@@ -59,7 +73,6 @@ def read_events(run_dir):
 
 
 def read_online(run_dir):
-    """Per-input-frame online poses -> list of dicts, ordered by frame."""
     p = os.path.join(run_dir, "online_poses.csv")
     if not os.path.exists(p):
         return None
@@ -82,8 +95,19 @@ def read_online(run_dir):
     return rows
 
 
-def read_map_kfs(run_dir):
-    """map_id -> trajectory file and row count, from maps_summary.csv."""
+def read_final_state(run_dir):
+    p = os.path.join(run_dir, "final_state.csv")
+    if not os.path.exists(p):
+        return None
+    rows = []
+    for d in _csv_rows(p):
+        rows.append((int(d["frame"]), float(d["timestamp"]), int(d["state"])))
+    rows.sort(key=lambda x: x[0])
+    return rows
+
+
+def read_maps(run_dir):
+    """map_id -> {file, n_kf, exists} from maps_summary.csv."""
     out = {}
     summ = os.path.join(run_dir, "maps_summary.csv")
     if not os.path.exists(summ):
@@ -91,18 +115,14 @@ def read_map_kfs(run_dir):
     for r in _csv_rows(summ):
         mid = int(r["map_id"])
         tf = r.get("traj_file", "")
-        n = int(r.get("n_exported_kf", "0") or 0)
-        out[mid] = {"file": tf, "n_kf": n,
+        out[mid] = {"file": tf,
+                    "n_kf": int(r.get("n_exported_kf", "0") or 0),
                     "exists": bool(tf) and os.path.exists(tf)}
     return out
 
 
 def jump_candidates(online, kf_jump_max=25):
-    """Frames where the reference keyframe id steps backwards beyond kf_jump_max.
-
-    Returned as (magnitude, index) pairs sorted by magnitude, so a caller can
-    take the largest ones as candidate world-frame changes.
-    """
+    """(magnitude, index) of backward reference-frame steps inside one map id."""
     cands = []
     prev = None
     for i, r in enumerate(online):
@@ -118,49 +138,21 @@ def jump_candidates(online, kf_jump_max=25):
     return cands
 
 
-def epochs(online, gap_max=0.5, kf_jump_max=25, max_jumps=0):
-    """Split the per-frame stream into alignable epochs.
+def align_epochs(online, n_merge=0, gap_max=1.0, kf_jump_max=25):
+    """World-frame eras (see module docstring).
 
-    A new epoch starts when any of these holds:
-      * the frame has no valid pose (invalid rows are excluded from every epoch
-        and are never smoothed into the next one),
-      * map_id differs from the previous posed frame,
-      * the state returns to NO_IMAGES_YET after the start (map reset),
-      * the timestamp gap exceeds gap_max,
-      * one of the `max_jumps` largest BACKWARD reference-keyframe jumps (each
-        beyond kf_jump_max) occurs.
-
-The last rule exists because `LoopClosing` ends a merge with
-    `pMergeMap->ChangeId(pCurrentMap->GetId())`: the survivor inherits the id of
-the map it absorbed, so `map_id` can be constant across a world-frame change and
-the merge would otherwise hide inside one epoch. Small backward moves are normal
-inside one map (re-localisation against an older keyframe), and splitting on all
-of them would fragment the run into dozens of epochs, each aligned on its own --
-which inflates accuracy. The caller therefore passes the number of merges the
-event log actually recorded, and only that many split points are taken (largest
-first). With no merge, no jump split happens at all.
+    `n_merge` is the number of MAP_MERGE events recorded for this run; at most
+    that many reference-frame discontinuities are accepted as world-frame
+    changes. A brief invalid stretch does not split an epoch.
     """
-    cands = jump_candidates(online, kf_jump_max)
-    split_at = ({i for _, i in cands[:max_jumps]} if max_jumps > 0 else set())
+    split_at = ({i for _, i in jump_candidates(online, kf_jump_max)[:n_merge]}
+                if n_merge > 0 else set())
     eps = []
     cur = None
-    seen = set()
     prev_ts = None
     prev_state = None
-
-    def close():
-        nonlocal cur
-        if cur is not None:
-            eps.append(cur)
-            seen.add(cur["map_id"])
-            cur = None
-
     for i, r in enumerate(online):
         if r["pose_valid"] != 1:
-            # an invalid frame closes the epoch: a pose is never interpolated
-            # across a frame that had none
-            close()
-            prev_ts = r["ts"]
             prev_state = r["state"]
             continue
         start_new = (cur is None
@@ -170,10 +162,49 @@ first). With no merge, no jump split happens at all.
                          and r["ts"] - prev_ts > gap_max)
                      or i in split_at)
         if start_new:
-            close()
-            cur = {"map_id": r["map_id"], "rows": []}
+            if cur is not None:
+                eps.append(cur)
+            cur = {"map_id": r["map_id"], "rows": [],
+                   "start_frame": r["frame"], "frame_lo": r["frame"],
+                   "frame_hi": r["frame"]}
         cur["rows"].append(r)
+        cur["frame_hi"] = r["frame"]
         prev_ts = r["ts"]
         prev_state = r["state"]
-    close()
+    if cur is not None:
+        eps.append(cur)
     return eps
+
+
+def continuity_intervals(epoch, states_by_frame, err_by_ts, tol, rot_tol,
+                         gap_max, rot_gate=True):
+    """Longest correct run inside ONE align epoch. Never crosses an epoch.
+
+    The walk is over the INPUT FRAME SPAN of the epoch (frame_lo..frame_hi), not
+    over the posed rows only: a frame that produced no valid pose is a break,
+    even when the two posed frames around it are close in time. Otherwise a 10
+    frame loss at 30 fps (0.33 s) would hide under a 0.5 s gap rule and the run
+    would be reported as continuous.
+    """
+    best_s, best_n = 0.0, 0
+    cur_start, cur_n = None, 0
+    prev_ts = None
+    for f in range(epoch["frame_lo"], epoch["frame_hi"] + 1):
+        state = states_by_frame.get(f)
+        ts = states_by_frame.get(("ts", f))
+        e = err_by_ts.get(round(ts, 6)) if ts is not None else None
+        ok = (e is not None and state == OK and e[0] <= tol
+              and (e[1] <= rot_tol if rot_gate else True))
+        if prev_ts is not None and ts is not None and ts - prev_ts > gap_max:
+            ok = False
+        if ok:
+            if cur_n == 0:
+                cur_start = ts
+            cur_n += 1
+            span = ts - cur_start
+            if span > best_s or (span == best_s and cur_n > best_n):
+                best_s, best_n = span, cur_n
+        else:
+            cur_n = 0
+        prev_ts = ts if ts is not None else prev_ts
+    return best_s, best_n
