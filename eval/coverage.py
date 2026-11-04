@@ -304,13 +304,22 @@ def evaluate_run(run_dir, gt, mode, max_dt, gap_max, rot_tol, verbose=False):
 
     # ---- automatic consistency checks (fail loudly, never silently) ------
     problems = []
+    # Counts must be compared on the SAME denominator. correct_cov uses the
+    # GT-evaluable input count while accepted_cov uses all inputs, so the ratios
+    # are not comparable; the corresponding count is accepted AND gt-evaluable.
+    n_acc_gt = sum(1 for _, ts, st_ in states
+                   if st_ == OK and nearest(gt_ts_all, ts, max_dt) is not None)
+    res["n_accepted_gt_evaluable"] = n_acc_gt
     for tol in TOLS:
-        j = res.get("correct_cov_%.2f" % tol)
-        t = res.get("correct_trans_only_%.2f" % tol)
-        if j is not None and t is not None and j > t + 1e-12:
+        jc = res.get("correct_cov_%.2f" % tol)
+        tc = res.get("correct_trans_only_%.2f" % tol)
+        if jc is not None and tc is not None and jc > tc + 1e-12:
             problems.append("joint>translation at tol %.2f" % tol)
-        if j is not None and j > res["accepted_cov"] + 1e-12:
-            problems.append("correct>accepted at tol %.2f" % tol)
+        if jc is not None:
+            jcount = round(jc * n_eval)
+            if jcount > n_acc_gt:
+                problems.append("correct count %d > accepted&gt %d at tol %.2f"
+                                % (jcount, n_acc_gt, tol))
     if res.get("longest_continuous_frames", 0) == 0 and best_s > 1e-9:
         problems.append("joint longest>0 while joint frames==0")
     if res.get("longest_continuous_trans_only_s", 0) > 0 and best_t == 0:
