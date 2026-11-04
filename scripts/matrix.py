@@ -29,6 +29,7 @@ import time
 from collections import Counter
 
 TREE = "/workspace/deliv/cabinet-eval"
+LAST_ROWS = []
 RUNS = "/workspace/eval_runs/final_runs"
 MANIFEST = os.path.join(RUNS, "MASTER_MANIFEST.csv")
 LOCK = os.path.join(RUNS, ".matrix.lock")
@@ -133,7 +134,8 @@ def rows_for(dataset, scene, modality, cfg, inp, assoc, blocked=""):
     return out
 
 
-def build():
+def build(write=True):
+    global LAST_ROWS
     rows = []
     for scene, dname, mcfg, rcfg, assoc in TUM:
         inp = os.path.join(DS, "tum", dname)
@@ -227,22 +229,86 @@ def build():
             "build_entry_sha256", "build_lib_sha256", "build_g2o_sha256",
             "evaluator_sha256", "gt_path"]
     os.makedirs(os.path.dirname(MANIFEST), exist_ok=True)
-    with open(MANIFEST, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=keys)
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
-    print("manifest=%s rows=%d entry=%s lib=%s"
-          % (MANIFEST, len(rows), bh[:16], lh[:16]))
+    if write:
+        # The manifest is written ONCE, before the first formal run, and is the
+        # frozen list of cells. Its status column is what it was at that moment;
+        # live state belongs in the attempt ledger, so that the manifest hash
+        # quoted in eval/FREEZE.md stays meaningful.
+        if os.path.exists(MANIFEST):
+            raise SystemExit("%s already exists -- refusing to overwrite the "
+                             "frozen manifest. Use `status`/`ledger` to read "
+                             "current state." % MANIFEST)
+        with open(MANIFEST, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=keys)
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+        print("manifest=%s rows=%d entry=%s lib=%s"
+              % (MANIFEST, len(rows), bh[:16], lh[:16]))
     for k, v in sorted(Counter((r["dataset"], r["status"]) for r in rows).items()):
         print("  %-9s %-10s %d" % (k[0], k[1], v))
     print("  TOTAL", dict(Counter(r["status"] for r in rows)))
+    LAST_ROWS = rows
+    return 0
+
+
+def rescan():
+    """Recompute every row's state from the artefacts on disk."""
+    return build(write=False)
+
+def ledger():
+    """Per-attempt ledger, built from the run directories themselves.
+
+    One row per attempt (the first attempt and the optional `_r1` retry), with
+    the exit code, the wall time and the note that the run wrote, plus the
+    build/evaluator identity. Nothing is inferred from a manifest written
+    earlier, so a crashed or interrupted cell cannot look completed.
+    """
+    rescan()
+    with open(MANIFEST) as f:
+        rows = {r["id"]: r for r in csv.DictReader(f)}
+    out = os.path.join(RUNS, "ATTEMPT_LEDGER.csv")
+    fields = ["id", "attempt_dir", "retry", "exit_code", "wall_s", "start",
+              "end", "note", "artefact_count", "build_entry_sha256",
+              "build_lib_sha256", "evaluator_sha256"]
+    n = 0
+    with open(out, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for rid in sorted(rows):
+            base = rows[rid]["out_dir"]
+            for suffix, retry in (("", 0), ("_r1", 1)):
+                d = base + suffix
+                if not os.path.isdir(d):
+                    continue
+                rec = {"id": rid, "attempt_dir": d, "retry": retry,
+                       "exit_code": "", "wall_s": "", "start": "",
+                       "end": "", "note": "MISSING_STATUS",
+                       "artefact_count": len(os.listdir(d)),
+                       "build_entry_sha256": rows[rid]["build_entry_sha256"],
+                       "build_lib_sha256": rows[rid]["build_lib_sha256"],
+                       "evaluator_sha256": rows[rid]["evaluator_sha256"]}
+                st = os.path.join(d, "status.txt")
+                if os.path.exists(st):
+                    for line in open(st):
+                        k, _, v = line.strip().partition("=")
+                        if k in ("exit_code", "wall_s", "end", "note"):
+                            rec[k] = v
+                mt = os.path.join(d, "meta.txt")
+                if os.path.exists(mt):
+                    for line in open(mt):
+                        k, _, v = line.strip().partition("=")
+                        if k == "start":
+                            rec["start"] = v
+                w.writerow(rec)
+                n += 1
+    print("ledger=%s attempts=%d" % (out, n))
     return 0
 
 
 def status():
-    with open(MANIFEST) as f:
-        rows = list(csv.DictReader(f))
+    rescan()
+    rows = LAST_ROWS
     print("rows=%d" % len(rows))
     for k, v in sorted(Counter(r["status"] for r in rows).items()):
         print("  %-10s %d" % (k, v))
@@ -355,4 +421,5 @@ def run():
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
-    sys.exit({"build": build, "run": run, "status": status}[cmd]())
+    sys.exit({"build": build, "run": run, "status": status,
+              "ledger": ledger}[cmd]())
