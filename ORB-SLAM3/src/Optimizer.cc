@@ -17719,6 +17719,28 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
         }
     }
 
+    // ---- [MEASUREMENT] real merge-BA line edge counts ---------------------
+    // The pre-gate row above reports the GATE only: "lineEdges=on" is a state
+    // flag, not evidence that an edge exists in this graph. The counts below
+    // come from vpEdgesLineMono, which is appended to only AFTER
+    // optimizer.addEdge() returned (and only for endpoints whose vertices were
+    // accepted), so they are edges actually present; lnActive is what g2o kept
+    // active (level 0) at the final iteration, lnToErase is what the 9.0 inlier
+    // test rejected. No numeric path is touched: this is read-only reporting
+    // behind the same IsLineEdgeDiag() switch as the rest of the diagnostics.
+    if (IsLineEdgeDiag())
+    {
+        int nLnActive = 0;
+        for (size_t i = 0; i < vpEdgesLineMono.size(); ++i)
+            if (vpEdgesLineMono[i]->level() == 0) ++nLnActive;
+        std::cout << "[LineEdgeDiag] site=LBA_MERGE_DONE lnEdgesAdded="
+                  << vpEdgesLineMono.size()
+                  << " lnActive=" << nLnActive
+                  << " lnToErase=" << vLineToErase.size()
+                  << " nML=" << vpMLs.size()
+                  << " enabled=" << (lineEdgesEnabledHere ? 1 : 0) << std::endl;
+    }
+
     unique_lock<mutex> lock(pMainKF->GetMap()->mMutexMapUpdate);
 
     if(!vToErase.empty())
