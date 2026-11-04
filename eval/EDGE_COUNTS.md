@@ -32,8 +32,8 @@ Build identities of record (verified in this session):
 
 | artefact | sha256 |
 |---|---|
-| Release `lib_rel/libORB_SLAM3.so` | `%s` |
-| ASan `lib_asan/libORB_SLAM3.so` | `%s` |
+| Release `lib_rel/libORB_SLAM3.so` | `9a31f4ce87d771f3297cdf56ec43975a17389930034c31660a48c311809a278e` |
+| ASan `lib_asan/libORB_SLAM3.so` | `8d38eb66aa17bb0848e81f78bec04b0325dad09f35928f4b841f97be50bf15cf` |
 | `entry_rel/eval_frontend` | `60d513316619e5d68de5bca276617b4ef455d575de330faef1b55570dad95977` |
 | `entry_asan/eval_frontend` | `a69e6116e74cf8941b4d6ed1966956b7ef42a9874b02756cd3397d6f1e4a5014` |
 
