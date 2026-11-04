@@ -185,6 +185,31 @@ int main(int argc, char **argv)
            << "\n";
     banner.flush();
 
+    // ---- [MEASUREMENT] complete pose products -----------------------------
+    // 1. Map lifecycle events. The library writes them to a CSV when
+    //    PHOTO_SLAM_MAP_EVENTS_CSV is set; point it at this run's directory
+    //    unless the caller already chose a path (setenv(..., 0) never
+    //    overrides). Read-only observer: no estimation path reads it.
+    // 2. Per-input-frame online pose goes to online_poses.csv, written in the
+    //    tracking loop below; final_state.csv keeps its original 4 columns so
+    //    existing consumers are unaffected.
+    // 3. Every map's final keyframe trajectory goes to traj_map<id>.txt via
+    //    System::SaveAllMapsTrajectoryTUM, because SaveTrajectoryTUM exports
+    //    only the single map chosen by SelectExportMap.
+    const std::string mapEventsCsv = (outDir / "map_events.csv").string();
+    setenv("PHOTO_SLAM_MAP_EVENTS_CSV", mapEventsCsv.c_str(), 0);
+    {
+        std::ofstream b2(outDir / "eval_entry.txt", std::ios::app);
+        b2 << "map_events_csv=" << mapEventsCsv << "\n";
+        b2 << "map_events_gate="
+           << (EnvOr("PHOTO_SLAM_MAP_EVENTS_CSV", "") == mapEventsCsv ?
+                   "set_by_entry" : "set_by_caller")
+           << "\n";
+        b2 << "online_poses_csv=" << (outDir / "online_poses.csv").string()
+           << "\n";
+        b2 << "all_maps_export_prefix=" << (outDir / "").string() << "\n";
+    }
+
     std::vector<std::string> vRGB, vD;
     std::vector<double> vTs;
     if (replica)
@@ -285,6 +310,14 @@ int main(int argc, char **argv)
     std::ofstream fsCsv(outDir / "final_state.csv");
     fsCsv << "frame,timestamp,state,state_name\n";
 
+    // Per-input-frame online pose. pose_valid=1 means the state was OK and the
+    // transform is finite; only those rows are poses of the frame at the time
+    // it was tracked. map_id/ref_kf_id identify which map produced the row, so
+    // rows of different world frames are never stitched together silently.
+    std::ofstream fsPose(outDir / "online_poses.csv");
+    fsPose << "frame,timestamp,state,state_name,pose_valid,map_id,ref_kf_id,"
+              "frame_id,tx,ty,tz,qx,qy,qz,qw\n";
+
     std::vector<float> vTimesTrack(nImages, 0.f);
     std::vector<double> vState(nImages, -2.0);
     // Entry-level stage timing (wall clock, non-overlapping buckets).
@@ -369,6 +402,39 @@ int main(int argc, char **argv)
               << StateName(st) << "\n";
         fsCsv.flush();
 
+        // Online pose of THIS frame, read back from the tracker right after the
+        // Track* call returned (single-threaded here). Nothing is corrected or
+        // re-derived: this is the pose the system had for the frame at the time.
+        {
+            long mapId = -1, refKfId = -1;
+            unsigned long frameId = 0;
+            Sophus::SE3f Twc;
+            bool poseValid = false;
+            ORB_SLAM3::Tracking* pTr = pSLAM->getTracker();
+            if (pTr)
+            {
+                const ORB_SLAM3::Frame& fr = pTr->mCurrentFrame;
+                frameId = fr.mnId;
+                Twc = fr.GetPose().inverse();
+                poseValid = (st == 2) && Twc.translation().allFinite();
+                if (fr.mpReferenceKF)
+                {
+                    refKfId = (long)fr.mpReferenceKF->mnId;
+                    if (fr.mpReferenceKF->GetMap())
+                        mapId = (long)fr.mpReferenceKF->GetMap()->GetId();
+                }
+            }
+            const Eigen::Vector3f t = Twc.translation();
+            const Eigen::Quaternionf q = Twc.unit_quaternion();
+            fsPose << ni << "," << std::fixed << tframe << "," << st << ","
+                   << StateName(st) << "," << (poseValid ? 1 : 0) << ","
+                   << mapId << "," << refKfId << "," << frameId << ","
+                   << t(0) << "," << t(1) << "," << t(2) << ","
+                   << q.x() << "," << q.y() << "," << q.z() << ","
+                   << q.w() << "\n";
+            fsPose.flush();
+        }
+
         double T = 0;
         if (ni < nImages - 1) T = vTs[ni + 1] - tframe;
         else if (ni > 0) T = tframe - vTs[ni - 1];
@@ -398,6 +464,8 @@ int main(int argc, char **argv)
 
     pSLAM->SaveTrajectoryTUM((outDir / "CameraTrajectory_TUM.txt").string());
     pSLAM->SaveKeyFrameTrajectoryTUM((outDir / "KeyFrameTrajectory_TUM.txt").string());
+    // Every map, not only the one SelectExportMap picked above.
+    pSLAM->SaveAllMapsTrajectoryTUM((outDir / "").string());
 
     int nOk = 0, nLost = 0, nOther = 0;
     for (double s : vState)

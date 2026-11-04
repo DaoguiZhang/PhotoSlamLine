@@ -30,7 +30,7 @@ from collections import Counter
 
 TREE = "/workspace/deliv/cabinet-eval"
 LAST_ROWS = []
-RUNS = "/workspace/eval_runs/final_runs"
+RUNS = "/workspace/eval_runs/final_runs_v2"
 MANIFEST = os.path.join(RUNS, "MASTER_MANIFEST.csv")
 LOCK = os.path.join(RUNS, ".matrix.lock")
 PROGRESS = os.path.join(RUNS, "matrix_progress.log")

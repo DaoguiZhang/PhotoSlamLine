@@ -172,6 +172,14 @@ public:
     // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
     void SaveKeyFrameTrajectoryTUM(const string &filename);
 
+    // [MEASUREMENT] Write the FINAL (reconstructed, post-BA) keyframe trajectory
+    // of EVERY map in the Atlas, one file per map, plus a summary row per map.
+    // SaveTrajectoryTUM writes only the single map chosen by SelectExportMap, so
+    // without this the poses of every other map are lost at exit. Read-only: it
+    // reads Map/KeyFrame state and writes files, and nothing in the estimation
+    // path consumes its output. `prefix` is a path prefix, e.g. "/out/traj_".
+    void SaveAllMapsTrajectoryTUM(const string &prefix);
+
     void SaveTrajectoryEuRoC(const string &filename);
     void SaveKeyFrameTrajectoryEuRoC(const string &filename);
 

@@ -1276,6 +1276,59 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
          << " refKFs=" << vpKFs.size() << endl;
 }
 
+void System::SaveAllMapsTrajectoryTUM(const string &prefix)
+{
+    // [MEASUREMENT] Every map, not just the exported one. The single-map export
+    // above drops the keyframes of every other map in the Atlas, which for a
+    // run with resets is most of the trajectory. This method only reads
+    // Map/KeyFrame state and writes one file per map plus a summary table.
+    cout << endl << "[System] SaveAllMapsTrajectoryTUM: prefix=" << prefix
+         << endl;
+
+    vector<Map*> vpMaps = mpAtlas->GetAllMaps();
+    std::sort(vpMaps.begin(), vpMaps.end(),
+              [](Map* a, Map* b) { return a->GetId() < b->GetId(); });
+
+    ofstream fIdx((prefix + "maps_summary.csv").c_str());
+    fIdx << "map_id,is_in_use,is_bad,n_keyframes,n_mappoints,n_maplines,"
+            "n_exported_kf,traj_file\n";
+
+    for (Map* pM : vpMaps)
+    {
+        if (!pM) continue;
+        vector<KeyFrame*> vpKFs = pM->GetAllKeyFrames();
+        std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
+
+        const string fn = prefix + "traj_map" +
+                          std::to_string(pM->GetId()) + ".txt";
+        ofstream f(fn.c_str());
+        f << fixed;
+        int nExp = 0;
+        for (KeyFrame* pKF : vpKFs)
+        {
+            if (!pKF || pKF->isBad()) continue;
+            Sophus::SE3f Twc = pKF->GetPoseInverse();
+            Eigen::Quaternionf q = Twc.unit_quaternion();
+            Eigen::Vector3f t = Twc.translation();
+            f << setprecision(6) << pKF->mTimeStamp << setprecision(7) << " "
+              << t(0) << " " << t(1) << " " << t(2) << " "
+              << q.x() << " " << q.y() << " " << q.z() << " " << q.w()
+              << endl;
+            ++nExp;
+        }
+        f.close();
+        fIdx << pM->GetId() << "," << (pM->IsInUse() ? 1 : 0) << ","
+             << (pM->IsBad() ? 1 : 0) << "," << pM->KeyFramesInMap() << ","
+             << pM->MapPointsInMap() << "," << pM->MapLinesInMap() << ","
+             << nExp << "," << fn << "\n";
+        cout << "[System] all-maps export: map=" << pM->GetId()
+             << " kfs=" << nExp << " in_use=" << (pM->IsInUse() ? 1 : 0)
+             << " bad=" << (pM->IsBad() ? 1 : 0) << endl;
+    }
+    fIdx.close();
+    cout << "[System] SaveAllMapsTrajectoryTUM: maps=" << vpMaps.size() << endl;
+}
+
 void System::SaveTrajectoryEuRoC(const string &filename)
 {
 

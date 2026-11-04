@@ -26,6 +26,7 @@
 #include "G2oTypes.h"
 #include "LineMode.h"
 #include "AuditTrail.h"
+#include "MapEventLog.h"
 
 #include<mutex>
 #include<thread>
@@ -2993,6 +2994,15 @@ void LoopClosing::MergeLocal()
             pCurrentMap->EraseMapPoint(pMPi);
         }
 
+        // [MEASUREMENT] MAP_MERGE: the map that is about to be discarded here is
+        // absorbed into pMergeMap. Gated by PHOTO_SLAM_MAP_EVENTS_CSV like every
+        // other map event; the kf_id column carries the ABSORBING map id for
+        // this event, because a merge has two maps and one id field. No
+        // estimation path reads this.
+        map_events::Emit("MAP_MERGE",
+                         pCurrentMap ? (long long)pCurrentMap->GetId() : -1LL,
+                         pMergeMap ? (long long)pMergeMap->GetId() : -1LL,
+                         "LoopClosing::MergeLocal");
         mpAtlas->ChangeMap(pMergeMap);
         mpAtlas->SetMapBad(pCurrentMap);
         pMergeMap->IncreaseChangeIndex();
@@ -3577,6 +3587,10 @@ void LoopClosing::MergeLocalWithLine()
             pCurrentMap->EraseMapLine(pMLi);
         }
 
+        map_events::Emit("MAP_MERGE",
+                         pCurrentMap ? (long long)pCurrentMap->GetId() : -1LL,
+                         pMergeMap ? (long long)pMergeMap->GetId() : -1LL,
+                         "LoopClosing::MergeLocalWithLine");
         mpAtlas->ChangeMap(pMergeMap);
         mpAtlas->SetMapBad(pCurrentMap);
         pMergeMap->IncreaseChangeIndex();
