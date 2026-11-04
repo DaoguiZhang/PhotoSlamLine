@@ -368,7 +368,10 @@ def main():
     rows = []
     for dataset in sorted(os.listdir(a.root)):
         droot = os.path.join(a.root, dataset)
-        if not os.path.isdir(droot) or dataset == "UPSTREAM":
+        # Only real datasets are evaluated; sibling directories that the
+        # pipeline creates inside the run root (metrics/, UPSTREAM/, logs) are
+        # not datasets and must not be parsed as one.
+        if not os.path.isdir(droot) or dataset not in ("TUM", "ETH3D", "Replica"):
             continue
         for scene in sorted(os.listdir(droot)):
             sdir = os.path.join(droot, scene)

@@ -57,9 +57,106 @@ def sh(cmd):
     return subprocess.call(cmd)
 
 
+
+
+def extra_tables(out):
+    """ONLINE / FINAL tables, built from the files online_eval.py wrote.
+
+    ONLINE  : per input frame, per-epoch alignment (eval/online_eval.py)
+    FINAL   : per map, keyframe-conditional
+    Both keep the raw per-run rows; the summaries use the median over the three
+    process repeats and weight scenes equally, exactly like PER_DATASET.csv.
+    """
+    import statistics
+    def read(name):
+        p = os.path.join(out, name)
+        if not os.path.exists(p):
+            return []
+        with open(p, newline="") as f:
+            return list(csv.DictReader(f))
+
+    def fnum(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    online = read("ONLINE_PER_RUN.csv")
+    if online:
+        keys = [k for k in ("online_correct_cov_0.05", "online_correct_cov_0.10",
+                            "online_correct_cov_0.20", "online_correct_cov_0.50",
+                            "online_correct_trans_only_0.20",
+                            "online_longest_continuous_s",
+                            "ate_rmse_m_frame_weighted_over_epochs",
+                            "rpe1_trans_rms_m_frame_weighted",
+                            "rpe30_trans_rms_m_frame_weighted",
+                            "pose_valid_frac", "n_epochs") if k in online[0]]
+        # per scene x arm: median over repeats
+        g = {}
+        for r in online:
+            g.setdefault((r["dataset"], r["scene"], r["modality"], r["arm"]),
+                         []).append(r)
+        per_scene = []
+        for k in sorted(g):
+            rows = g[k]
+            rec = {"dataset": k[0], "scene": k[1], "modality": k[2],
+                   "arm": k[3], "n_reps": len(rows)}
+            for m in keys:
+                vals = [fnum(r.get(m)) for r in rows]
+                vals = [v for v in vals if v is not None]
+                rec[m] = ("%.6g" % statistics.median(vals)) if vals else "UNDETERMINED"
+            per_scene.append(rec)
+        with open(os.path.join(out, "ONLINE_PER_SCENE.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(per_scene[0].keys()))
+            w.writeheader()
+            for r in per_scene:
+                w.writerow(r)
+        d = {}
+        for r in per_scene:
+            d.setdefault((r["dataset"], r["modality"], r["arm"]), []).append(r)
+        per_ds = []
+        for k in sorted(d):
+            rec = {"dataset": k[0], "modality": k[1], "arm": k[2],
+                   "n_scenes": len(d[k])}
+            for m in keys:
+                vals = [fnum(r[m]) for r in d[k]]
+                vals = [v for v in vals if v is not None]
+                rec[m + "_scene_equal"] = ("%.6g" % statistics.fmean(vals)) if vals else "UNDETERMINED"
+            per_ds.append(rec)
+        with open(os.path.join(out, "ONLINE_PER_DATASET.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(per_ds[0].keys()))
+            w.writeheader()
+            for r in per_ds:
+                w.writerow(r)
+
+    fin = read("FINAL_PER_MAP.csv")
+    if fin:
+        keys = [k for k in ("n_kf", "n_pairs", "ate_rmse_m", "rot_rmse_deg",
+                            "align_scale", "rpe1_trans_rms_m", "rpe30_trans_rms_m")
+                if k in fin[0]]
+        g = {}
+        for r in fin:
+            g.setdefault((r["dataset"], r["scene"], r["modality"], r["arm"]),
+                         []).append(r)
+        rows = []
+        for k in sorted(g):
+            rec = {"dataset": k[0], "scene": k[1], "modality": k[2], "arm": k[3],
+                   "scope": "KEYFRAME_CONDITIONAL", "n_map_rows": len(g[k])}
+            for m in keys:
+                vals = [fnum(r.get(m)) for r in g[k]]
+                vals = [v for v in vals if v is not None]
+                rec[m + "_median_over_maps"] = ("%.6g" % statistics.median(vals)) if vals else "UNDETERMINED"
+            rows.append(rec)
+        with open(os.path.join(out, "FINAL_CONDITIONAL.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+    return len(online), len(fin)
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="/workspace/eval_runs/final_runs")
+    ap.add_argument("--root", default="/workspace/eval_runs/final_runs_v2")
     a = ap.parse_args()
     root = a.root
     out = os.path.join(root, "metrics")
@@ -175,8 +272,10 @@ def main():
     # 5. attempt ledger, so cost/exit status travel with the accuracy tables
     sh([sys.executable, "scripts/matrix.py", "ledger"])
 
-    print("wrote %s/{PER_RUN.csv,PER_SCENE.csv,PER_DATASET.csv}"
-          % out)
+    n_on, n_fin = extra_tables(out)
+    print("wrote %s/{PER_RUN,PER_SCENE,PER_DATASET}.csv" % out)
+    print("wrote %s/{ONLINE_PER_SCENE,ONLINE_PER_DATASET,FINAL_CONDITIONAL}.csv "
+          "from online=%d final=%d rows" % (out, n_on, n_fin))
     print("rows: per_run=%d per_scene=%d per_dataset=%d"
           % (len(per_run), len(per_scene), len(per_dataset)))
     return 0
