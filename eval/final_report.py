@@ -207,7 +207,11 @@ def main():
 
     # ---- cost, two tables ------------------------------------------------
     L.append("\n## 5. 成本分表\n")
-    L.append("### 5.1 SLAM-only（本轮全部运行都是 `PHOTO_SLAM_SLAM_ONLY=1`）\n")
+    L.append("### 5.1 内部 486 项：SLAM-only（`PHOTO_SLAM_SLAM_ONLY=1`）\n")
+    L.append("适用范围只有这 486 项内部运行（339 补测 + 147 复用）。"
+             "6 项上游对照**不在本表**，它们按上游自己的默认管线运行"
+             "（`meta.txt` 记有 `gauss_cfg`、产物含 `GpuPeakUsageMB.txt`，即含 Gaussian 建图），"
+             "见 5.2。下表只含跟踪时间与进程墙钟。\n")
     acc = {}
     for r in man:
         d = os.path.join(os.path.dirname(os.path.join(a.root, "")), "")
@@ -249,10 +253,13 @@ def main():
                 f(tr / fr if fr else None, 1)))
     else:
         L.append("没有可读的 `[EVAL-TIMING]` 行。\n")
-    L.append("\n### 5.2 Gaussian 建图成本\n")
-    L.append("本轮 492 项全部以 `PHOTO_SLAM_SLAM_ONLY=1` 运行，**不含** Gaussian 训练，"
-             "因此本表没有本轮数据；Gaussian 成本只在既有的建图产物里，未在本轮重跑，"
-             "不并进上表，也不与本表的跟踪时间相加。\n")
+    L.append("\n### 5.2 Gaussian 建图成本（与 5.1 不可混比）\n")
+    L.append("准确口径：**486 项内部运行**是 SLAM-only，不含任何 Gaussian 训练；"
+             "**6 项上游对照**按其自身默认管线运行，含 Gaussian 建图"
+             "（`meta.txt` 记有 `gauss_cfg`，`GpuPeakUsageMB.txt` 记录峰值显存），"
+             "其墙钟 42–48 s 因此同时包含 SLAM 与建图，不能当作纯跟踪成本，"
+             "也不能与 5.1 的跟踪时间或墙钟相减、相加或比较。"
+             "本轮没有单独测过 Gaussian 训练耗时，故本表不给出任何建图成本数字。\n")
 
     p = a.out
     os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
