@@ -116,7 +116,7 @@ def main():
         row = dict(s or b)
         row["id"] = i
         row["source_root"] = src
-        row["reused"] = int(src == "base")
+        row["reused"] = int(src == "base" and state == "OK")
         row["attempt_state"] = state
         row["attempt_exit"] = "" if not d else exit_code(d)
         if not d:

@@ -29,6 +29,18 @@ def read_csv(p):
     return list(csv.DictReader(open(p))) if os.path.exists(p) else []
 
 
+def first_existing(paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def read_any(paths):
+    p = first_existing(paths)
+    return (read_csv(p), p) if p else ([], None)
+
+
 def med(v):
     v = [x for x in v if x is not None]
     return st.median(v) if v else None
@@ -67,10 +79,15 @@ def main():
         sys.exit("no merged manifest under %s: the settlement stage has not run"
                  % a.root)
     mdir = os.path.join(a.root, "metrics_v4")
+    chain = os.path.dirname(os.path.abspath(a.out))
+    cand = [mdir, os.path.join(chain, "metrics_v4"),
+            os.path.join(a.base, "metrics_v4")]
     runs = read_csv(os.path.join(mdir, "ONLINE_PER_RUN.csv"))
-    epochs = read_csv(os.path.join(mdir, "ONLINE_PER_EPOCH.csv"))
-    final_maps = read_csv(os.path.join(mdir, "FINAL_PER_MAP.csv"))
-    settle = read_csv(os.path.join(a.root, "SETTLEMENT_492.csv"))
+    epochs, _p = read_any([os.path.join(d, "ONLINE_PER_EPOCH.csv") for d in cand])
+    final_maps, fp = read_any([os.path.join(d, "FINAL_PER_MAP.csv") for d in cand]
+                              + [os.path.join(chain, "FINAL_PER_MAP.csv")])
+    settle, sp = read_any([os.path.join(a.root, "SETTLEMENT_492.csv"),
+                          os.path.join(chain, "SETTLEMENT_492.csv")])
 
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     L = ["# 最终报告（492 项计划）\n",
@@ -95,16 +112,20 @@ def main():
     L.append("| 补测失败 | %d |" % state.get(("supplement", "FAILED"), 0))
     L.append("| 补测缺失（未产出目录） | %d |"
              % state.get(("supplement", "MISSING"), 0))
-    L.append("\n`reused=1` 共 %d 项，其余 %d 项为本轮补测。\n"
-             % (reused.get("1", 0), reused.get("0", 0)))
+    L.append("\n`reused=1`（旧运行复用且成功）共 %d 项，本轮补测 %d 项，"
+             "上游 6 项为旧运行且失败（按失败保留）。\n"
+             % (reused.get("1", 0), state.get(("supplement", "OK"), 0)
+                + state.get(("supplement", "FAILED"), 0)
+                + state.get(("supplement", "MISSING"), 0)))
 
     # ---- settlement ------------------------------------------------------
     L.append("\n## 2. 逐 ID 结算\n")
     if settle:
+        L.append("结算文件 `%s` 共 %d 行。\n" % (sp, len(settle)))
         stc = Counter((r.get("valid") == "1", r.get("reason", "")[:40]) for r in settle)
         ok = sum(1 for r in settle if r.get("valid") == "1")
-        L.append("结算文件 `SETTLEMENT_492.csv` 共 %d 行，`valid=1` 的 %d 项。\n"
-                 % (len(settle), ok))
+        L.append("`valid=1` 的 %d 项；`valid=0` 的 %d 项按下表原因分类。\n"
+                 % (ok, len(settle) - ok))
         L.append("| valid | 原因 | 项数 |\n|---|---|---|")
         for (v, reason), n in sorted(stc.items(), key=lambda kv: -kv[1])[:14]:
             L.append("| %s | %s | %d |" % ("1" if v else "0", reason or "—", n))
@@ -142,6 +163,7 @@ def main():
     # ---- FINAL (keyframe conditional) ------------------------------------
     L.append("\n## 4. FINAL：按地图的关键帧条件指标（与 ONLINE 分表）\n")
     if final_maps:
+        L.append("来源：`%s`\n" % fp)
         g = {}
         for r in final_maps:
             g.setdefault((r["dataset"], r["scene"], r["modality"], r["arm"]), []).append(r)
