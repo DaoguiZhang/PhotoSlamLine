@@ -18,6 +18,7 @@
 #ifndef ORB_SLAM3_MAP_EVENT_LOG_H
 #define ORB_SLAM3_MAP_EVENT_LOG_H
 
+#include <atomic>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -40,15 +41,45 @@ inline bool Enabled()
 // number, and a merge cannot be bound to a frame boundary: any claim that "this
 // reference-keyframe jump is that merge" would be an inference from jump size.
 // With it, the event names the frame it happened on and the claim is checkable.
-inline int& CurrentFrameIndex()
+inline std::atomic<int>& CurrentFrameIndexRef()
 {
-    static int f = -1;
+    static std::atomic<int> f{-1};
     return f;
 }
 
 inline void SetFrameIndex(int f)
 {
-    CurrentFrameIndex() = f;
+    CurrentFrameIndexRef().store(f, std::memory_order_relaxed);
+}
+
+inline int CurrentFrameIndex()
+{
+    return CurrentFrameIndexRef().load(std::memory_order_relaxed);
+}
+
+// [MEASUREMENT] Coordinate-frame epoch. Incremented INSIDE Emit(), i.e. under
+// the same mutex that serialises the event rows, so "an event was written" and
+// "the epoch advanced" are one indivisible step rather than two racy ones. The
+// entry point reads it after Track* returns, which is ordered after whatever the
+// tracker did during that call, and stores it with the frame's pose. The
+// evaluator then splits alignment intervals on a change of this number instead
+// of guessing from map ids or keyframe jumps.
+inline std::atomic<int>& EpochRef()
+{
+    static std::atomic<int> e{0};
+    return e;
+}
+
+inline int CurrentEpoch()
+{
+    return EpochRef().load(std::memory_order_acquire);
+}
+
+inline bool AdvancesEpoch(const char* event)
+{
+    return event && (std::string(event) == "MAP_CREATE"
+                     || std::string(event) == "MAP_MERGE"
+                     || std::string(event) == "MAP_RESET");
 }
 
 inline std::mutex& Mtx()
@@ -67,7 +98,7 @@ inline std::ofstream& Sink()
         if (s->good())
         {
             (*s) << "# map lifecycle events; seq is monotonic per process\n";
-            (*s) << "seq,event,map_id,kf_id,reason,frame\n";
+            (*s) << "seq,event,map_id,kf_id,reason,frame,epoch\n";
             s->flush();
         }
     }
@@ -80,10 +111,14 @@ inline void Emit(const char* event, long long mapId, long long kfId,
     if (!Enabled()) return;
     static long long seq = 0;
     std::lock_guard<std::mutex> g(Mtx());
+    // The epoch advance happens under the same lock as the row write.
+    if (AdvancesEpoch(event))
+        EpochRef().fetch_add(1, std::memory_order_acq_rel);
     std::ofstream& o = Sink();
     if (!o.good()) return;
     o << (seq++) << ',' << event << ',' << mapId << ',' << kfId << ','
-      << (reason ? reason : "") << ',' << CurrentFrameIndex() << '\n';
+      << (reason ? reason : "") << ',' << CurrentFrameIndex() << ','
+      << CurrentEpoch() << '\n';
     o.flush();
     std::cerr << "[MAP-EVENT] " << event << " map=" << mapId
               << " kf=" << kfId

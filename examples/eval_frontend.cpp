@@ -317,7 +317,7 @@ int main(int argc, char **argv)
     // rows of different world frames are never stitched together silently.
     std::ofstream fsPose(outDir / "online_poses.csv");
     fsPose << "frame,timestamp,state,state_name,pose_valid,map_id,ref_kf_id,"
-              "frame_id,tx,ty,tz,qx,qy,qz,qw\n";
+              "frame_id,tx,ty,tz,qx,qy,qz,qw,epoch\n";
 
     std::vector<float> vTimesTrack(nImages, 0.f);
     std::vector<double> vState(nImages, -2.0);
@@ -432,12 +432,16 @@ int main(int argc, char **argv)
             }
             const Eigen::Vector3f t = Twc.translation();
             const Eigen::Quaternionf q = Twc.unit_quaternion();
+            // Coordinate-frame epoch in force when this pose was produced.
+            // Read after Track* returned, so it includes any map change that
+            // happened during this frame.
+            const int epoch = ORB_SLAM3::map_events::CurrentEpoch();
             fsPose << ni << "," << std::fixed << tframe << "," << st << ","
                    << StateName(st) << "," << (poseValid ? 1 : 0) << ","
                    << mapId << "," << refKfId << "," << frameId << ","
                    << t(0) << "," << t(1) << "," << t(2) << ","
                    << q.x() << "," << q.y() << "," << q.z() << ","
-                   << q.w() << "\n";
+                   << q.w() << "," << epoch << "\n";
             fsPose.flush();
         }
 

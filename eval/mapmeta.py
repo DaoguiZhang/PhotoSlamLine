@@ -92,6 +92,8 @@ def read_online(run_dir):
             "map_id": int(r["map_id"]),
             "ref_kf": int(r["ref_kf_id"]),
             "frame_id": int(r["frame_id"]),
+            "epoch": (int(r["epoch"]) if str(r.get("epoch", "")).strip()
+                      .lstrip("-").isdigit() else -1),
             "t": [float(r["tx"]), float(r["ty"]), float(r["tz"])],
             "q": [float(r["qx"]), float(r["qy"]), float(r["qz"]),
                   float(r["qw"])],
@@ -159,7 +161,22 @@ def align_epochs(online, split_frames=(), gap_max=None):
     only so callers can pass it explicitly and see that it is ignored; continuity
     (a different question) is where gaps matter.
     """
+    # An anchored merge frame says "the world frame changed while this input
+    # frame was being processed". The pose recorded FOR that frame may itself be
+    # pre-merge, so it is not assigned to either era; the first posed frame
+    # strictly after it starts the new era. That is a proof-driven split, not a
+    # heuristic: without it the split silently disappeared whenever the anchored
+    # frame happened to have no valid pose.
     split_frames = set(split_frames)
+    posed_frames = [r["frame"] for r in online if r["pose_valid"] == 1]
+    split_at_frames = set()
+    exclude_frames = set()
+    for f in split_frames:
+        nxt = next((pf for pf in posed_frames if pf > f), None)
+        if nxt is not None:
+            split_at_frames.add(nxt)
+        if f in posed_frames:
+            exclude_frames.add(f)
     eps = []
     cur = None
     prev_state = None
@@ -167,14 +184,31 @@ def align_epochs(online, split_frames=(), gap_max=None):
         if r["pose_valid"] != 1:
             prev_state = r["state"]
             continue
+        # Preferred evidence: the epoch recorded WITH the pose. It advances
+        # inside the event log's own lock, so a merge that happened while the
+        # previous frames had no valid pose is still visible here: the first
+        # valid pose afterwards carries the new epoch even though map_id is
+        # unchanged. Frame anchors are the fallback for records without it.
+        epoch_split = (cur is not None and r["epoch"] >= 0
+                       and cur.get("epoch", -1) >= 0
+                       and r["epoch"] != cur["epoch"])
+        if r["frame"] in exclude_frames:
+            # pose of the frame during which the merge happened: assignable to
+            # neither era, so it starts a fresh one and is not scored there
+            if cur is not None:
+                eps.append(cur)
+                cur = None
+            prev_state = r["state"]
+            continue
         start_new = (cur is None
                      or r["map_id"] != cur["map_id"]
                      or prev_state == NO_IMAGES_YET
-                     or r["frame"] in split_frames)
+                     or r["frame"] in split_at_frames
+                     or epoch_split)
         if start_new:
             if cur is not None:
                 eps.append(cur)
-            cur = {"map_id": r["map_id"], "rows": [],
+            cur = {"map_id": r["map_id"], "epoch": r["epoch"], "rows": [],
                    "start_frame": r["frame"], "frame_lo": r["frame"],
                    "frame_hi": r["frame"]}
         cur["rows"].append(r)

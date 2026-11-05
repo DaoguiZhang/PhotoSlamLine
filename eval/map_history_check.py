@@ -64,6 +64,13 @@ def assess(online, events, summary_ids):
     if dangling:
         out["problems"].append("merge anchored at frames that are not in the "
                                "per-frame record: %s" % dangling[:5])
+    # An anchor on a frame that produced no valid pose is still a usable split
+    # (the first posed frame after it starts a new era); record that it happened
+    # so a reader can see the epoch boundary was derived from an anchor inside a
+    # gap rather than observed on a scored frame.
+    posed_frames_set = {r["frame"] for r in posed}
+    out["n_merge_anchored_in_gap"] = sum(1 for f in exact
+                                         if f not in posed_frames_set)
 
     eps = mapmeta.align_epochs(online, split_frames=exact)
     out.update({
@@ -92,18 +99,25 @@ def assess(online, events, summary_ids):
     if out["problems"]:
         out["verdict"] = "BROKEN"
         return out
-    if unanchored:
+    # If every posed frame carries a coordinate epoch, the history is exact and
+    # no anchor is needed: the evaluator splits on the epoch itself.
+    eps_have_epoch = all(e["epoch"] >= 0 for e in eps) if eps else False
+    out["epochs_recorded"] = int(eps_have_epoch)
+    if unanchored and not eps_have_epoch:
         out["verdict"] = "AMBIGUOUS"
         out["notes"].append(
-            "%d of %d merge(s) carry no frame anchor, so where the world frame "
-            "changed is not in the record; reference-keyframe jumps are not "
-            "accepted as evidence"
+            "%d of %d merge(s) carry no frame anchor and the frames carry no "
+            "coordinate epoch, so where the world frame changed is not in the "
+            "record; reference-keyframe jumps are not accepted as evidence"
             % (len(unanchored), len(unanchored) + len(exact)))
         return out
     out["verdict"] = "OK"
     if exact:
         out["notes"].append("all %d merge(s) anchored at an input frame"
                             % len(exact))
+    if eps_have_epoch:
+        out["notes"].append("every posed frame carries a coordinate epoch; "
+                            "alignment eras come from it")
     return out
 
 

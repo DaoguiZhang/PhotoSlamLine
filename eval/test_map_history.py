@@ -32,7 +32,8 @@ def check(name, cond, detail=""):
         FAILED.append(name)
 
 
-def make_run(tmp, events, frames, summary_maps, with_frame_column=True):
+def make_run(tmp, events, frames, summary_maps, with_frame_column=True,
+             with_epoch=False):
     """events: (event, map_id, kf_or_target[, frame]) tuples."""
     d = tempfile.mkdtemp(dir=tmp)
     with open(os.path.join(d, "map_events.csv"), "w") as f:
@@ -48,11 +49,13 @@ def make_run(tmp, events, frames, summary_maps, with_frame_column=True):
                 f.write("%d,%s,%d,%d,synthetic\n" % (i, name, mid, kf))
     with open(os.path.join(d, "online_poses.csv"), "w") as f:
         f.write("frame,timestamp,state,state_name,pose_valid,map_id,ref_kf_id,"
-                "frame_id,tx,ty,tz,qx,qy,qz,qw\n")
+                "frame_id,tx,ty,tz,qx,qy,qz,qw%s\n"
+                % (",epoch" if with_epoch else ""))
         for r in frames:
-            f.write("%d,%.6f,%d,%s,%d,%d,%d,%d,0,0,0,0,0,0,1\n"
+            extra = (",%d" % r.get("epoch", 1)) if with_epoch else ""
+            f.write("%d,%.6f,%d,%s,%d,%d,%d,%d,0,0,0,0,0,0,1%s\n"
                     % (r["frame"], r["ts"], r["state"], r["name"],
-                       r["valid"], r["map_id"], r["ref_kf"], r["frame"]))
+                       r["valid"], r["map_id"], r["ref_kf"], r["frame"], extra))
     with open(os.path.join(d, "maps_summary.csv"), "w") as f:
         f.write("map_id,is_in_use,is_bad,n_keyframes,n_mappoints,n_maplines,"
                 "n_exported_kf,traj_file\n")
@@ -72,8 +75,9 @@ def frames_uniform(n=60, map_id=1, kf0=10, state=2, valid=1, dt=0.033):
             for i in range(n)]
 
 
-def run_case(tmp, events, frames, summary, with_frame_column=True):
-    d = make_run(tmp, events, frames, summary, with_frame_column)
+def run_case(tmp, events, frames, summary, with_frame_column=True,
+             with_epoch=False):
+    d = make_run(tmp, events, frames, summary, with_frame_column, with_epoch)
     return mhc.check_run(d)
 
 
@@ -175,6 +179,53 @@ def main():
             eps[0], states, errs, tol=0.20, rot_tol=5.0, gap_max=0.5)
         check("T8b the gap breaks continuity instead (30 frames)",
               n_frames == 30, "longest=%d" % n_frames)
+        # T9. THE CASE THE FREEZE d7e4e9fd STILL GOT WRONG: the merge is anchored on
+        # a frame that produced no valid pose, and map_id is identical before and
+        # after. A splitter that only looks at posed frames sees no boundary and
+        # reports one era with verdict OK.
+        fr = frames_uniform(90, map_id=5)
+        for i in range(40, 50):
+            fr[i]["state"] = 3
+            fr[i]["name"] = "RECENTLY_LOST"
+            fr[i]["valid"] = 0
+        # anchor inside the gap (frame 45 is not posed), same map id throughout
+        r = run_case(tmp, [("MAP_CREATE", 5, 0, 0), ("MAP_MERGE", 5, 9, 45)],
+                     fr, [(5, 90), (9, 10)])
+        check("T9 merge anchored in a gap, same map id -> two eras, not one",
+              r["verdict"] == "OK" and r["n_epochs"] == 2,
+              "%s epochs=%d" % (r["verdict"], r["n_epochs"]))
+        check("T9b the gap anchor is reported",
+              r.get("n_merge_anchored_in_gap") == 1,
+              "anchored_in_gap=%s" % r.get("n_merge_anchored_in_gap"))
+
+        # T9c. Same shape, but with a recorded coordinate epoch: the evaluator can
+        # see the era change directly, without relying on the anchor at all.
+        fr2 = frames_uniform(90, map_id=5)
+        for i in range(90):
+            fr2[i]["epoch"] = 1 if i < 45 else 2
+        for i in range(40, 50):
+            fr2[i]["state"] = 3
+            fr2[i]["name"] = "RECENTLY_LOST"
+            fr2[i]["valid"] = 0
+        r = run_case(tmp, [("MAP_CREATE", 5, 0, 45), ("MAP_MERGE", 5, 9, 46)],
+                     fr2, [(5, 90), (9, 10)], with_epoch=True)
+        check("T9c recorded epoch splits the eras exactly",
+              r["verdict"] == "OK" and r["n_epochs"] == 2
+              and r.get("epochs_recorded") == 1,
+              "%s epochs=%d epoch_flag=%s"
+              % (r["verdict"], r["n_epochs"], r.get("epochs_recorded")))
+
+        # T9d. No anchor and no epoch: nothing in the record locates the change.
+        fr3 = frames_uniform(90, map_id=5)
+        for i in range(40, 50):
+            fr3[i]["state"] = 3
+            fr3[i]["name"] = "RECENTLY_LOST"
+            fr3[i]["valid"] = 0
+        r = run_case(tmp, [("MAP_CREATE", 5, 0), ("MAP_MERGE", 5, 9)],
+                     fr3, [(5, 90), (9, 10)], with_frame_column=False)
+        check("T9d no anchor and no epoch -> AMBIGUOUS",
+              r["verdict"] == "AMBIGUOUS", r["verdict"])
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
