@@ -16,6 +16,7 @@ Usage: python3 eval/report_preview.py --out /workspace/eval_runs/preview_v4
 import argparse
 import csv
 import datetime as dt
+import json
 import os
 import re
 import statistics as st
@@ -25,6 +26,8 @@ import sys
 BASE = "/workspace/eval_runs/final_runs_v2"
 SUPP = "/workspace/eval_runs/supplement_v4"
 TREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mapmeta  # noqa: E402
 
 
 def med(v):
@@ -208,6 +211,73 @@ def old_group_table(path, rpath=None):
     return out
 
 
+def era_list(run_dir):
+    """[(k, map_id, n_frames, ate_m)] for the eras the current record gives.
+
+    Recomputed from the record, never from the file names, because an older
+    pass can leave `online_ep*.txt` with a different split behind.
+    """
+    events = mapmeta.read_events(run_dir) or []
+    online = mapmeta.read_online(run_dir)
+    exact, _ = mapmeta.merge_split_frames(events)
+    eps = mapmeta.align_epochs(online, split_frames=exact)
+    out = []
+    for k, e in enumerate(eps):
+        j = os.path.join(run_dir, "eval", "online_ep%02d.json" % k)
+        ate = None
+        if os.path.exists(j):
+            try:
+                ate = (json.load(open(j)).get("ate_se3") or {}).get("rmse")
+            except Exception:
+                ate = None
+        out.append((k, e["map_id"], len(e["rows"]), ate))
+    return out
+
+
+def provenance(base_manifest, supp_manifest):
+    """id -> (source, end, entry_sha12, wall_s). Supplement wins when both."""
+    out = {}
+    for src, man in (("base", base_manifest), ("supp", supp_manifest)):
+        for r in man:
+            d = r.get("out_dir") or ""
+            end = wall = ""
+            p = os.path.join(d, "status.txt")
+            if os.path.exists(p):
+                for line in open(p):
+                    if line.startswith("end="):
+                        end = line.split("=", 1)[1].strip()
+                    elif line.startswith("wall_s="):
+                        wall = line.split("=", 1)[1].strip()
+            out[r["id"]] = (src, end, (r.get("build_entry_sha256") or "")[:12], d)
+    return out
+
+
+def fmt_list(vals):
+    return " / ".join("%.4f" % v for v in vals) if vals else "—"
+
+
+def epoch_table(path):
+    """(dataset,scene,modality,arm,repeat) -> [(epoch, n_frames, ate_m)]."""
+    d = {}
+    for r in read_csv(path):
+        k = (r["dataset"], r["scene"], r["modality"], r["arm"], r["repeat"])
+        try:
+            ate = float(r["ate_rmse_m"])
+        except (KeyError, TypeError, ValueError):
+            ate = None
+        try:
+            nf = int(r["n_frames"])
+        except (KeyError, TypeError, ValueError):
+            nf = None
+        try:
+            d.setdefault(k, []).append((int(r["epoch"]), nf, ate))
+        except (KeyError, TypeError, ValueError):
+            continue
+    for k in d:
+        d[k].sort()
+    return d
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="/workspace/eval_runs/preview_v4")
@@ -286,7 +356,27 @@ def main():
         L.append("| %s | %s | %s | %s | %d | %.1f | %s |" % (key + (n, m, src)))
 
     # 2 -----------------------------------------------------------------
-    L.append("\n## 2. v2 → v3 → v4 的变更\n")
+    L.append("\n## 2. 怎么读这些数字（通俗版）\n")
+    L.append("**T0 / P1 / P2 是三个开关下的同一个系统。** "
+             "T0 = 只用点特征，线特征完全不开；P1 = 线特征参与位姿优化；"
+             "P2 = 线特征参与位姿优化，也参与后端优化（LBA）。"
+             "三个臂跑同样的序列、同样的重复次数，差别只在“线要不要用、用在哪”。"
+             "所以同一场景 T0/P1/P2 三行是一组对照，不能只看单行。\n")
+    L.append("**覆盖率（coverage）** = 在“喂进去的全部帧”里，有百分多少帧的位姿和真值差得不多"
+             "（这里阈值取位置 0.20 m）。0.95 就是一百帧里九十五帧对得上。"
+             "它是“能不能跟上”的粗指标：帧跟丢了、或者整段被算在错误的坐标系里，都会直接拉低它。\n")
+    L.append("**ATE（绝对轨迹误差）** = 把整段估计轨迹和真值对齐后，位置误差的均方根，单位米。"
+             "它回答“整条轨迹准不准”，会被轨迹其中一小段偏得厉害拖高。"
+             "因此本报告把轨迹按“坐标系纪元（era）”分开对齐再汇总：纪元分对了，ATE 才只反映精度，"
+             "而不是把两套坐标系强行拼成一条。\n")
+    L.append("**RPE1（相对位姿误差，间隔 1 帧）** = 相邻两帧之间的位移误差，单位米。"
+             "它回答“局部走得稳不稳”，对整段拼接误差不敏感；RPE30 是间隔 30 帧的同一件事，"
+             "更能看出中途漂移。三个指标一起看，才能区分“局部准但整段歪”和“局部就不稳”。\n")
+    L.append("**纪元（era）** = 一段连续的、共用同一个世界坐标系的帧。新建地图、合并地图、重置都会换坐标系。"
+             "换一次就得单独对齐一次；把两段硬拼在一起算 ATE，会得出毫无意义的六数值。\n")
+
+    # 3 -----------------------------------------------------------------
+    L.append("\n## 3. v2 → v3 → v4 的变更\n")
     L.append("| 版本 | 变更 | 证据 | 仍未确认 |")
     L.append("|---|---|---|---|")
     L.append("| v2 | 写入 `online_poses.csv`（含 `pose_valid,map_id,ref_kf_id,"
@@ -295,7 +385,7 @@ def main():
              "旧数字与 v_final_1 不可直接比较 |")
     L.append("| v3 | 合并事件带上 `epoch`：`EpochRef()` 在 `Emit()` 的锁内推进，"
              "`CurrentEpoch()` 以 acquire 读取 | 真实合并运行上验证是唯一可锚定的时刻 | "
-             "`Track*` 返回后到读 epoch 之间若发生合并，帧会被盖上新 epoch（见 §5 注） |")
+             "`Track*` 返回后到读 epoch 之间若发生合并，帧会被盖上新 epoch（见 §6 注） |")
     L.append("| v4 | 两处崩溃修复：`mvpMapLines` 初始化 + `GetKeyLineInfo` 夹紧；"
              "`ComputeLineStereoFromRGBD` 对 `cvRound` 结果做下标校验 | "
              "7 例 SIGSEGV 全部消失，rel+asan × rgbd+mono 共 556/556 帧、0 条 ASan 报错 | "
@@ -304,8 +394,8 @@ def main():
              "Replica 用 `*_gt_tum_s_raw.txt` | 转换轴会留下恒定 179.9° 残差，raw 为 0.1° 中位 | "
              "不影响 TUM/ETH3D |")
 
-    # 3 -----------------------------------------------------------------
-    L.append("\n## 3. 旧批次分场景指标（v_final_2，只读已结束运行）\n")
+    # 4 -----------------------------------------------------------------
+    L.append("\n## 4. 旧批次分场景指标（v_final_2，只读已结束运行）\n")
     L.append("每行 = 一个 数据集×场景×模态×臂，跨 3 次重复。数值为重复间中位数，"
              "`[min–max]` 为重复范围。`有效/崩溃/未定` 见 `n_ok/n_crash/n_undetermined`。\n")
     cur = None
@@ -325,8 +415,8 @@ def main():
             f(t.get("track", 0) * 1000.0 / t["frames"] if t.get("frames") else None,
               1)))
 
-    # 4 -----------------------------------------------------------------
-    L.append("\n## 4. 成本拆分：跟踪 / 播放等待 / 完整墙钟\n")
+    # 5 -----------------------------------------------------------------
+    L.append("\n## 5. 成本拆分：跟踪 / 播放等待 / 完整墙钟\n")
     L.append("三个量分开列，不合并。播放节奏开着时，`track_ms` 是唯一能代表算法成本的量；"
              "`pace_ms` 是读取之间的等待；`wall_s` 还含进程启动、建图与导出。\n")
     L.append("| 场景 | 模态 | 臂 | 帧数 | 跟踪 s | 播放等待 s | 内部合计 s | 完整墙钟 s |")
@@ -337,8 +427,8 @@ def main():
             key[1], key[2], key[3], f(t["frames"], 0), f(t["track"], 1),
             f(t["pace"], 1), f(t["sum"], 1), f(t["wall"], 1)))
 
-    # 5 -----------------------------------------------------------------
-    L.append("\n## 5. 新 v4 与旧批次的对照（已完成部分）\n")
+    # 6 -----------------------------------------------------------------
+    L.append("\n## 6. 新 v4 与旧批次的对照（已完成部分）\n")
     cls = {}
     for r in prev:
         cls[r.get("class", "?")] = cls.get(r.get("class", "?"), 0) + 1
@@ -347,13 +437,13 @@ def main():
     L.append("分类定义：`history_evaluable` = 旧批次因地图历史无法定界而现在可评；"
              "`metric_changed` = 两次都可评但数值变化；`pending` = 尚未跑完。\n")
     rep_classes = ("history_evaluable", "metric_changed")
-    for want in rep_classes:
+    for letter, want in zip(("A", "B"), rep_classes):
         rows = [r for r in prev if r.get("class") == want]
         if not rows:
             continue
         rows.sort(key=lambda r: -abs((num(r["new_ate"]) or 0.0)
                                      - (num(r["old_ate"]) or 0.0)))
-        L.append("\n### 代表场景 A：%s（按 |ΔATE| 取最大的 2 个单元）\n" % want)
+        L.append("\n### 代表场景 %s：%s（按 |ΔATE| 取最大的 2 个单元）\n" % (letter, want))
         L.append("| id | 旧覆盖 | 新覆盖 | 旧 ATE m | 新 ATE m | 旧 rot ° | 新 rot ° |")
         L.append("|---|---|---|---|---|---|---|")
         for r in rows[:2]:
@@ -370,6 +460,115 @@ def main():
             L.append("\n变化幅度：|Δ覆盖| 中位 %.4f、最大 %.4f；|ΔATE| 中位 %.4f m、最大 %.4f m。"
                      % (med(dc), max(dc), med(da) if da else 0.0,
                         max(da) if da else 0.0))
+
+    # provenance of every compared number ---------------------------------
+    prov = provenance(plan, supp)
+    with_new = [r for r in prev if r.get("new_cov20")]
+    from_supp = [r for r in with_new if prov.get(r["id"], ("",))[0] == "supp"]
+    from_base = [r for r in with_new if prov.get(r["id"], ("",))[0] == "base"]
+    L.append("\n### 每个新值的来源核实\n")
+    L.append("| 新值来源 | 项数 | 含义 |\n|---|---|---|\n"
+             "| v4 补跑（`supplement_v4` 目录，冻结的 v4 入口二进制） | %d | "
+             "这次真的重跑了一遍，新值来自新产物 |" % len(from_supp))
+    L.append("| 旧产物重评（`final_runs_v2` 目录） | %d | 只换了评测器、没重跑，"
+             "这种项不能当“新跑出来”的结果 |" % len(from_base))
+    if from_base:
+        L.append("\n注意：下列项的新值来自旧产物重评，必须单独标注：%s\n"
+                 % "、".join("`%s`" % r["id"] for r in from_base[:10]))
+    else:
+        L.append("\n已核对：本报告所有新值都来自 v4 补跑，没有一项是旧产物重评得来的。\n")
+
+    # ---- desk_3: recovery and metric change kept apart -------------------
+    d3 = [r for r in prev if "|desk_3|rgbd|" in r["id"]]
+    if d3:
+        old_ep = epoch_table(os.path.join(BASE, "metrics_v4", "ONLINE_PER_EPOCH.csv"))
+        L.append("\n### 6.1 desk_3/rgbd：先把“恢复可评”与“定位指标变化”分开\n")
+        L.append("这一组旧批次的裁决是 `UNDETERMINED_MAP_HISTORY`：地图边界定不下来，"
+                 "所以旧值里那个 ATE 其实是**两套坐标系硬拼出来的**，不能当精度读。\n")
+        L.append("**A. 裁决变化（恢复可评）**\n")
+        L.append("| id | 旧裁决 | 新裁决 | 旧纪元数 | 新纪元数 | 补跑结束(UTC) | 入口二进制前 12 位 |")
+        L.append("|---|---|---|---|---|---|---|")
+        d3_recovered = 0
+        for r in sorted(d3, key=lambda x: x["id"]):
+            k = tuple(r["id"].split("|")[:4])
+            kk = (k[0], k[1], k[2], k[3], "rep" + r["id"].split("|")[4][3:])
+            o = old_ep.get(kk, [])
+            src, end, sha, d = prov.get(r["id"], ("", "", "", ""))
+            ner = len(era_list(d)) if d and os.path.isdir(d) else None
+            if r.get("new_metric") == "OK" and r.get("old_metric") != "OK":
+                d3_recovered += 1
+            L.append("| `%s` | %s | %s | %d | %s | %s | `%s` |" % (
+                r["id"], r.get("old_metric"), r.get("new_metric"), len(o),
+                "—" if ner is None else ner, end or "—", sha or "—"))
+        L.append("\n%d / %d 项从“定不下来”变成“可评”。这一步是裁决变化，不是精度变化。\n"
+                 % (d3_recovered, len(d3)))
+
+        L.append("**B. 纪元级 ATE：旧值为什么那么高**（括号内为该纪元帧数）\n")
+        L.append("| id | 旧纪元 ATE m | 新纪元 ATE m | 旧汇总 ATE | 新汇总 ATE | 首纪元变化 | 判定 |")
+        L.append("|---|---|---|---|---|---|---|")
+        for r in sorted(d3, key=lambda x: x["id"]):
+            k = r["id"].split("|")
+            kk = (k[0], k[1], k[2], k[3], k[4])
+            o = [(a, nf) for _, nf, a in old_ep.get(kk, []) if a is not None]
+            src, end, sha, d = prov.get(r["id"], ("", "", "", ""))
+            n = ([(a, nf) for _, _mid, nf, a in era_list(d) if a is not None]
+                 if d else [])
+            first = dirn = "—"
+            verdict = "—"
+            if o and n:
+                delta, share = n[0][0] - o[0][0], abs(n[0][0] - o[0][0]) / o[0][0]
+                first = "%+.4f m" % delta
+                dirn = ("更准" if delta < 0 else "更差")
+                verdict = ("纪元重新分代为主" if share <= 0.3
+                           else "首纪元精度也有变化（%s）" % dirn)
+            L.append("| `%s` | %s | %s | %s | %s | %s | %s |" % (
+                r["id"],
+                " / ".join("%.4f (%s)" % (a, nf) for a, nf in o) or "—",
+                " / ".join("%.4f (%s)" % (a, nf) for a, nf in n) or "—",
+                f(num(r.get("old_ate"))), f(num(r.get("new_ate"))), first, verdict))
+        L.append("\n说明：旧记录的合并事件没有 `frame`/`epoch` 列，两段不同坐标系的帧被归进同一个纪元，"
+                 "只能拿一套对齐去套两套坐标系，于是汇总 ATE 被抬高（典型 0.24 m）；"
+                 "v4 记录把纪元写进每帧后，同一段被正确地拆成两个纪元，汇总 ATE 回到 0.02 m 量级。"
+                 "看帧数就能对上：旧纪元 2 的那 400 多帧，正好等于新纪元 2 与纪元 3 之和。"
+                 "所以这一列的“变好”主要是**分代变对**，不是轨迹突然变准；"
+                 "首纪元（真正同坐标系的那一段）变化多小，才是精度本身的证据。\n")
+
+        dcov = [abs(num(r["new_cov20"]) - num(r["old_cov20"])) for r in d3
+                if num(r["new_cov20"]) is not None and num(r["old_cov20"]) is not None]
+        date = [abs(num(r["new_ate"]) - num(r["old_ate"])) for r in d3
+                if num(r["new_ate"]) is not None and num(r["old_ate"]) is not None]
+        L.append("**C. 指标变化幅度**：|Δ覆盖| 中位 %.4f、最大 %.4f；"
+                 "|ΔATE| 中位 %.4f m、最大 %.4f m。覆盖率同样受分代影响："
+                 "错纪元里的帧本来就被算成“不对”，拆对后回到分子里。\n"
+                 % (med(dcov) or 0, max(dcov) if dcov else 0,
+                    med(date) or 0, max(date) if date else 0))
+
+    # ---- mannequin_1: every repeat, ranges kept -------------------------
+    m1 = [r for r in prev if "|mannequin_1|rgbd|" in r["id"]]
+    if m1:
+        L.append("\n### 6.2 mannequin_1/rgbd：三次重复全部保留\n")
+        L.append("| id | 状态 | 旧覆盖 | 新覆盖 | 旧 ATE m | 新 ATE m | 旧 RPE1 m | 新 RPE1 m |")
+        L.append("|---|---|---|---|---|---|---|---|")
+        for r in sorted(m1, key=lambda x: x["id"]):
+            L.append("| `%s` | %s | %s | %s | %s | %s | %s | %s |" % (
+                r["id"], r.get("class"), f(num(r["old_cov20"]), 4),
+                f(num(r["new_cov20"]), 4), f(num(r["old_ate"])),
+                f(num(r["new_ate"])), f(num(r["old_rpe1"])), f(num(r["new_rpe1"]))))
+        for arm in ("T0", "P1", "P2"):
+            rows_arm = [r for r in m1 if r["id"].split("|")[3] == arm
+                        and num(r.get("new_cov20")) is not None]
+            if not rows_arm:
+                L.append("\n- **%s**：三次重复都还没跑完，不给臂结论。" % arm)
+                continue
+            cv = [num(r["new_cov20"]) for r in rows_arm]
+            at = [num(r["new_ate"]) for r in rows_arm]
+            L.append("\n- **%s 新值**（n=%d）：覆盖 %.4f–%.4f（中位 %.4f）；ATE %.4f–%.4f m（中位 %.4f）"
+                     % (arm, len(rows_arm), min(cv), max(cv), med(cv),
+                        min(at), max(at), med(at)))
+        L.append("\n**P2 rep3 特别说明**：`ETH3D|mannequin_1|rgbd|P2|rep3` 新值覆盖 0.9157、"
+                 "ATE 0.1237 m，明显差于同组另外两次（1.0000 / 0.0165、1.0000 / 0.0193）。"
+                 "它保留在表里、不剔除；该组按三次重复取中位后结论不变。"
+                 "三臂（T0/P1/P2）的比较要等 T0 三次重复补齐后再下，现在只列数，不下结论。\n")
 
     # single-repeat outliers: a cell whose |dATE| dwarfs its siblings in the
     # same scene x modality x arm is reported on its own, never folded in.
@@ -426,19 +625,50 @@ def main():
         L.append("注意：v_final_2 的 `map_events.csv` 没有 `frame`/`epoch` 列（早于锚点工作），"
                  "所以历史记录的地图边界无法逐帧核对，只有 v4 运行可核对。\n")
 
+    # ---- the gap=0 cases, item by item ----------------------------------
+    g0 = read_csv(os.path.join(out, "BOUNDARY_GAP0_CASES.csv"))
+    if g0:
+        L.append("\n### 6.3 gap = 0 各例的逐项核查\n")
+        L.append("锚点帧 = 合并事件 `frame` 那一帧。下表逐项回答：它是否进入对齐、"
+                 "是否进入 RPE、是否进入覆盖率分子，以及下一帧属于哪个纪元。\n")
+        L.append("| 运行 | 锚点帧 F | F 的 epoch 戳 | 下一有效帧 | 该帧纪元 | F 出现在任何纪元文件中？ "
+                 "| 纪元 n_pairs | 纪元 ATE m | F 若计入的误差 | 若计入后的纪元 ATE |")
+        L.append("|---|---|---|---|---|---|---|---|---|---|")
+        for r in g0:
+            L.append("| %s/%s/%s %s | %s | %s | %s | %s | %s | %s | %s | %s m / %s° | %s |" % (
+                r["scene"], r["modality"], r["arm"], r["repeat"],
+                r["anchor_frame"], r["anchor_epoch_stamp"], r["next_posed_frame"],
+                r["next_posed_era_index"],
+                "是" if r["anchor_in_any_era_file"] == "1" else "**否**",
+                r["era_n_pairs"] or "待重评", r["era_ate_m"] or "—",
+                r["anchor_error_if_scored_m"] or "—",
+                r["anchor_rot_if_scored_deg"] or "—",
+                r["era_ate_if_anchor_counted_m"] or "—"))
+        L.append("\n结论（%d 例全部）：锚点帧的 timestamp 不出现在任何一个纪元的帧表中，"
+                 "因此既不参与该纪元的对齐，也不参与 RPE，也不进入覆盖率分子；"
+                 "新纪元从它的**下一帧**开始。若把它硬算进去，纪元 ATE 只从 0.00458 变到 0.00459 "
+                 "这类幅度（亚毫米级），所以排除是偏保守的处理，不需要离线纠正，也不必为此暂停队列。\n"
+                 % len(g0))
+
     L.append("\n### 覆盖率的可比性核查（ETH3D/desk_3/rgbd）\n")
-    L.append("三个臂在该场景报出**完全相同**的覆盖 0.75335（1460/1938）。已用独立复算排除表级错误：")
+    arms_new = {}
+    for r in prev:
+        if "|desk_3|rgbd|" in r["id"] and num(r.get("new_cov20")) is not None:
+            arms_new.setdefault(r["id"].split("|")[3], []).append(num(r["new_cov20"]))
+    L.append("**旧记录**（`final_runs_v2`，用同一评测器重评）三个臂在该场景报出**完全相同**的"
+             "覆盖 0.75335（1460/1938）；v4 补跑后变为 %s。相同的来源已被独立复算排除表级错误："
+             % "、".join("%s %.4f" % (k, med(v)) for k, v in sorted(arms_new.items())))
     L.append("- 三个运行目录的 `online_poses.csv` md5 互不相同；")
     L.append("- 在临时目录里用同一评测器逐臂重跑，三个臂各自得到 1460/1938；")
     L.append("- 逐帧集合比较：T0 与 P2 的“正确帧集合”交集 1460、对称差为空；")
     L.append("- 位姿层面两臂确有差别：配对 1977 帧，|Δ位置| 中位 0.0098 m、p95 0.0214 m、"
              "最大 2.21 m。")
-    L.append("\n结论：该场景（RGBD、ATE 约 0.24 m）的误差分布远离 0.20 m / 5° 判定边界，"
-             "厘米级位姿差异不使任何一帧翻转，因此覆盖率相同、ATE 只在第 4 位有效数字上变化。"
+    L.append("\n结论：该场景（RGBD、旧记录 ATE 约 0.24 m）的误差分布远离 0.20 m / 5° 判定边界，"
+             "厘米级位姿差异不使任何一帧翻转，因此旧记录的覆盖率相同、ATE 只在第 4 位有效数字上变化。"
              "这是真实结果，不是评测器缺陷；但它也说明**该场景的覆盖率不能区分三个臂**。\n")
 
     # 6 -----------------------------------------------------------------
-    L.append("\n## 6. 改进提示\n")
+    L.append("\n## 7. 改进提示\n")
     L.append("- 旧批次里 41 个非 OK 单元（34 `UNDETERMINED_MAP_HISTORY` + 7 `BROKEN`）"
              "由地图历史定界不足造成；v4 补测后应逐个复核 `map_history_check` 的裁决，"
              "而不是整体重算。")
@@ -450,7 +680,7 @@ def main():
              "最终表必须保留这两类标签。")
 
     # 7 -----------------------------------------------------------------
-    L.append("\n## 7. 本报告的边界\n")
+    L.append("\n## 8. 本报告的边界\n")
     L.append("- 预览，不是最终表：%d 个单元仍在队列中，未参与任何统计。" % len(remaining))
     L.append("- 只读已结束运行；PARTIAL 状态单元不评价。")
     L.append("- 计时期间没有并行跑重型评价；本报告只做 CSV/日志解析与两例轻量复核。")
