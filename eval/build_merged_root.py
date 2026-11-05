@@ -54,10 +54,32 @@ def usable(d):
     return os.path.isdir(d) and exit_code(d) == 0 and complete(d)
 
 
+def upstream_state(d):
+    """The upstream control rows are judged by their own products.
+
+    They come from the upstream Photo-SLAM binary, which does not write this
+    project's `online_poses.csv` / `final_state.csv`; it writes
+    `CameraTrajectory_TUM.txt` and `status.txt`. Missing internal CSVs are not
+    a crash and must not be reported as one.
+    """
+    if not d or not os.path.isdir(d):
+        return "MISSING"
+    traj = os.path.exists(os.path.join(d, "CameraTrajectory_TUM.txt"))
+    return "OK" if (exit_code(d) == 0 and traj) else "FAILED"
+
+
 def read_manifest(path):
     if not os.path.exists(path):
         return []
     return list(csv.DictReader(open(path)))
+
+
+def row_is_upstream(b, s):
+    for r in (b, s):
+        if r and (r.get("dataset") == "UPSTREAM"
+                  or r.get("system_arm") == "UPSTREAM"):
+            return True
+    return False
 
 
 def read_metrics(path):
@@ -73,6 +95,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--metrics-supp", required=True)
     ap.add_argument("--metrics-base", required=True)
+    ap.add_argument("--upstream-metrics", default=None)
     a = ap.parse_args()
 
     base = {r["id"]: r for r in read_manifest(os.path.join(a.base, "MASTER_MANIFEST.csv"))}
@@ -105,8 +128,9 @@ def main():
             src, d = "supplement", sd
         else:
             src, d = "base", bd
-        state = "OK" if (d and usable(d)) else (
-            "FAILED" if (d and os.path.isdir(d)) else "MISSING")
+        state = (upstream_state(d) if row_is_upstream(b, s) else
+                 ("OK" if (d and usable(d)) else
+                  ("FAILED" if (d and os.path.isdir(d)) else "MISSING")))
         if src == "supplement":
             stats["supp_ok" if state == "OK" else "supp_failed"] += 1
         else:
@@ -116,7 +140,9 @@ def main():
         row = dict(s or b)
         row["id"] = i
         row["source_root"] = src
-        row["reused"] = int(src == "base" and state == "OK")
+        row["role"] = ("upstream" if row_is_upstream(b, s)
+                       else ("reused" if src == "base" else "supplement"))
+        row["reused"] = int(row["role"] == "reused" and state == "OK")
         row["attempt_state"] = state
         row["attempt_exit"] = "" if not d else exit_code(d)
         if not d:
@@ -134,7 +160,8 @@ def main():
         chosen[i] = row
         rows.append(row)
 
-    EXTRA = ["source_root", "reused", "attempt_state", "attempt_exit"]
+    EXTRA = ["out_dir", "source_root", "role", "reused", "attempt_state",
+             "attempt_exit"]
     with open(os.path.join(out, "MASTER_MANIFEST.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=COLS_BASE + EXTRA)
         w.writeheader()
@@ -161,6 +188,44 @@ def main():
             w = csv.DictWriter(f, fieldnames=header)
             w.writeheader()
             for r in mrows:
+                w.writerow(r)
+
+    # per-era and per-map tables, again only from the winner's own pass
+    for name, keycols in (("ONLINE_PER_EPOCH.csv", ("dataset", "scene", "modality",
+                                                   "arm", "repeat")),
+                          ("FINAL_PER_MAP.csv", ("dataset", "scene", "modality",
+                                                 "arm", "repeat", "map_id"))):
+        rows_s = read_metrics(os.path.join(a.metrics_supp, name))
+        rows_b = read_metrics(os.path.join(a.metrics_base, name))
+        grp = lambda rows: {k: [r for r in rows if tuple(r[c] for c in keycols[:5]) == k]
+                            for k in {tuple(r[c] for c in keycols[:5]) for r in rows}}
+        idx_s, idx_b = grp(rows_s), grp(rows_b)
+        keep, hdr = [], None
+        for i, c in chosen.items():
+            base_key = (c["dataset"], c["scene"], c["modality"],
+                        c["system_arm"], "rep%s" % c["repeat"])
+            idx = idx_s if c["source_root"] == "supplement" else idx_b
+            for r in idx.get(base_key, []):
+                if hdr is None:
+                    hdr = list(r.keys())
+                keep.append(r)
+        if hdr:
+            with open(os.path.join(mdir, name), "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=hdr, extrasaction="ignore")
+                w.writeheader()
+                for r in keep:
+                    w.writerow(r)
+
+    # upstream rows are evaluated by eval/upstream_eval.py, which writes its own
+    # table; carry it into the merged root so settlement can read it here
+    up_src = a.upstream_metrics or os.path.join(
+        a.base, "metrics_v4", "UPSTREAM_PER_RUN.csv")
+    up = read_metrics(up_src)
+    if up:
+        with open(os.path.join(mdir, "UPSTREAM_PER_RUN.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(up[0].keys()))
+            w.writeheader()
+            for r in up:
                 w.writerow(r)
 
     print("ids=%d supplement_ok=%d supplement_failed=%d base_reused_ok=%d "

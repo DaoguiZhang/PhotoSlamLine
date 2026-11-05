@@ -47,11 +47,71 @@ def main():
                      r["repeat"])] = r
 
     out = []
+    up_metrics = {}
+    up_path = os.path.join(root, "metrics_v4", "UPSTREAM_PER_RUN.csv")
+    if os.path.exists(up_path):
+        for r in csv.DictReader(open(up_path)):
+            rep = str(r.get("repeat", ""))
+            if not rep.startswith("rep"):
+                rep = "rep" + rep
+            up_metrics[(r.get("scene"), rep)] = r
+
     for r in rows:
         d = r["out_dir"]
         rec = {"id": r["id"], "dataset": r["dataset"], "scene": r["scene"],
                "modality": r["modality"], "arm": r["system_arm"],
                "repeat": r["repeat"], "dir_exists": int(os.path.isdir(d))}
+        rec["source"] = r.get("source_root", "")
+        rec["role"] = r.get("role", "")
+        rec["attempt_state"] = r.get("attempt_state", "")
+
+        # --- upstream control rows ---------------------------------------
+        # They run the upstream Photo-SLAM binary, which writes
+        # CameraTrajectory_TUM.txt and status.txt but none of this project's
+        # internal CSVs. Absence of the internal CSVs is not a crash, so these
+        # rows are judged by their own products and their own evaluator.
+        if r["dataset"] == "UPSTREAM" or r["system_arm"] == "UPSTREAM":
+            st = os.path.join(d, "status.txt")
+            code = None
+            if os.path.exists(st):
+                for line in open(st):
+                    if line.startswith("exit_code="):
+                        code = int(line.split("=", 1)[1])
+            traj = os.path.exists(os.path.join(d, "CameraTrajectory_TUM.txt"))
+            repk = str(r["repeat"])
+            if not repk.startswith("rep"):
+                repk = "rep" + repk
+            m = up_metrics.get((r["scene"], repk))
+            mstat = (m or {}).get("status") or (m or {}).get("metric_status") or "NOT_EVALUATED"
+            rec.update({
+                "exit_code": "MISSING" if code is None else code,
+                "n_processed": ((m or {}).get("n_pairs", "")),
+                "n_expected": "",
+                "input_complete": "NA",
+                "artefacts": "UPSTREAM_PRODUCTS" if traj else "NO_TRAJECTORY",
+                "history": "NOT_APPLICABLE",
+                "metric_status": mstat,
+                "convention_ok": (m or {}).get("convention_ok", ""),
+                "n_gt_evaluable": (m or {}).get("n_gt_evaluable", ""),
+                "online_cov_0.20": (m or {}).get("online_correct_cov_0.20", ""),
+                "ate_rmse_m": (m or {}).get("ate_rmse_m", ""),
+                "align_scale": (m or {}).get("align_scale", ""),
+                "rpe1_trans_rms_m": (m or {}).get("rpe1_trans_rms_m", ""),
+                "upstream_commit": (m or {}).get("upstream_commit", ""),
+                "history_note": "upstream binary: no map event log by design",
+            })
+            ok = (rec["exit_code"] == 0 and traj and mstat == "OK")
+            rec["valid"] = int(bool(ok))
+            why = []
+            if rec["exit_code"] != 0:
+                why.append("exit=%s" % rec["exit_code"])
+            if not traj:
+                why.append("no CameraTrajectory_TUM.txt")
+            if mstat != "OK":
+                why.append("metrics=%s" % mstat)
+            rec["reason"] = "; ".join(why)
+            out.append(rec)
+            continue
 
         # --- exit -------------------------------------------------------
         st = os.path.join(d, "status.txt")
@@ -138,9 +198,11 @@ def main():
 
     outp = a.out or os.path.join(root, "SETTLEMENT.csv")
     keys = ["id", "dataset", "scene", "modality", "arm", "repeat", "dir_exists",
+            "source", "role", "attempt_state",
             "exit_code", "n_processed", "n_expected", "input_complete",
             "artefacts", "history", "metric_status", "convention_ok",
-            "n_gt_evaluable", "online_cov_0.20", "valid", "reason",
+            "n_gt_evaluable", "online_cov_0.20", "ate_rmse_m", "align_scale",
+            "rpe1_trans_rms_m", "upstream_commit", "valid", "reason",
             "history_note"]
     with open(outp, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
@@ -149,11 +211,11 @@ def main():
             w.writerow(r)
 
     import collections
-    print("rows=%d valid=%d" % (len(out), sum(r["valid"] for r in out)))
-    for k in ("exit_code", "input_complete", "artefacts", "history",
+    print("rows=%d valid=%d" % (len(out), sum(int(r["valid"]) for r in out)))
+    for k in ("role", "exit_code", "input_complete", "artefacts", "history",
               "metric_status"):
-        print("  %-14s %s" % (k, dict(collections.Counter(r[k] for r in out))))
-    inv = [r for r in out if not r["valid"]]
+        print("  %-14s %s" % (k, dict(collections.Counter(str(r.get(k, "")) for r in out))))
+    inv = [r for r in out if not int(r["valid"])]
     print("invalid rows: %d" % len(inv))
     for r in inv[:40]:
         print("   %-52s %s" % (r["id"], r["reason"]))

@@ -80,6 +80,7 @@ def main():
                  % a.root)
     mdir = os.path.join(a.root, "metrics_v4")
     chain = os.path.dirname(os.path.abspath(a.out))
+    chain_mdir = os.path.join(chain, "metrics_v4")
     cand = [mdir, os.path.join(chain, "metrics_v4"),
             os.path.join(a.base, "metrics_v4")]
     runs = read_csv(os.path.join(mdir, "ONLINE_PER_RUN.csv"))
@@ -101,22 +102,44 @@ def main():
     state = Counter((r["source_root"], r["attempt_state"]) for r in man)
     reused = Counter(r["reused"] for r in man)
     L.append("\n## 1. 状态与来源计数\n")
+    role = Counter(r.get("role", "") for r in man)
     L.append("| 项 | 数量 |\n|---|---|")
     L.append("| 计划 ID 总数 | %d |" % len(man))
-    L.append("| 补测计划内（用补测结果） | %d |" % src.get("supplement", 0))
-    L.append("| 复用旧运行（预先指定的 T0） | %d |" % src.get("base", 0))
-    L.append("| 其中复用且旧运行成功 | %d |" % state.get(("base", "OK"), 0))
-    L.append("| 其中复用但旧运行失败（上游 6 项） | %d |"
-             % state.get(("base", "FAILED"), 0))
-    L.append("| 补测成功 | %d |" % state.get(("supplement", "OK"), 0))
-    L.append("| 补测失败 | %d |" % state.get(("supplement", "FAILED"), 0))
-    L.append("| 补测缺失（未产出目录） | %d |"
-             % state.get(("supplement", "MISSING"), 0))
-    L.append("\n`reused=1`（旧运行复用且成功）共 %d 项，本轮补测 %d 项，"
-             "上游 6 项为旧运行且失败（按失败保留）。\n"
-             % (reused.get("1", 0), state.get(("supplement", "OK"), 0)
-                + state.get(("supplement", "FAILED"), 0)
-                + state.get(("supplement", "MISSING"), 0)))
+    L.append("| 补测计划内（本轮重跑） | %d |" % role.get("supplement", 0))
+    L.append("| 预先指定复用的 T0 | %d |" % role.get("reused", 0))
+    L.append("| 上游对照 | %d |" % role.get("upstream", 0))
+    for rl in ("supplement", "reused", "upstream"):
+        states = Counter(r["attempt_state"] for r in man if r.get("role") == rl)
+        L.append("| — %s 的尝试结果 | %s |" % (
+            rl, "、".join("%s %d" % kv for kv in sorted(states.items())) or "0"))
+    L.append("| 实际退出码为 0 的项 | %d |"
+             % sum(1 for r in man if str(r.get("attempt_exit")) == "0"))
+    L.append("\n三类相加 = %d + %d + %d = %d，与 492 项计划一一对应；"
+             "上游 6 项按自身产物结算（见 1.1），未经失败替换。\n"
+             % (role.get("supplement", 0), role.get("reused", 0),
+                role.get("upstream", 0), len(man)))
+
+    # ---- upstream rows, settled by their own products --------------------
+    upr, upp = read_any([os.path.join(mdir, "UPSTREAM_PER_RUN.csv"),
+                         os.path.join(chain_mdir, "UPSTREAM_PER_RUN.csv")])
+    L.append("\n### 1.1 上游 6 项（按上游自己的产物与评价方式结算）\n")
+    if upr:
+        L.append("上游二进制（Photo-SLAM upstream，commit `%s`）不写本项目的 "
+                 "`online_poses.csv` / `final_state.csv`，只写 `CameraTrajectory_TUM.txt` "
+                 "与 `status.txt`。因此这 6 项**不以“缺内部 CSV”判崩溃**，"
+                 "而是按“退出码 0 + 轨迹存在 + 同一评测器（mono 用 Sim3，带尺度）”结算。\n"
+                 % (upr[0].get("upstream_commit", "")))
+        L.append("| 场景 | 重复 | 退出码 | 轨迹 | 对齐尺度 | ATE m | RPE1 m | 墙钟 s | 状态 |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
+        for r in sorted(upr, key=lambda x: (x.get("scene", ""), x.get("repeat", ""))):
+            L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                r.get("scene"), r.get("repeat"), r.get("exit_code"),
+                "有" if r.get("has_traj") == "1" else "缺",
+                f(num(r.get("align_scale")), 2), f(num(r.get("ate_rmse_m"))),
+                f(num(r.get("rpe1_trans_rms_m")), 4), f(num(r.get("wall_s")), 1),
+                r.get("status")))
+    else:
+        L.append("上游表未找到（`UPSTREAM_PER_RUN.csv`），本节留空。\n")
 
     # ---- settlement ------------------------------------------------------
     L.append("\n## 2. 逐 ID 结算\n")
@@ -134,6 +157,8 @@ def main():
 
     # ---- per-run online metrics, every repeat ----------------------------
     L.append("\n## 3. ONLINE：逐场景 × 臂 × 重复的原值与范围\n")
+    L.append("口径：分子只算“状态 OK + 位置 ≤ 0.20 m + 旋转 ≤ 5°”的帧，分母是冻结的 GT 可评计划帧数；"
+             "合并锚点帧不进分子（也不进对齐与 RPE），但**仍在分母里**，所以结果是偏保守的。\n")
     if not runs:
         L.append("`ONLINE_PER_RUN.csv` 还没生成，本节留空。\n")
     else:
