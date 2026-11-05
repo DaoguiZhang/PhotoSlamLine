@@ -2610,9 +2610,19 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
         if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
             u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
             continue;
+        // [CRASH FIX] the float check above is not enough: cvRound(rows-0.4)
+        // is rows, so a keyline endpoint just inside the border rounds one row
+        // PAST the image. ASan on ETH3D/sfm_house_loop reported a 4-byte READ a
+        // few kilobytes beyond the depth buffer, in this exact statement. The
+        // rounded indices are therefore validated before use.
+        const int vv1 = cvRound(v1), uu1 = cvRound(u1);
+        const int vv2 = cvRound(v2), uu2 = cvRound(u2);
+        if (uu1 < 0 || uu1 >= cols || vv1 < 0 || vv1 >= rows ||
+            uu2 < 0 || uu2 >= cols || vv2 < 0 || vv2 >= rows)
+            continue;
         // 读取两端深度
-        float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
-        float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
+        float d1 = imDepth.at<float>(vv1, uu1);
+        float d2 = imDepth.at<float>(vv2, uu2);
         bool valid1 = (d1 > minDepth && d1 < maxDepth);
         bool valid2 = (d2 > minDepth && d2 < maxDepth);
         if (!valid1 && !valid2) continue; // 两端都无效

@@ -17,6 +17,7 @@
 */
 
 #include "KeyFrame.h"
+#include <algorithm>
 #include "Converter.h"
 #include "ImuTypes.h"
 #include "AuditTrail.h"
@@ -89,6 +90,14 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mLineSampleStep(F.mLineSampleStep), mLineViewWeight(F.mLineViewWeight), mLineSigma(F.mLineSigma), mLineTopK(F.mLineTopK), mvLineAdaptiveSteps(F.mvLineAdaptiveSteps)
 {
     mnId=nNextId++;
+
+    // [CRASH FIX, root cause] mvpMapLines was never sized, so it stayed empty
+    // while NL > 0 and every reader that indexes it by line index (for example
+    // GetKeyLineInfo) ran off the end of an empty vector: ASan reported a SEGV
+    // at 0x0 on ETH3D/sfm_house_loop. The vector holds one observation slot per
+    // detected line, all null until a MapLine is associated, which is the
+    // invariant the readers already assume.
+    mvpMapLines.assign(NL, static_cast<MapLine*>(NULL));
 
     mGrid.resize(mnGridCols);
     if(F.Nleft != -1)  mGridRight.resize(mnGridCols);
@@ -2081,11 +2090,26 @@ void KeyFrame::GetKeyLineInfo(
     unique_lock<mutex> lock(mMutexFeatures);
 
     // Save the id of each MapLine in this KF, there can be null pointer in the vector
+    // [CRASH FIX] NL is copied from the Frame, but the two vectors this loop
+    // indexes can be shorter than NL (a KeyFrame built from a frame whose line
+    // vectors were later resized, and mvpMapLines which is filled in a separate
+    // step). ASan on ETH3D/sfm_house_loop showed the unbounded loop reading
+    // through an empty vector's null data pointer: SEGV at 0x0 in this exact
+    // function. Clamping skips entries that do not exist; for every KeyFrame
+    // where the invariant NL == mvKeyLines.size() == mvpMapLines.size() holds,
+    // the loop is unchanged.
+    const int nLines = std::min(NL, (int)std::min(mvKeyLines.size(),
+                                                  mvpMapLines.size()));
+    if (nLines != NL) {
+        std::cerr << "[KF-NL-MISMATCH] kf=" << mnId << " NL=" << NL
+                  << " mvKeyLines=" << mvKeyLines.size()
+                  << " mvpMapLines=" << mvpMapLines.size() << std::endl;
+    }
     pixelsUndist.clear();
-    pixelsUndist.reserve(NL * 4);
+    pixelsUndist.reserve(nLines * 4);
     pointsLocal.clear();
-    pointsLocal.reserve(NL * 6);
-    for(int i = 0; i < NL; ++i)
+    pointsLocal.reserve(nLines * 6);
+    for(int i = 0; i < nLines; ++i)
     {
         pixelsUndist.push_back(mvKeyLines[i].startPointX);
         pixelsUndist.push_back(mvKeyLines[i].startPointY);
