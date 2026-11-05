@@ -90,34 +90,38 @@ def main():
             ids.append(i)
 
     rows, chosen = [], {}
-    stats = {"supp": 0, "base_reused": 0, "supp_failed": 0, "base_failed": 0,
-             "no_dir": 0}
+    stats = {"supp_ok": 0, "supp_failed": 0, "base_reused_ok": 0,
+             "base_reused_failed": 0, "no_dir": 0}
     for i in ids:
         b = base.get(i)
         s = supp.get(i)
         bd = b["out_dir"] if b else None
         sd = s["out_dir"] if s else None
-        src, d = None, None
-        if sd and usable(sd):
+        # A cell that the supplement planned belongs to the supplement attempt,
+        # whatever that attempt produced. A later failure must never be replaced
+        # by the earlier success: the plan says this cell was re-run, and the
+        # re-run's outcome is the record.
+        if s is not None:
             src, d = "supplement", sd
-        elif bd and usable(bd):
-            src, d = "base", bd
-        elif sd and os.path.isdir(sd):
-            src, d = "supplement", sd
-            stats["supp_failed"] += 1
-        elif bd and os.path.isdir(bd):
-            src, d = "base", bd
-            stats["base_failed"] += 1
         else:
-            src, d = ("supplement" if sd else "base"), (sd or bd)
+            src, d = "base", bd
+        state = "OK" if (d and usable(d)) else (
+            "FAILED" if (d and os.path.isdir(d)) else "MISSING")
+        if src == "supplement":
+            stats["supp_ok" if state == "OK" else "supp_failed"] += 1
+        else:
+            stats["base_reused_ok" if state == "OK" else "base_reused_failed"] += 1
+        if state == "MISSING":
             stats["no_dir"] += 1
-        row = dict(b or s)
+        row = dict(s or b)
         row["id"] = i
         row["source_root"] = src
-        row["reused"] = int(src == "base" and bool(s))
+        row["reused"] = int(src == "base")
+        row["attempt_state"] = state
+        row["attempt_exit"] = "" if not d else exit_code(d)
         if not d:
+            rows.append(row)
             continue
-        rel = os.path.relpath(d, os.path.dirname(os.path.dirname(d)))
         # keep the canonical <dataset>/<scene>/<modality>/<arm>/rep<k> shape
         rep = "rep%s" % row["repeat"]
         rel = os.path.join(row["dataset"], row["scene"], row["modality"],
@@ -127,18 +131,15 @@ def main():
         if not os.path.lexists(link):
             os.symlink(d, link)
         row["out_dir"] = link
-        if src == "supplement":
-            stats["supp"] += 1
-        else:
-            stats["base_reused"] += 1
         chosen[i] = row
         rows.append(row)
 
+    EXTRA = ["source_root", "reused", "attempt_state", "attempt_exit"]
     with open(os.path.join(out, "MASTER_MANIFEST.csv"), "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=COLS_BASE + ["source_root", "reused"])
+        w = csv.DictWriter(f, fieldnames=COLS_BASE + EXTRA)
         w.writeheader()
         for r in rows:
-            w.writerow({k: r.get(k, "") for k in COLS_BASE + ["source_root", "reused"]})
+            w.writerow({k: r.get(k, "") for k in COLS_BASE + EXTRA})
 
     key = lambda r: (r["dataset"], r["scene"], r["modality"], r["arm"], r["repeat"])
     msupp = {key(r): r for r in read_metrics(os.path.join(a.metrics_supp, "ONLINE_PER_RUN.csv"))}
@@ -148,9 +149,8 @@ def main():
     mrows, header = [], None
     for i, c in chosen.items():
         k = (c["dataset"], c["scene"], c["modality"], c["system_arm"], "rep%s" % c["repeat"])
+        # only the winner's own evaluation pass may supply the numbers
         r = msupp.get(k) if c["source_root"] == "supplement" else mbase.get(k)
-        if r is None:
-            r = msupp.get(k) or mbase.get(k)
         if r is None:
             continue
         if header is None:
@@ -163,10 +163,11 @@ def main():
             for r in mrows:
                 w.writerow(r)
 
-    print("ids=%d supplement_usable=%d base_reused=%d supp_attempt_but_failed=%d "
-          "base_only_failed=%d no_dir=%d metrics_rows=%d"
-          % (len(ids), stats["supp"], stats["base_reused"], stats["supp_failed"],
-             stats["base_failed"], stats["no_dir"], len(mrows)))
+    print("ids=%d supplement_ok=%d supplement_failed=%d base_reused_ok=%d "
+          "base_reused_failed=%d no_dir=%d metrics_rows=%d"
+          % (len(ids), stats["supp_ok"], stats["supp_failed"],
+             stats["base_reused_ok"], stats["base_reused_failed"],
+             stats["no_dir"], len(mrows)))
 
 
 if __name__ == "__main__":

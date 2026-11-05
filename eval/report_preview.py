@@ -357,16 +357,25 @@ def main():
 
     # 2 -----------------------------------------------------------------
     L.append("\n## 2. 怎么读这些数字（通俗版）\n")
-    L.append("**T0 / P1 / P2 是三个开关下的同一个系统。** "
-             "T0 = 只用点特征，线特征完全不开；P1 = 线特征参与位姿优化；"
-             "P2 = 线特征参与位姿优化，也参与后端优化（LBA）。"
-             "三个臂跑同样的序列、同样的重复次数，差别只在“线要不要用、用在哪”。"
-             "所以同一场景 T0/P1/P2 三行是一组对照，不能只看单行。\n")
-    L.append("**覆盖率（coverage）** = 在“喂进去的全部帧”里，有百分多少帧的位姿和真值差得不多"
-             "（这里阈值取位置 0.20 m）。0.95 就是一百帧里九十五帧对得上。"
-             "它是“能不能跟上”的粗指标：帧跟丢了、或者整段被算在错误的坐标系里，都会直接拉低它。\n")
+    L.append("**T0 / P1 / P2 是同一系统的三个开关，差别只在“线走到哪一步”。** "
+             "入口用 `EVAL_ARM` 选臂，并要求 `PHOTO_SLAM_LINE_MODE` 与臂一致（T0→0、P1→1、P2→2），"
+             "不一致就直接退出，所以不存在“臂名对、实际设置错”的运行：\n")
+    L.append("| 臂 | `LINE_MODE` | 调用哪个跟踪接口 | 线前端（提取/跟踪/建线图） | "
+             "位姿优化里的线残差 | Local BA 里的线顶点与边 |\n|---|---|---|---|---|---|")
+    L.append("| **T0** | 0 | `TrackMonocular` / `TrackRGBD`（纯点） | 完全不开，不进入任何线代码路径 | 无 | 无 |")
+    L.append("| **P1** | 1 | `TrackMonocularWithLine` / `TrackRGBDWithLine` | 开启 | "
+             "**不加**（代码门控是 `GetLineMode() >= 2`） | 不加 |")
+    L.append("| **P2** | 2 | 同上 | 开启 | 加（`PHOTO_SLAM_PO_LINE`） | 加（`PHOTO_SLAM_LBA_LINE`） |")
+    L.append("\n读法：P1 与 P2 共用同一套线前端，差别只在“线的残差要不要进优化器”；"
+             "T0 连线都不提取。所以 P1 与 P2 的差异是后端的差异，T0 与 P1 的差异另含前端本身的代价。\n")
+    L.append("**覆盖率（coverage）** 的精确说法：分子 = 同时满足三件事的帧数——"
+             "(a) 该帧跟踪状态是 OK；(b) 该帧位置误差 ≤ 0.20 m；(c) 该帧旋转误差 ≤ 5°。"
+             "分母 = **冻结的、能与真值对上的输入帧数**（`n_gt_evaluable`，"
+             "真值在 `max_dt = 0.02 s` 内可插值的计划帧），不是“实际处理了多少帧”，"
+             "所以跟丢或提前结束不会被分母兑水而抬高覆盖率。"
+             "每个纪元单独对齐后再统计；合并锚点帧不属于任何纪元，因此不进分子也不进分母。\n")
     L.append("**ATE（绝对轨迹误差）** = 把整段估计轨迹和真值对齐后，位置误差的均方根，单位米。"
-             "它回答“整条轨迹准不准”，会被轨迹其中一小段偏得厉害拖高。"
+             "它回答“整条轨迹准不准”，会被轨迹中一小段偏得厉害拖高。"
              "因此本报告把轨迹按“坐标系纪元（era）”分开对齐再汇总：纪元分对了，ATE 才只反映精度，"
              "而不是把两套坐标系强行拼成一条。\n")
     L.append("**RPE1（相对位姿误差，间隔 1 帧）** = 相邻两帧之间的位移误差，单位米。"
@@ -625,30 +634,40 @@ def main():
         L.append("注意：v_final_2 的 `map_events.csv` 没有 `frame`/`epoch` 列（早于锚点工作），"
                  "所以历史记录的地图边界无法逐帧核对，只有 v4 运行可核对。\n")
 
-    # ---- the gap=0 cases, item by item ----------------------------------
-    g0 = read_csv(os.path.join(out, "BOUNDARY_GAP0_CASES.csv"))
-    if g0:
-        L.append("\n### 6.3 gap = 0 各例的逐项核查\n")
-        L.append("锚点帧 = 合并事件 `frame` 那一帧。下表逐项回答：它是否进入对齐、"
-                 "是否进入 RPE、是否进入覆盖率分子，以及下一帧属于哪个纪元。\n")
-        L.append("| 运行 | 锚点帧 F | F 的 epoch 戳 | 下一有效帧 | 该帧纪元 | F 出现在任何纪元文件中？ "
-                 "| 纪元 n_pairs | 纪元 ATE m | F 若计入的误差 | 若计入后的纪元 ATE |")
-        L.append("|---|---|---|---|---|---|---|---|---|---|")
-        for r in g0:
-            L.append("| %s/%s/%s %s | %s | %s | %s | %s | %s | %s | %s | %s m / %s° | %s |" % (
-                r["scene"], r["modality"], r["arm"], r["repeat"],
-                r["anchor_frame"], r["anchor_epoch_stamp"], r["next_posed_frame"],
-                r["next_posed_era_index"],
-                "是" if r["anchor_in_any_era_file"] == "1" else "**否**",
-                r["era_n_pairs"] or "待重评", r["era_ate_m"] or "—",
-                r["anchor_error_if_scored_m"] or "—",
-                r["anchor_rot_if_scored_deg"] or "—",
-                r["era_ate_if_anchor_counted_m"] or "—"))
-        L.append("\n结论（%d 例全部）：锚点帧的 timestamp 不出现在任何一个纪元的帧表中，"
-                 "因此既不参与该纪元的对齐，也不参与 RPE，也不进入覆盖率分子；"
-                 "新纪元从它的**下一帧**开始。若把它硬算进去，纪元 ATE 只从 0.00458 变到 0.00459 "
-                 "这类幅度（亚毫米级），所以排除是偏保守的处理，不需要离线纠正，也不必为此暂停队列。\n"
-                 % len(g0))
+    # ---- merge boundary, paired by the raw epoch value -------------------
+    raw = read_csv(os.path.join(out, "MERGE_RAW_EPOCH_PAIRING.csv"))
+    if raw:
+        z = [r for r in raw if r["raw_gap"] == "0"]
+        neg = [r for r in raw if int(r["raw_gap"]) < 0]
+        one_epoch = sum(1 for r in raw if r["era_epoch_ok"] == "1")
+        L.append("\n### 6.3 合并边界：按事件原始 `epoch` 与位姿记录配对\n")
+        L.append("做法：取事件行自带 `epoch`（记为“事件 epoch”），再找位姿记录里"
+                 "**原始 epoch 等于它**的第一帧与最后一帧，二者相减得到 `raw_gap`。"
+                 "`raw_gap` 由原始 epoch 决定，**可以取负**，所以它不会像“只挑早于当前帧的锚点”"
+                 "那样天然非负、永远通过。\n")
+        L.append("已配对合并事件 %d 个：`raw_gap = 0` 的 %d 个，`raw_gap < 0` 的 %d 个；"
+                 "评价纪元内只含单一原始 epoch 的 %d/%d 个。\n"
+                 % (len(raw), len(z), len(neg), one_epoch, len(raw)))
+        L.append("| 运行 | 事件 epoch | F 上记录的 epoch | 最后前置帧 | 首个后置帧 | raw_gap "
+                 "| 评价纪元编号 | 该纪元的原始 epoch 集 | F 进入任何纪元？ | 下一有效帧 | 下一帧纪元 "
+                 "| 纪元 n_pairs | 纪元 ATE m |")
+        L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        for r in sorted(z, key=lambda x: x["dir"]):
+            L.append("| %s/%s/%s %s | %s | %s | %s | %s | **%s** | %s（归属帧 %s） | [%s] | %s "
+                     "| %s | %s | %s | %s |" % (
+                         r["scene"], r["modality"], r["arm"], r["repeat"],
+                         r["event_epoch"], r["pose_epoch_at_F"], r["last_pre_frame"],
+                         r["first_post_frame"], r["raw_gap"], r["era_index"],
+                         r["era_owner_frame"], r["era_epochs"],
+                         "**否**" if r["F_in_any_era"] == "0" else "是",
+                         r["next_valid_frame"], r["next_valid_era"],
+                         r["era_n_pairs"] or "待重评", r["era_ate_m"] or "待重评"))
+        L.append("\n读法：`raw_gap = 0` 表示合并发生在 `Track*` 返回之后、读 `epoch` 之前，"
+                 "锚点帧 F 自己的记录已经被盖上新的 epoch；`raw_gap = 1` 表示 F 仍记旧 epoch，"
+                 "新纪元从 F+1 开始。两种情况下 **F 都不属于任何纪元**（`F 进入任何纪元？` 列为“否”），"
+                 "所以它既不参与该纪元对齐，也不构成任何 RPE 相邻对，也不出现在逐帧误差表里"
+                 "（因此不进覆盖率分子）；新纪元由**下一个有效帧**开启，且该纪元的原始 epoch 集合"
+                 "恰好只有事件 epoch 一个值。负的 `raw_gap` 一个也没有。\n")
 
     L.append("\n### 覆盖率的可比性核查（ETH3D/desk_3/rgbd）\n")
     arms_new = {}
