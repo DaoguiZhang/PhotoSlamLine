@@ -192,7 +192,7 @@ def main():
         g = {}
         for r in final_maps:
             g.setdefault((r["dataset"], r["scene"], r["modality"], r["arm"]), []).append(r)
-        L.append("| 场景 | 模态 | 臂 | 地图数 | 关键帧条件 ATE 范围 m | 每图 n_kf 范围 |")
+        L.append("| 场景 | 模态 | 臂 | 地图条目数（跨重复合计） | 关键帧条件 ATE 范围 m | 每图 n_kf 范围 |")
         L.append("|---|---|---|---|---|---|")
         for k in sorted(g):
             rs = g[k]
