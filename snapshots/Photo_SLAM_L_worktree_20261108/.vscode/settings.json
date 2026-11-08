@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^R=/workspace/code/Photo-SLAM-L; git -C \\$R worktree add -b feat/fixed-geometry-mapper-ablation /workspace/code/PSL-fgm-ablation 0e2f7fc400 2>&1 \\| tail -3; echo \"=== worktrees ===\"; git -C \\$R worktree list; echo \"=== branch ===\"; git -C /workspace/code/PSL-fgm-ablation rev-parse --abbrev-ref HEAD; git -C /workspace/code/PSL-fgm-ablation rev-parse HEAD; echo \"=== frozen ablation entry points present\\? ===\"; grep -n \"PHOTO_SLAM_FROZEN_ABLATION\\\\\\|PHOTO_SLAM_FROZEN_STEPS\\\\\\|PHOTO_SLAM_FROZEN_CONDS\\\\\\|runFrozenAblation\\\\\\|PHOTO_SLAM_ABL_DIRECTIONAL_DENSIFY\" /workspace/code/PSL-fgm-ablation/src/gaussian_mapper_line\\.cpp \\| head -20$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
