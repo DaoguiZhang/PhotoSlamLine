@@ -1,0 +1,3 @@
+backend,kfs,gaussians,line_gaussians,optimizer_steps,mapping_seconds,psnr_n,psnr_mean,psnr_last,psnr_gs_n,psnr_gs_mean,psnr_gs_last,loop_events,loop_kfs,loop_pose_changed,loop_moved_rows,loop_missing_rows,gba_events,gba_deltas,gba_translation_max,gba_moved_rows
+A,183,546704,2725,10289,70.644,183,30.653566,28.300085,183,30.660965,28.300148,0,0,0,0,0,0,0,0,0
+C,182,472461,818,9189,71.640,182,29.907105,24.799335,182,29.914971,24.813097,1,120,116,371525,4703,1,121,0.00000,0

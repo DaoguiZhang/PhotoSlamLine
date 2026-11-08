@@ -1,0 +1,971 @@
+diff --git a/.gitignore b/.gitignore
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/include/AuditTrail.h b/ORB-SLAM3/include/AuditTrail.h
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/include/LineMode.h b/ORB-SLAM3/include/LineMode.h
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/include/StereoLineDebug.h b/ORB-SLAM3/include/StereoLineDebug.h
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/src/Frame.cc b/ORB-SLAM3/src/Frame.cc
+index 373308fb9a..849e91a6df 100755
+--- a/ORB-SLAM3/src/Frame.cc
++++ b/ORB-SLAM3/src/Frame.cc
+@@ -2610,9 +2610,17 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
+         if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
+             u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
+             continue;
++        // [CRASH FIX] the float check above is not enough: cvRound(rows-0.4)
++        // is rows, so a keyline endpoint just inside the border rounds one row
++        // PAST the image. Validate the rounded indices before indexing.
++        const int vv1 = cvRound(v1), uu1 = cvRound(u1);
++        const int vv2 = cvRound(v2), uu2 = cvRound(u2);
++        if (uu1 < 0 || uu1 >= cols || vv1 < 0 || vv1 >= rows ||
++            uu2 < 0 || uu2 >= cols || vv2 < 0 || vv2 >= rows)
++            continue;
+         // 读取两端深度
+-        float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
+-        float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
++        float d1 = imDepth.at<float>(vv1, uu1);
++        float d2 = imDepth.at<float>(vv2, uu2);
+         bool valid1 = (d1 > minDepth && d1 < maxDepth);
+         bool valid2 = (d2 > minDepth && d2 < maxDepth);
+         if (!valid1 && !valid2) continue; // 两端都无效
+diff --git a/ORB-SLAM3/src/KeyFrame.cc b/ORB-SLAM3/src/KeyFrame.cc
+index ea8bc8982b..8940e47dd8 100755
+--- a/ORB-SLAM3/src/KeyFrame.cc
++++ b/ORB-SLAM3/src/KeyFrame.cc
+@@ -17,6 +17,7 @@
+ */
+ 
+ #include "KeyFrame.h"
++#include <algorithm>
+ #include "Converter.h"
+ #include "ImuTypes.h"
+ #include "AuditTrail.h"
+@@ -90,6 +91,12 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
+ {
+     mnId=nNextId++;
+ 
++    // [CRASH FIX, root cause] mvpMapLines was never sized, so it stayed empty
++    // while NL > 0 and every reader that indexes it by line index ran off the
++    // end of an empty vector. One null slot per detected line, as the readers
++    // already assume.
++    mvpMapLines.assign(NL, static_cast<MapLine*>(NULL));
++
+     mGrid.resize(mnGridCols);
+     if(F.Nleft != -1)  mGridRight.resize(mnGridCols);
+     for(int i=0; i<mnGridCols;i++)
+@@ -2081,11 +2088,21 @@ void KeyFrame::GetKeyLineInfo(
+     unique_lock<mutex> lock(mMutexFeatures);
+ 
+     // Save the id of each MapLine in this KF, there can be null pointer in the vector
++    // [CRASH FIX] NL is copied from the Frame, but mvKeyLines / mvpMapLines can
++    // be shorter than NL. Clamp the loop; when the invariant holds it is
++    // unchanged.
++    const int nLines = std::min(NL, (int)std::min(mvKeyLines.size(),
++                                                  mvpMapLines.size()));
++    if (nLines != NL) {
++        std::cerr << "[KF-NL-MISMATCH] kf=" << mnId << " NL=" << NL
++                  << " mvKeyLines=" << mvKeyLines.size()
++                  << " mvpMapLines=" << mvpMapLines.size() << std::endl;
++    }
+     pixelsUndist.clear();
+-    pixelsUndist.reserve(NL * 4);
++    pixelsUndist.reserve(nLines * 4);
+     pointsLocal.clear();
+-    pointsLocal.reserve(NL * 6);
+-    for(int i = 0; i < NL; ++i)
++    pointsLocal.reserve(nLines * 6);
++    for(int i = 0; i < nLines; ++i)
+     {
+         pixelsUndist.push_back(mvKeyLines[i].startPointX);
+         pixelsUndist.push_back(mvKeyLines[i].startPointY);
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_desk_3.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_desk_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_mono.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_mono.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_2.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_2.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_3.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_sfm_garden.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_table_7.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_table_7.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_1.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_3.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_2.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_2.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_3.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_plant_scene_1.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_plant_scene_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_bench.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_bench.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_garden.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_table_7.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_table_7.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/Rover/rover_campus_small_1.yaml b/cfg/ORB_SLAM3/RGB-D/Rover/rover_campus_small_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/Rover/rover_garden_large_1.yaml b/cfg/ORB_SLAM3/RGB-D/Rover/rover_garden_large_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far_150.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far_150.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near_150.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near_150.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_far_lowfast.yaml b/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_far_lowfast.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_near_lowfast.yaml b/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_near_lowfast.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_desk_3.yaml b/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_desk_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_sfm_garden.yaml b/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg1_room_diag.yaml b/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg1_room_diag.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg3_long_office_household_diag.yaml b/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg3_long_office_household_diag.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_plant_scene_1.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_plant_scene_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_bench.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_bench.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_garden.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/Rover/rover_campus_small_1.yaml b/cfg/gaussian_mapper/RGB-D/Rover/rover_campus_small_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/Rover/rover_garden_large_1.yaml b/cfg/gaussian_mapper/RGB-D/Rover/rover_garden_large_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household_diag.yaml b/cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household_diag.yaml
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/SUMMARY.md b/evidence/line_ablation_multiscene/SUMMARY.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/all_runs.csv b/evidence/line_ablation_multiscene/all_runs.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/common_window.csv b/evidence/line_ablation_multiscene/common_window.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/far_mono.csv b/evidence/line_ablation_multiscene/far_mono.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/far_rgbd.csv b/evidence/line_ablation_multiscene/far_rgbd.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/gate_rescue_summary.txt b/evidence/line_ablation_multiscene/gate_rescue_summary.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/logs.tar.gz b/evidence/line_ablation_multiscene/logs.tar.gz
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/near_mono.csv b/evidence/line_ablation_multiscene/near_mono.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/near_rgbd.csv b/evidence/line_ablation_multiscene/near_rgbd.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/SUMMARY.md b/evidence/line_rescue_audit/SUMMARY.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/eth3d_scan.csv b/evidence/line_rescue_audit/eth3d_scan.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/ladder_inventory_interrupted.txt b/evidence/line_rescue_audit/ladder_inventory_interrupted.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/gdb_B1_no_repro.txt b/evidence/line_rescue_audit/merge_deadlock/gdb_B1_no_repro.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/gdb_B2_interrupted_backtrace.txt b/evidence/line_rescue_audit/merge_deadlock/gdb_B2_interrupted_backtrace.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/repro_attempts.txt b/evidence/line_rescue_audit/merge_deadlock/repro_attempts.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/run.meta.drop30_B b/evidence/line_rescue_audit/merge_deadlock/run.meta.drop30_B
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/validation_resampler_guard.txt b/evidence/line_rescue_audit/merge_deadlock/validation_resampler_guard.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/wait_graph.md b/evidence/line_rescue_audit/merge_deadlock/wait_graph.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/opportunity_scan_7seq.txt b/evidence/line_rescue_audit/opportunity_scan_7seq.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/opportunity_scan_stress.txt b/evidence/line_rescue_audit/opportunity_scan_stress.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/scan_logs.tar.gz b/evidence/line_rescue_audit/scan_logs.tar.gz
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stress_logs.tar.gz b/evidence/line_rescue_audit/stress_logs.tar.gz
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stuck_frame1778/log_snapshot.txt b/evidence/line_rescue_audit/stuck_frame1778/log_snapshot.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stuck_frame1778/run.meta b/evidence/line_rescue_audit/stuck_frame1778/run.meta
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stuck_frame1778/threads.txt b/evidence/line_rescue_audit/stuck_frame1778/threads.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/tum_scan.csv b/evidence/line_rescue_audit/tum_scan.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/SUMMARY.md b/evidence/line_rescue_diag/SUMMARY.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/ate_preserved_A1B1C1.txt b/evidence/line_rescue_diag/ate_preserved_A1B1C1.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/ate_preserved_A1B1C1_rpeOLD_definition.txt b/evidence/line_rescue_diag/ate_preserved_A1B1C1_rpeOLD_definition.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/bc_compare_r1.txt b/evidence/line_rescue_diag/bc_compare_r1.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/bc_perframe_r1.csv b/evidence/line_rescue_diag/bc_perframe_r1.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/gate_summary_all_runs.txt b/evidence/line_rescue_diag/gate_summary_all_runs.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/interleave_aggregate.txt b/evidence/line_rescue_diag/interleave_aggregate.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/line_quality_B_C_r1.txt b/evidence/line_rescue_diag/line_quality_B_C_r1.txt
+old mode 100644
+new mode 100755
+diff --git a/scripts/ablation_aggregate.py b/scripts/ablation_aggregate.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/ablation_common_window.py b/scripts/ablation_common_window.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/ablation_replica_rgbd.sh b/scripts/ablation_replica_rgbd.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/aggregate_abc.py b/scripts/aggregate_abc.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/analyze_export_diag.py b/scripts/analyze_export_diag.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/build_asan.sh b/scripts/build_asan.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/chain_error_check.py b/scripts/chain_error_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/classify_a6.py b/scripts/classify_a6.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/compare_runs.py b/scripts/compare_runs.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eth3d_ablation_run.sh b/scripts/eth3d_ablation_run.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_batch.py b/scripts/eval_batch.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_mono_stability.py b/scripts/eval_mono_stability.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_tum_se3.py b/scripts/eval_tum_se3.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_tum_se3_v2.py b/scripts/eval_tum_se3_v2.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/export_acceptance.py b/scripts/export_acceptance.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_abc_interleave.sh b/scripts/fr3_abc_interleave.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_ablation_repeats.sh b/scripts/fr3_ablation_repeats.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_ablation_run.sh b/scripts/fr3_ablation_run.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_line_diag_abc.sh b/scripts/fr3_line_diag_abc.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/gdb_catch_lba.txt b/scripts/gdb_catch_lba.txt
+old mode 100644
+new mode 100755
+diff --git a/scripts/group_common_window.py b/scripts/group_common_window.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/ladder_report.py b/scripts/ladder_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/line_bc_compare.py b/scripts/line_bc_compare.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/line_diag_report.py b/scripts/line_diag_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/line_quality_report.py b/scripts/line_quality_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/make_tandt_rgb_txt.sh b/scripts/make_tandt_rgb_txt.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/mapper_ablation_full.sh b/scripts/mapper_ablation_full.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/mapper_ablation_replica_rgbd.sh b/scripts/mapper_ablation_replica_rgbd.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/mapper_ablation_report.py b/scripts/mapper_ablation_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/p6_eval_tum.py b/scripts/p6_eval_tum.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/p6_rgbd_loop_matrix.sh b/scripts/p6_rgbd_loop_matrix.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/pose_rebuild_check.py b/scripts/pose_rebuild_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/pose_trace_compare.py b/scripts/pose_trace_compare.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_ab_stability.sh b/scripts/repro_ab_stability.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_ab_suite.sh b/scripts/repro_ab_suite.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_accept_30x.sh b/scripts/repro_accept_30x.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_accept_gauss_10x.sh b/scripts/repro_accept_gauss_10x.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_accept_xseq.sh b/scripts/repro_accept_xseq.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_iso_suite.sh b/scripts/repro_iso_suite.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_office1_line_lba_crash.sh b/scripts/repro_office1_line_lba_crash.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_office1_nocsv.sh b/scripts/repro_office1_nocsv.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_plucker_e2e.sh b/scripts/repro_plucker_e2e.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_regression.sh b/scripts/repro_regression.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/rescue_frame_audit.py b/scripts/rescue_frame_audit.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rescue_opportunity_scan.py b/scripts/rescue_opportunity_scan.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rot_convention_check.py b/scripts/rot_convention_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rotation_axis_check.py b/scripts/rotation_axis_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rotation_spec_check.py b/scripts/rotation_spec_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/round_stats.py b/scripts/round_stats.py
+old mode 100644
+new mode 100755
+index 85da853899..6ff974cc9c
+--- a/scripts/round_stats.py
++++ b/scripts/round_stats.py
+@@ -153,7 +153,8 @@ def main():
+         if k1 - k0 != 1 or valid[k0]["refmap"] != valid[k1]["refmap"]:
+             continue
+         steps.append((k1, dist(inv(valid[k0]["Tcw"])[1], inv(valid[k1]["Tcw"])[1])))
+-    max_step, arg_step = (max(steps, key=lambda x: x[1]) if steps else (None, 0.0))
++    # NOTE: (frame, step) pairs -> the FIRST element is the frame index.
++    arg_step, max_step = (max(steps, key=lambda x: x[1]) if steps else (None, 0.0))
+ 
+     # online pose -> final export pose, and reference-KF pose change
+     Two_inv = inv(Two) if Two else None
+@@ -167,6 +168,12 @@ def main():
+             kfdiff.append((k, dist(inv(used_then)[1], inv(e["TrwKF"])[1])))
+     max_dev, arg_dev = (max(dev, key=lambda x: x[1]) if dev else (None, 0.0))
+     max_kf, arg_kf = (max(kfdiff, key=lambda x: x[1]) if kfdiff else (None, 0.0))
++    arg_dev, max_dev = (arg_dev, max_dev) if isinstance(arg_dev, int) else (None, max_dev)
++    arg_kf, max_kf = (arg_kf, max_kf) if isinstance(arg_kf, int) else (None, max_kf)
++    if dev:
++        arg_dev, max_dev = max(dev, key=lambda x: x[1])
++    if kfdiff:
++        arg_kf, max_kf = max(kfdiff, key=lambda x: x[1])
+ 
+     res = dict(input_frames=len(fed), online_pose_frames=len(valid),
+                exported_frames=written, maps=maps,
+@@ -182,8 +189,9 @@ def main():
+             json.dump(res, f, indent=2)
+ 
+     if arg_step is not None:
+-        lo, hi = arg_step - a.window, arg_step + a.window
+-        print(f"window around the largest adjacent online step (frame {arg_step}):")
++        lo, hi = int(arg_step) - a.window, int(arg_step) + a.window
++        print(f"window around the largest adjacent online step (frame {arg_step}, "
++              f"step {max_step:.4f} m):")
+         for k in range(lo, hi + 1):
+             if k not in online:
+                 continue
+diff --git a/scripts/run_asan.sh b/scripts/run_asan.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_exp3_stability.sh b/scripts/run_exp3_stability.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_exp4_gw.sh b/scripts/run_exp4_gw.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_frame_table.py b/scripts/run_frame_table.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diag2.sh b/scripts/run_office2_diag2.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diag2_batch.sh b/scripts/run_office2_diag2_batch.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diagnosis.sh b/scripts/run_office2_diagnosis.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diagnosis_batch.sh b/scripts/run_office2_diagnosis_batch.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/smallbatch_2x.sh b/scripts/smallbatch_2x.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/stability_table.py b/scripts/stability_table.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/stress_rescue_repeats.sh b/scripts/stress_rescue_repeats.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/summarize_office2_diag2.py b/scripts/summarize_office2_diag2.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/summarize_office2_diagnosis.py b/scripts/summarize_office2_diagnosis.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/tandt_mono.sh b/scripts/tandt_mono.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/traj_continuity_audit.py b/scripts/traj_continuity_audit.py
+old mode 100644
+new mode 100755
+diff --git a/tests/cull_chain_invariant.cc b/tests/cull_chain_invariant.cc
+old mode 100644
+new mode 100755
+index 2b2004b26a..25bcf6c580
+--- a/tests/cull_chain_invariant.cc
++++ b/tests/cull_chain_invariant.cc
+@@ -293,6 +293,84 @@ int main()
+         (void)r;
+     }
+ 
++    // 12. PURESCALE with a parent that does NOT move. Requested case: the parent sits
++    //     on the similarity's fixed point, so its pose is unchanged (D = I) while a
++    //     live child WOULD move (its centre is scaled). A generic conjugation carry
++    //     therefore does nothing and leaves the child behind; the same-rule carry
++    //     used for ApplyScaledRotation is exact. This is precisely why the fix is
++    //     scoped per pose rule instead of being one blanket conjugation.
++    {
++        Result r("12 pure scale, parent does NOT move (s=0.2, parent at origin)");
++        const int nTrial = 200;
++        const float s = 0.2f;
++        const Quaternionf Ryw = Quaternionf::Identity();
++        const Vector3f tyw(0, 0, 0);
++        for(int t = 0; t < nTrial; ++t)
++        {
++            SE3f Pp(PoseRule(Quaternionf::Identity(), Vector3f(0, 0, 0), 1.0));      // origin: stays put
++            SE3f Pc(PoseRule(RandAxis(rng, 20.0f, axGen), Vector3f(0.9f, 0.3f, -0.5f), 1.0));
++            const SE3f mTcpFrozen = Pc * Pp.inverse();
++            auto ApplyScaled = [&](const SE3f &P) {
++                SE3f Twc = P.inverse();
++                Twc.translation() *= s;
++                return (SE3f(Ryw, tyw) * Twc).inverse();
++            };
++            const SE3f PpNew = ApplyScaled(Pp);
++            const SE3f PcLiveNew = ApplyScaled(Pc);
++            const SE3f Dparent = PpNew * Pp.inverse();
++            r.carry_err += PosErr(PcLiveNew * PpNew.inverse() * PpNew, PcLiveNew);   // same-rule: exact
++            r.nocarry_err += PosErr(mTcpFrozen * PpNew, PcLiveNew);
++            r.control_err += PosErr(Carry(mTcpFrozen, Dparent) * PpNew, PcLiveNew);  // generic conjugation
++            r.bControl = true;
++        }
++        r.carry_err /= nTrial; r.nocarry_err /= nTrial; r.control_err /= nTrial;
++        vRes.push_back(r);
++    }
++
++    // 13. three-level frozen chain (P <- C1 <- C2 <- C3) with Sim3 merge: every link
++    //     carried; checks the transitive walk KeyFrame::CarryCulledDependents does.
++    {
++        Result r("13 three-level chain (P<-C1<-C2<-C3) + Sim3 merge");
++        const int nTrial = 200;
++        for(int t = 0; t < nTrial; ++t)
++        {
++            SE3f Pp(PoseRule(Quaternionf::Identity(), Vector3f(1.0f, 0.1f, 0.3f), 1.0));
++            SE3f P1(PoseRule(RandAxis(rng, 15.0f, Vector3f::UnitX()), Vector3f(1.2f, 0.4f, 0.1f), 1.0));
++            SE3f P2(PoseRule(RandAxis(rng, -10.0f, Vector3f::UnitY()), Vector3f(1.5f, 0.7f, 0.2f), 1.0));
++            SE3f P3(PoseRule(RandAxis(rng, 8.0f, Vector3f::UnitZ()), Vector3f(1.7f, 0.9f, 0.35f), 1.0));
++            const SE3f m1 = P1 * Pp.inverse(), m2 = P2 * P1.inverse(), m3 = P3 * P2.inverse();
++            const SE3f D = PoseRule(RandAxis(rng, 60.0f, axGen), Vector3f(0.5f, -1.0f, 0.6f), 0.31);
++            const SE3f PpNew = D * Pp, P3Live = D * P3;
++            r.carry_err += PosErr(Carry(m3, D) * Carry(m2, D) * Carry(m1, D) * PpNew, P3Live);
++            r.nocarry_err += PosErr(m3 * m2 * m1 * PpNew, P3Live);
++        }
++        r.carry_err /= nTrial; r.nocarry_err /= nTrial;
++        vRes.push_back(r);
++    }
++
++    // 14. ordinary BA with a TRANSLATION-ONLY parent update: here carrying is not a
++    //     matter of taste - the frozen link is exact and the no-carry form is off by
++    //     |d - R_m d| <= 2|d| sin(theta_m/2), i.e. by the rotation inside the frozen
++    //     link. Separates "BA carry is a modelling choice" from "BA carry is exact
++    //     for the translation part".
++    {
++        Result r("14 BA, parent translation-only update (|d|=0.3 m)");
++        const int nTrial = 200;
++        for(int t = 0; t < nTrial; ++t)
++        {
++            SE3f Pp(PoseRule(Quaternionf::Identity(), Vector3f(0.2f, -0.1f, 0.4f), 1.0));
++            SE3f Pc(PoseRule(RandAxis(rng, 25.0f, axGen), Vector3f(1.0f, 0.2f, -0.3f), 1.0));
++            const SE3f mTcpFrozen = Pc * Pp.inverse();
++            const SE3f D(Quaternionf::Identity(), Vector3f(0.3f, 0, 0));   // pure translation
++            const SE3f PpNew = D * Pp;
++            const SE3f PcLiveNew = D * Pc;                // a sibling carried by the same d
++            r.carry_err += PosErr(Carry(mTcpFrozen, D) * PpNew, PcLiveNew);
++            r.nocarry_err += PosErr(mTcpFrozen * PpNew, PcLiveNew);
++        }
++        r.carry_err /= nTrial; r.nocarry_err /= nTrial;
++        vRes.push_back(r);
++    }
++
+     printf("\n  %-56s %11s %11s %12s\n", "case", "carry [m]", "no carry [m]", "control [m]");
+     printf("  %-56s %11s %11s %12s\n", "", "", "(defect size)", "");
+     for(const Result &r : vRes)
+diff --git a/tests/test_line_loop.cpp b/tests/test_line_loop.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_line_loop_audit.cpp b/tests/test_line_loop_audit.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_line_loop_gaussian.cpp b/tests/test_line_loop_gaussian.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_line_structure_loss.cpp b/tests/test_line_structure_loss.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_mapline_default.cpp b/tests/test_mapline_default.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_plucker_lba_audit.cpp b/tests/test_plucker_lba_audit.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_stereo_line_jacobian.cpp b/tests/test_stereo_line_jacobian.cpp
+old mode 100644
+new mode 100755
+diff --git a/todolist.txt b/todolist.txt
+index dab28f5165..16a05eac07 100755
+--- a/todolist.txt
++++ b/todolist.txt
+@@ -60,3 +60,174 @@
+ 
+ 你之所以加那三个 Prior（长度、方向、中点），是为了防止线段端点在 3D 空间中沿着射线“乱滑”或者“乱飞”。
+ 其实，你只需要对 vP1 和 vP2 分别加一个“3D位置先验边”（一元边），就能达到完全相同的约束效果，并且不会破坏 g2o 的二分图结构！
++
++
++
++
++我感觉我的代码，对于线段上采样定点，然后拿去gaussian mapping优化，可能会添加很多重复的点（线段上）。我想减少这个现象发生。我需要怎么做。是不是可以采样帧去采样线段上点。或者在某个重大节点上采样点给gaussian mapping 上优化？怎么给大模型话语。我现在是不是github重新开分支（先保存原来的分支）。再开发？
++
++我想减少 Photo-SLAM-L 在线段上给 Gaussian mapping 重复生成点。先保护当前分支及未提交源码，从已验证过 Replica Mono/RGB-D 的线段映射提交建立独立 feat/line-gaussian-dedup 分支/worktree；不要改跟踪、位姿优化或既有结果。先审计现有 LINE-SAMPLE、Voxel Grid、Gaussian 插入和后续 clone/split 路径，按 MapLine ID 统计候选点、实际插入点和最终 Gaussian，确认重复发生在哪一步。实现最小的 mapper 侧去重：稳定 MapLine 首次符合条件时按线段长度生成有限种子；后续关键帧只增加观测与优化约束；用 MapLine ID＋线段参数区间及空间邻近检查阻止重复插入，并处理端点更新、剔除及地图合并。不要仅改为“每 N 帧采样”。用同配置、同训练预算对比旧/新版本的重复率、Gaussian 数、PSNR/SSIM/LPIPS、时间和显存；先验证 Replica office0 Mono/RGB-D，再决定扩量。分开提交去重代码与实验报告，不把尚未验证的跟踪修复混入这个分支。
++
++
++
++**你的担心有依据：相对于原 Photo-SLAM，你的改动明确；放到整个结构化 Gaussian SLAM 领域，目前更接近组合式、增量式创新。** 要加强论文，最有价值的是证明：线提供的几何信息，能让系统在有限计算下更有效地定位、采样和优化。
++
++结合你这版论文，我建议把主攻方向定为：**结构证据驱动的 Gaussian 预算分配**。加速方法和 tracking 都有空间，但需要分别验证。
++
++**1．没有采用最新加速方法，并不是论文的硬伤。**
++
++你需要区分两种收益：
++
++| 收益      | 核心问题                | 验证方式           |
++| ------- | ------------------- | -------------- |
++| 每一步算得更快 | 光栅化、反向传播、参数更新是否更高效  | 每步耗时、总时间       |
++| 每一步更有效  | 初始化和采样是否减少无效优化      | 相同实际步数下的质量     |
++| 表示更精简   | 是否减少重复和低贡献 Gaussian | 相同质量下的数量、显存和时间 |
++
++**你的线几何最适合争取后两项。** 如果以更少 Gaussian、更少实际优化步骤达到相同画质，即使使用已有优化器，也有研究价值。
++
++可以参考的工作中，我建议优先看：
++
++| 工作               | 值得借鉴的部分                     | 与你的关系                     |
++| ---------------- | --------------------------- | ------------------------- |
++| **CaRtGS**       | 快速反向传播、训练调度和表示压缩            | 与 Photo-SLAM 的架构接近，适合优先研究 |
++| **Speedy-Splat** | 更精确的 Gaussian 与图像块相交计算，以及剪枝 | 适合光栅化开销明显的情况              |
++| **FastGS**       | 多视角一致性驱动的增密和剪枝              | 适合研究哪些 Gaussian 值得继续分配计算  |
++
++这些机制分别来自其官方方法介绍；实际接入你的 C++/LibTorch 在线管线仍需评估，论文中的加速倍数不能直接套用。[dapengfeng.github.io](https://dapengfeng.github.io/cartgs/?utm_source=chatgpt.com)
++
++如果移植一个加速模块，建议做四组：
++```
++Photo-SLAM
++Photo-SLAM＋加速模块
++Photo-SLAM-L
++Photo-SLAM-L＋相同加速模块
++```
++
++这样才能看出你的结构方法在更强的基础实现上是否仍有效。
++
++**2．“同样次数下降最多”值得研究，但不要直接比较总训练损失。**
++
++你的目标包含结构正则，原 Photo-SLAM 没有对应项，两者的总 loss 数值不能直接比较。训练视图、分辨率和 Gaussian 数量不同，也会改变一次迭代的成本。
++
++更有说服力的是：
++
++- 相同位姿、关键帧和评价视图下，比较 **PSNR—实际优化次数**；
++- 把结构管理和增密耗时计入，比较 **PSNR—mapping 时间**；
++- 比较达到相近 PSNR、SSIM、LPIPS 时，需要多少 Gaussian。
++
++训练 loss 下降更快，还可能来自对当前训练视图的拟合。应当同时检查固定评价视图上的质量。
++
++**3．线点占比少，可能限制整体收益，但不能仅凭数量判断。**
++
++关键不是“线 Gaussian 占总数多少”，而是：
++
++> 它们实际解释了哪些像素，这些像素贡献了多少原始误差？
++
++举一个简化例子：假设线附近区域只贡献原全图平方误差的 **5%**，你把该区域误差降低一半，而其他区域不变，则全图 PSNR 只提高：
++
++\\[ -10\log\_{10}(1-0.05\times0.5)\approx0.11\ \mathrm{dB}. \\]
++
++因此，局部改善明显、全图 PSNR 变化很小，完全可能同时发生。这里的 5% 是**误差贡献比例**，并非 Gaussian 数量比例。
++
++你需要先测四个量：
++
++- 线 Gaussian 数量及其变化；
++- 考虑透明度合成、遮挡后的实际像素贡献；
++- 共同参考区域内的渲染误差；
++- 光度损失与结构损失对相关参数产生的梯度量级。
++
++如果结构梯度几乎没有作用，先检查损失归一化、参数关联和约束实现；如果局部误差已经很低，继续增加线点也很难改善全图。
++
++**4．最值得改的是：让线决定普通 Gaussian 的资源分配。**
++
++目前你的线信息主要作用于线采样得到的一小部分 Gaussian。可以把它扩展为局部结构管理依据：
++
++| 当前区域的证据       | 建议操作           |
++| ------------- | -------------- |
++| 已有覆盖充分、跨视角误差低 | 减少重复播种和训练机会    |
++| 覆盖不足，且几何证据可靠  | 创建新的 Gaussian  |
++| 多视角都显示缺少细节    | 分裂或细化已有表示      |
++| 高残差伴随位姿不稳定    | 优先检查几何一致性，暂缓增密 |
++| 可靠边界两侧属于不同表面  | 分开维护覆盖，避免跨表面合并 |
++
++这样，即使线相关 Gaussian 数量少，线仍能影响周围普通 Gaussian 的创建、保留和优化。
++
++实现时，先完成你已有 MapLine 的跨帧共享、有限区间覆盖和几何更新；随后再把可靠线段与邻域深度点组成有限平面片。只有存在真实表面证据时，才扩大作用范围。
++
++**局部平面在这里的价值，是把一维线信息扩展为二维表面上的采样依据。** 例如桌沿帮助限定桌面范围，桌面内部采用较少、合适朝向的 Gaussian，边缘附近保留更细表示，侧面和背景独立维护。
++
++近期也已有工作研究相机相关尺度初始化、保持透射率的增密和误差驱动增密。因此，泛泛的“几何引导增密”已经不足以区分方法；你需要明确有限支撑、边界和在线更新具体改变了什么。[arxiv.org](https://arxiv.org/abs/2608.14902?utm_source=chatgpt.com)
++
++**5．Tracking 仍有改进空间，尤其是“什么时候相信线”。**
++
++首先检查你之前关注的那个问题是否仍存在：
++
++> 点线联合优化已经使用线残差，但跟踪成功、关键帧插入和进入丢失状态的判据，是否仍主要依赖点内点数量？
++
++如果是，线对位姿估计有帮助，也可能无法影响最终状态判定。
++
++不过，直接把“点内点数”换成“点数＋线数”也不充分。许多平行线可能重复提供相似方向的约束，仍不能可靠约束完整位姿。
++
++更有价值的改进是：
++
++- 根据残差、观测不确定性和跨帧稳定性判断线是否可靠；
++- 根据归一化后的位姿信息，判断线能否补充点约束较弱的方向；
++- 让可靠线参与位姿接受和关键帧决策；
++- 对高度重复、方向单一或匹配不稳定的线降低权重。
++
++自适应线信息矩阵已有研究，所以“动态调整权重”本身也不能自动成为强创新；关键是你的可靠性与互补性判断是否带来可重复的改善。[ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0262885623002111?utm_source=chatgpt.com)
++
++Tracking 应重点报告完整轨迹、跟踪覆盖率、最长连续跟踪段、重定位次数和 ATE。普通序列中点已经足够时，线的价值可能主要体现在困难片段，而非全程平均 ATE。
++
++**6．还有一个值得优先处理的方向：避免 Gaussian 在补偿位姿错误。**
++
++同一个地方残差很高，可能是缺少表示，也可能是相机位姿刚被 BA 修改。
++
++如果后者被当成增密依据，系统可能创建更多 Gaussian 来解释错位图像。随后位姿再次修正，又需要额外计算消除重影。
++
++因此，你可以让 mapping 根据几何更新采取不同操作：
++
++- 小幅、稳定更新：正常优化；
++- 较大位姿或线几何修正：先同步校正相关 Gaussian；
++- 回环后：更新覆盖记录，优先恢复受影响区域；
++- 几何稳定后：再决定是否需要新增表示。
++
++这能直接联系你关心的“减少实际优化步骤”，也能解释为什么仅增加线损失未必有效。
++
++**7．下一轮，我建议只执行下面这条主线。**
++
++先在 Replica `office0`、`room0` 和 TUM `fr3/office` 上，使用同一份几何输入，比较：
++
++1. 点 mapper；
++2. 现有 Photo-SLAM-L mapper；
++3. 点 mapper＋通用去重和预算管理；
++4. Photo-SLAM-L＋共享有限线支撑和相同预算管理。
++
++先判断三件事：
++
++- 现有线方法是否在相同步数下提高质量；
++- 去重后的收益是否主要来自通用管理；
++- 线支撑是否额外改善结构区域，并减少达到同等质量的成本。
++
++若线本身已经表示良好、邻接表面仍大量重复采样，再加入局部平面。若收益主要受位姿更新影响，先完成地图同步与恢复。若光栅化占主要耗时，再接入合适的加速模块。
++
++**你要争取的研究结果是：结构证据能持续减少错误采样和无效优化，在相同计算预算下改善重建。** 下一轮用一张受控对比表和质量随步数、时间、Gaussian 数量变化的三条曲线，就能判断这条路线是否足以支撑论文的核心贡献。
++
++我想基于上述的改进，应该会大一些。
++
++
++
++总结Photoslam和Photoslam-l的不同点，以及改进：
++| 部分 | Photo-SLAM | Photo-SLAM-L的变化 | 当前证据 |
++|---|---|---|---|
++| 几何特征 | 主要使用ORB点特征 | 增加线检测、描述、匹配和MapLine | 已实现，运行可证 |
++| 位姿优化 | 点观测残差 | 增加线观测残差 | 已证实真实线边参与；稳定收益未建立 |
++| 局部BA | 点地图优化 | 增加线观测及线地图相关优化 | 已参与；独立收益未建立 |
++| 共视与候选选择 | 点共视关系 | 目前仍明显依赖点；线投票部分未使用 | 是现有局限，不是已完成改进 |
++| Gaussian初始化 | 从几何点建立表示 | 增加沿三维线采样、线身份与参考信息 | 已实现；初始化收益尚未干净证明 |
++| Gaussian约束 | 光度优化及原有机制 | 增加位置、方向和形状约束 | 约束活跃，但未建立稳定光度收益 |
++| 增密 | 原有增密机制 | 增加线方向相关分裂/采样 | 曾出现病态；守卫有条件性防崩证据 |
++| 同步与生命周期 | 原系统机制 | 增加线、高斯坐标版本及相关同步处理 | 部分修复已验证，完整事件链仍有边界 |
++| Raster后端 | 原有实现 | A保留原始路径，另有C/H实验入口 | A不能写成新内核加速贡献 |
++| 工程与评价 | 上游实现 | 修复坐标变换、三角化接口、统计导出、评价及状态记录等 | 属于正确性和可复现性成果 |
+ .gitignore                                         |   0
+ ORB-SLAM3/include/AuditTrail.h                     |   0
+ ORB-SLAM3/include/LineMode.h                       |   0
+ ORB-SLAM3/include/StereoLineDebug.h                |   0
+ ORB-SLAM3/src/Frame.cc                             |  12 +-
+ ORB-SLAM3/src/KeyFrame.cc                          |  23 ++-
+ cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_desk_3.yaml    |   0
+ cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_mono.yaml      |   0
+ cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_2.yaml  |   0
+ cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_3.yaml  |   0
+ .../Monocular/ETH3D/eth3d_sfm_garden.yaml          |   0
+ cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_table_7.yaml   |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml        |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_1.yaml   |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_3.yaml   |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_2.yaml      |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_3.yaml      |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_plant_scene_1.yaml |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_bench.yaml     |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_garden.yaml    |   0
+ .../RGB-D/ETH3D/eth3d_sfm_house_loop.yaml          |   0
+ .../RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml          |   0
+ cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_table_7.yaml       |   0
+ .../RGB-D/Rover/rover_campus_small_1.yaml          |   0
+ .../RGB-D/Rover/rover_garden_large_1.yaml          |   0
+ .../associations/fr3_structure_notexture_far.txt   |   0
+ .../fr3_structure_notexture_far_150.txt            |   0
+ .../associations/fr3_structure_notexture_near.txt  |   0
+ .../fr3_structure_notexture_near_150.txt           |   0
+ ..._freiburg3_structure_notexture_far_lowfast.yaml |   0
+ ...freiburg3_structure_notexture_near_lowfast.yaml |   0
+ .../Monocular/ETH3D/eth3d_desk_3.yaml              |   0
+ .../Monocular/ETH3D/eth3d_sfm_garden.yaml          |   0
+ .../Monocular/TUM/tum_freiburg1_room_diag.yaml     |   0
+ .../tum_freiburg3_long_office_household_diag.yaml  |   0
+ .../RGB-D/ETH3D/eth3d_plant_scene_1.yaml           |   0
+ .../RGB-D/ETH3D/eth3d_sfm_bench.yaml               |   0
+ .../RGB-D/ETH3D/eth3d_sfm_garden.yaml              |   0
+ .../RGB-D/ETH3D/eth3d_sfm_house_loop.yaml          |   0
+ .../RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml          |   0
+ .../RGB-D/Rover/rover_campus_small_1.yaml          |   0
+ .../RGB-D/Rover/rover_garden_large_1.yaml          |   0
+ .../tum_freiburg3_long_office_household_diag.yaml  |   0
+ evidence/line_ablation_multiscene/SUMMARY.md       |   0
+ evidence/line_ablation_multiscene/all_runs.csv     |   0
+ .../line_ablation_multiscene/common_window.csv     |   0
+ evidence/line_ablation_multiscene/far_mono.csv     |   0
+ evidence/line_ablation_multiscene/far_rgbd.csv     |   0
+ .../gate_rescue_summary.txt                        |   0
+ evidence/line_ablation_multiscene/logs.tar.gz      | Bin 2333054 -> 2333054 bytes
+ evidence/line_ablation_multiscene/near_mono.csv    |   0
+ evidence/line_ablation_multiscene/near_rgbd.csv    |   0
+ evidence/line_rescue_audit/SUMMARY.md              |   0
+ evidence/line_rescue_audit/eth3d_scan.csv          |   0
+ .../ladder_inventory_interrupted.txt               |   0
+ .../merge_deadlock/gdb_B1_no_repro.txt             |   0
+ .../gdb_B2_interrupted_backtrace.txt               |   0
+ .../merge_deadlock/repro_attempts.txt              |   0
+ .../merge_deadlock/run.meta.drop30_B               |   0
+ .../merge_deadlock/validation_resampler_guard.txt  |   0
+ .../line_rescue_audit/merge_deadlock/wait_graph.md |   0
+ .../line_rescue_audit/opportunity_scan_7seq.txt    |   0
+ .../line_rescue_audit/opportunity_scan_stress.txt  |   0
+ evidence/line_rescue_audit/scan_logs.tar.gz        | Bin 453816 -> 453816 bytes
+ evidence/line_rescue_audit/stress_logs.tar.gz      | Bin 701702 -> 701702 bytes
+ .../stuck_frame1778/log_snapshot.txt               |   0
+ .../line_rescue_audit/stuck_frame1778/run.meta     |   0
+ .../line_rescue_audit/stuck_frame1778/threads.txt  |   0
+ evidence/line_rescue_audit/tum_scan.csv            |   0
+ evidence/line_rescue_diag/SUMMARY.md               |   0
+ evidence/line_rescue_diag/ate_preserved_A1B1C1.txt |   0
+ .../ate_preserved_A1B1C1_rpeOLD_definition.txt     |   0
+ evidence/line_rescue_diag/bc_compare_r1.txt        |   0
+ evidence/line_rescue_diag/bc_perframe_r1.csv       |   0
+ .../line_rescue_diag/gate_summary_all_runs.txt     |   0
+ evidence/line_rescue_diag/interleave_aggregate.txt |   0
+ evidence/line_rescue_diag/line_quality_B_C_r1.txt  |   0
+ scripts/ablation_aggregate.py                      |   0
+ scripts/ablation_common_window.py                  |   0
+ scripts/ablation_replica_rgbd.sh                   |   0
+ scripts/aggregate_abc.py                           |   0
+ scripts/analyze_export_diag.py                     |   0
+ scripts/build_asan.sh                              |   0
+ scripts/chain_error_check.py                       |   0
+ scripts/classify_a6.py                             |   0
+ scripts/compare_runs.py                            |   0
+ scripts/eth3d_ablation_run.sh                      |   0
+ scripts/eval_batch.py                              |   0
+ scripts/eval_mono_stability.py                     |   0
+ scripts/eval_tum_se3.py                            |   0
+ scripts/eval_tum_se3_v2.py                         |   0
+ scripts/export_acceptance.py                       |   0
+ scripts/fr3_abc_interleave.sh                      |   0
+ scripts/fr3_ablation_repeats.sh                    |   0
+ scripts/fr3_ablation_run.sh                        |   0
+ scripts/fr3_line_diag_abc.sh                       |   0
+ scripts/gdb_catch_lba.txt                          |   0
+ scripts/group_common_window.py                     |   0
+ scripts/ladder_report.py                           |   0
+ scripts/line_bc_compare.py                         |   0
+ scripts/line_diag_report.py                        |   0
+ scripts/line_quality_report.py                     |   0
+ scripts/make_tandt_rgb_txt.sh                      |   0
+ scripts/mapper_ablation_full.sh                    |   0
+ scripts/mapper_ablation_replica_rgbd.sh            |   0
+ scripts/mapper_ablation_report.py                  |   0
+ scripts/p6_eval_tum.py                             |   0
+ scripts/p6_rgbd_loop_matrix.sh                     |   0
+ scripts/pose_rebuild_check.py                      |   0
+ scripts/pose_trace_compare.py                      |   0
+ scripts/repro_ab_stability.sh                      |   0
+ scripts/repro_ab_suite.sh                          |   0
+ scripts/repro_accept_30x.sh                        |   0
+ scripts/repro_accept_gauss_10x.sh                  |   0
+ scripts/repro_accept_xseq.sh                       |   0
+ scripts/repro_iso_suite.sh                         |   0
+ scripts/repro_office1_line_lba_crash.sh            |   0
+ scripts/repro_office1_nocsv.sh                     |   0
+ scripts/repro_plucker_e2e.sh                       |   0
+ scripts/repro_regression.sh                        |   0
+ scripts/rescue_frame_audit.py                      |   0
+ scripts/rescue_opportunity_scan.py                 |   0
+ scripts/rot_convention_check.py                    |   0
+ scripts/rotation_axis_check.py                     |   0
+ scripts/rotation_spec_check.py                     |   0
+ scripts/round_stats.py                             |  14 +-
+ scripts/run_asan.sh                                |   0
+ scripts/run_exp3_stability.sh                      |   0
+ scripts/run_exp4_gw.sh                             |   0
+ scripts/run_frame_table.py                         |   0
+ scripts/run_office2_diag2.sh                       |   0
+ scripts/run_office2_diag2_batch.sh                 |   0
+ scripts/run_office2_diagnosis.sh                   |   0
+ scripts/run_office2_diagnosis_batch.sh             |   0
+ scripts/smallbatch_2x.sh                           |   0
+ scripts/stability_table.py                         |   0
+ scripts/stress_rescue_repeats.sh                   |   0
+ scripts/summarize_office2_diag2.py                 |   0
+ scripts/summarize_office2_diagnosis.py             |   0
+ scripts/tandt_mono.sh                              |   0
+ scripts/traj_continuity_audit.py                   |   0
+ tests/cull_chain_invariant.cc                      |  78 ++++++++++
+ tests/test_line_loop.cpp                           |   0
+ tests/test_line_loop_audit.cpp                     |   0
+ tests/test_line_loop_gaussian.cpp                  |   0
+ tests/test_line_structure_loss.cpp                 |   0
+ tests/test_mapline_default.cpp                     |   0
+ tests/test_plucker_lba_audit.cpp                   |   0
+ tests/test_stereo_line_jacobian.cpp                |   0
+ todolist.txt                                       | 171 +++++++++++++++++++++
+ 150 files changed, 290 insertions(+), 8 deletions(-)

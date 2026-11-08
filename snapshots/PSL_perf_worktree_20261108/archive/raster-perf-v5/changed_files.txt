@@ -1,0 +1,5 @@
+cuda_rasterizer/backward.cu
+include/gaussian_mapper_line.h
+reports/raster_perf_v5_report.md
+scripts/table_golden.py
+src/gaussian_mapper_line.cpp

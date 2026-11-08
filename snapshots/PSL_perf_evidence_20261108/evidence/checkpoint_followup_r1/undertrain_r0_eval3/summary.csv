@@ -1,0 +1,3 @@
+arm,backend,requested_steps,actual_steps,ok,gaussians,line_gaussians,psnr_gs_0,psnr_gs_100,psnr_gs_400,psnr_gs_800,psnr_gs_1230
+END_A,0,1230,1230,1,511336,717,30.2927,30.4399,34.1307,34.2903,35.1507
+END_C,2,1230,1230,1,511336,717,30.2927,30.4396,34.1508,34.2896,35.1057

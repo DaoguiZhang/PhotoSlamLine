@@ -1,0 +1,44 @@
+Snapshot completeness audit (existing r0 checkpoints)
+
+All existing frame_500/1000/1500/end snapshot.pt files contain 16 tensors:
+  0 xyz, 1 features_dc, 2 features_rest, 3 scaling, 4 opacity, 5 rotation,
+  6 is_line, 7 line_dir_w, 8 xyz_init, 9 max_radii2D,
+  10 xyz_gradient_accum, 11 denom, 12 exist_since_iter, 13 point_ids,
+  14 ref_kf_id, 15 coord_event_id
+
+They do NOT contain:
+  - Adam exp_avg / exp_avg_sq / step
+  - optimizer param-group learning rates (AdamOptions)
+  - the live optimizer object or its state keyed by TensorImpl
+  - per-keyframe remaining_times_of_use / pyramid usage
+  - a full live iteration schedule
+
+meta.txt contains iteration, optimizer_steps, kf count, Gaussian/line counts,
+active/default SH and the render size.  cameras.csv contains the native training
+camera poses, image paths and intrinsics.  masks.pt/mask_cameras.txt contain the
+undistort masks.  These are sufficient for offline rendering/PSNR, but NOT for
+a faithful optimizer resume.
+
+Therefore the existing end snapshot cannot be restored as a complete optimizer
+state.  Rebuilding Adam from a PLY/snapshot would be a silent state reconstruction
+and was not done.
+
+The controlled follow-up used a live natural-end capture instead:
+evidence/checkpoint_followup_r1/undertrain_r1/terminal_state.txt
+
+That live state has:
+  - 6 Adam groups
+  - exp_avg=1 and exp_avg_sq=1 for every group
+  - LRs: 5.03314e-05, 0.0025, 0.000125, 0.05, 0.005, 0.001
+  - CPU and CUDA generator states
+  - 168 keyframes, 450378 Gaussians, 2080 line Gaussians
+  - frozen_opt_steps=8712, Adam step=8625
+
+The Adam step (8625) is 87 lower than frozen_opt_steps (8712); those optimizer
+steps were not identical counters in this build (some iterations returned
+without a view/update).  Do not claim a one-to-one optimizer-step identity.
+
+Important timing note: the r0 "end" checkpoint (C optimizer_steps=8337,
+174/171 KFs) was captured at input frame 2000 during final refinement, not at
+the process's final terminal state.  The live r1 terminal state is later
+(8712 steps), so its absolute PSNR is not the same checkpoint as r0/end.

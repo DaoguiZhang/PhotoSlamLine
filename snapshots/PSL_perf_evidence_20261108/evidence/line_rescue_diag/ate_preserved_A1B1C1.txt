@@ -1,0 +1,19 @@
+[ATE v2/se3/interp] pairs=1052/1054 (unmatched=2)  dt med=0.0000s max=0.0047s  align_scale=1.000000
+[ATE v2] rmse=0.022824 mean=0.021576 median=0.020784 std=0.007448 max=0.054364 p95=0.033679 m
+[RPE v2] d=1 n=1051 dt=0.0347s trans_rms=0.006602 m (0.1905 m/s) trans_mean=0.005524 m rot_rms=0.4255 deg rot_mean=0.3556 deg
+[RPE v2] d=10 n=1042 dt=0.3460s trans_rms=0.011444 m (0.0331 m/s) trans_mean=0.009179 m rot_rms=0.6877 deg rot_mean=0.5840 deg
+[RPE v2] d=30 n=1022 dt=1.0372s trans_rms=0.016603 m (0.0160 m/s) trans_mean=0.013928 m rot_rms=0.8874 deg rot_mean=0.7689 deg
+[ATE v2/se3/interp] pairs=1052/1054 (unmatched=2)  dt med=0.0000s max=0.0047s  align_scale=1.000000
+[ATE v2] rmse=0.030187 mean=0.028259 median=0.026969 std=0.010619 max=0.056302 p95=0.044701 m
+[RPE v2] d=1 n=1051 dt=0.0347s trans_rms=0.006420 m (0.1852 m/s) trans_mean=0.005421 m rot_rms=0.4133 deg rot_mean=0.3511 deg
+[RPE v2] d=10 n=1042 dt=0.3460s trans_rms=0.011041 m (0.0319 m/s) trans_mean=0.009075 m rot_rms=0.6553 deg rot_mean=0.5604 deg
+[RPE v2] d=30 n=1022 dt=1.0372s trans_rms=0.016885 m (0.0163 m/s) trans_mean=0.014241 m rot_rms=0.8737 deg rot_mean=0.7611 deg
+[ATE v2/se3/interp] pairs=1052/1054 (unmatched=2)  dt med=0.0000s max=0.0047s  align_scale=1.000000
+[ATE v2] rmse=0.020544 mean=0.018730 median=0.019131 std=0.008446 max=0.050777 p95=0.031184 m
+[RPE v2] d=1 n=1051 dt=0.0347s trans_rms=0.006404 m (0.1848 m/s) trans_mean=0.005363 m rot_rms=0.4121 deg rot_mean=0.3468 deg
+[RPE v2] d=10 n=1042 dt=0.3460s trans_rms=0.011015 m (0.0318 m/s) trans_mean=0.008921 m rot_rms=0.6761 deg rot_mean=0.5716 deg
+[RPE v2] d=30 n=1022 dt=1.0372s trans_rms=0.016457 m (0.0159 m/s) trans_mean=0.013419 m rot_rms=0.8934 deg rot_mean=0.7657 deg
+
+### OLD scripts/eval_tum_se3.py -- argument-order defect
+  gt-first : [SE3 ATE] rmse=0.022837 m mean=0.021577 median=0.020778 max=0.054657 n=3551
+  est-first: [SE3 ATE] rmse=0.022824 m mean=0.021574 median=0.020804 max=0.054262 n=1052

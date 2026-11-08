@@ -1,0 +1,4 @@
+key,clean_yaml_value,clean_actual,stable_actual,user_intent_actual,stable_equals_clean,user_intent_vs_stable
+Optimization.absolute_max_ratio,,1500.0,1500.0,100.0,yes,changes
+Optimization.line_sample_step,,0.2,0.2,0.10,yes,changes
+Optimization.max_anisotropy_threshold,,600.0,600.0,100.0,yes,changes

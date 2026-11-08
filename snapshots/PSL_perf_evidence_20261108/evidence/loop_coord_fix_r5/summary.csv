@@ -1,0 +1,2 @@
+event,evt,views,psnr_before_camera_before_model,psnr_after_camera_before_model,psnr_after_camera_corrected_model,dpsnr_pose,dpsnr_map
+loop,0,24,30.58399487,23.47381488,28.98292383,-7.110179981,-1.60107104

@@ -1,0 +1,20 @@
+ M ORB-SLAM3/src/Frame.cc
+ M ORB-SLAM3/src/KeyFrame.cc
+ M include/gaussian_mapper_line.h
+ M include/gaussian_model_line.h
+ M src/gaussian_mapper_line.cpp
+ M src/gaussian_model_line.cpp
+?? 2_Keyframe_Camera_after.txt
+?? 2_Keyframe_Camera_before.txt
+?? 2_Keyframe_MapPoints_after.obj
+?? 2_Keyframe_MapPoints_before.obj
+?? 2_Keyframe_Maplines_after.obj
+?? 2_Keyframe_Maplines_before.obj
+?? ExecMean.txt
+?? LBA_Stats.txt
+?? LocalMapTimeStats.txt
+?? SessionInfo.txt
+?? TrackingTimeStats.txt
+?? scripts/analyze_lineinit.py
+?? scripts/run_lineinit_formal.sh
+?? scripts/run_lineinit_tum.sh

@@ -1,0 +1,34 @@
+Adam step vs host optimizer counter (r1 live C terminal)
+
+terminal_state.txt:
+  frozen_opt_steps = 8712
+  optimizer_steps (host) = 8712
+  Adam group 0..5 step = 8625 for all six groups
+  difference = 87, identical across all groups
+
+Observed group state (all six): exp_avg=1, exp_avg_sq=1, same step 8625.
+LRS: 5.03314e-05, 0.0025, 0.000125, 0.05, 0.005, 0.001.
+
+Code locations that can make the two numbers differ (record only; no optimizer change):
+  - GaussianModelLine::trainingSetup (src/gaussian_model_line.cpp:2237)
+    creates the initial Adam and its param groups.
+  - GaussianModelLine::replaceTensorToOptimizer (around 2318-2340)
+    replaces one param tensor and carries stored_state.step(); if no state
+    exists it sets step(0).  This is used by opacity reset and similar tensor
+    replacement.
+  - densify/clone/split state extension (around 2600-2640)
+    builds new Adam states with stored_state.step() and zero-extended moments.
+  - GaussianMapperLine::restoreRecoverySnapshot (around 4974-5011)
+    rebuilds optimizer state only in diagnostic replay; not used to make the
+    online r1 terminal.
+  - GaussianMapperLine::runRecoveryArm (around 5110)
+    resets frozen_opt_steps_ to 0 for an arm; it does not reset the Adam step.
+  - Host increments: only after optimizer_->step() at mapper lines ~3701 and
+    ~4767.  AdamParamState::step() is advanced inside torch::optim::Adam.
+
+The exact 87-step difference is not resolvable from the existing per-update
+logs: it can come from optimizer calls where a group produced no state update,
+or from a state/tensor replacement event, but no per-iteration Adam-step log
+exists.  All six groups have the same step, so there is no evidence for a
+group-specific reset.  Do not call the difference "87 missed updates" without a
+per-step audit, and do not modify the optimizer on this evidence.

@@ -1,0 +1,13 @@
+# Build-compat patch applied to O_raw (torch 2.x: c10::guts::to_string removed)
+-    auto key = c10::guts::to_string(param.unsafeGetTensorImpl());
++    auto key = param.unsafeGetTensorImpl();
+-    key = c10::guts::to_string(param.unsafeGetTensorImpl());
++    key = param.unsafeGetTensorImpl();
+-        auto key = c10::guts::to_string(param.unsafeGetTensorImpl());
++        auto key = param.unsafeGetTensorImpl();
+-            key = c10::guts::to_string(param.unsafeGetTensorImpl());
++            key = param.unsafeGetTensorImpl();
+-        auto key = c10::guts::to_string(param.unsafeGetTensorImpl());
++        auto key = param.unsafeGetTensorImpl();
+-            key = c10::guts::to_string(param.unsafeGetTensorImpl());
++            key = param.unsafeGetTensorImpl();

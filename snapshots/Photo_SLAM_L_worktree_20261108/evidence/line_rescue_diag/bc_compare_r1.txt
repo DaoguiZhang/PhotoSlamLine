@@ -1,0 +1,21 @@
+==============================================================================
+B (rescue OFF) log : /tmp/lr_abc_interleave/r1_B/log.txt
+C (rescue ON ) log : /tmp/lr_abc_interleave/r1_C/log.txt
+==============================================================================
+
+[B] MotionModel old-path failures : 0
+[C] MotionModel old-path failures : 0
+[C] ACTUAL gate bypasses (old_would_fail=1 AND rescueEnabled=1): 0
+[B] TrackReferenceKF old failures: 0
+[B] frames evaluated (PO calls)  : 2105 over 1053 frames
+[C] frames evaluated (PO calls)  : 2104 over 1053 frames
+
+[B] frames WITH line edges in PO  : 274
+[C] frames WITH line edges in PO  : 265
+    B: total line edges handed to PO = 1258   example frames = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    C: total line edges handed to PO = 1175   example frames = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+[DECISIVE] frames where the OLD point-only flow failed and C bypassed the gate: 0
+
+per-frame CSV written: evidence/line_rescue_diag/bc_perframe_r1.csv
+

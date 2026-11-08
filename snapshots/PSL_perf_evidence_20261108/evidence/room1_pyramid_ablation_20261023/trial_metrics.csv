@@ -1,0 +1,7 @@
+tag,level,exit_code,result_dir,wall_seconds,total_operation_seconds,records,first_psnr,mean_psnr,median_psnr,std_psnr,optimizer_step_calls,adam_advance_total_not_steps,mapper_kfs,gaussians,line_gaussians
+r1_pyramid3,pyramid3,0,/workspace/code/PSL-perf/results/room1_pyramid_ablation_20261023/r1_pyramid3/room1,93,89.6996,181,33.3924636841,32.7391586725,33.1879501343,3.1767503077,10285,61134,181,515835,688
+r1_pyramid2,pyramid2,0,/workspace/code/PSL-perf/results/room1_pyramid_ablation_20261023/r1_pyramid2/room1,91,88.4509,176,29.8809394836,35.5814104297,36.2774047851,2.8689526580,9226,54840,176,500226,972
+r2_pyramid2,pyramid2,0,/workspace/code/PSL-perf/results/room1_pyramid_ablation_20261023/r2_pyramid2/room1,90,87.9682,169,34.2610893250,35.5815385220,35.8681640625,2.0943986974,9031,53682,169,474977,352
+r2_pyramid3,pyramid3,0,/workspace/code/PSL-perf/results/room1_pyramid_ablation_20261023/r2_pyramid3/room1,94,90.8117,188,28.9857463837,32.1732054365,32.3942661286,3.3075611156,10285,61134,188,536884,407
+r3_pyramid3,pyramid3,0,/workspace/code/PSL-perf/results/room1_pyramid_ablation_20261023/r3_pyramid3/room1,90,87.229,173,31.6408252716,32.0827286671,31.7040157318,3.1888687418,9953,59160,173,505445,1179
+r3_pyramid2,pyramid2,0,/workspace/code/PSL-perf/results/room1_pyramid_ablation_20261023/r3_pyramid2/room1,92,88.3027,174,33.5562477112,35.2808051164,35.4446239471,2.2461308889,9240,54924,174,500578,525

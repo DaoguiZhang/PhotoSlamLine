@@ -1,0 +1,8 @@
+[RasterBackend] mode = H SH-stage protection
+[RasterHDispatch] sh=0 backend=C expected=C
+[RasterHDispatch] sh=1 backend=C expected=C
+[RasterHDispatch] sh=2 backend=C expected=C
+[RasterHDispatch] sh=3 backend=A expected=A
+[RasterBackendPin] condition pinned to A
+[RasterBackendPin] condition pinned to C
+[RasterHDispatch] PASS

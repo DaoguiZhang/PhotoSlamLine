@@ -1,0 +1,45 @@
+Adam step / host update audit, formal A/C/H round (h-round3)
+
+At checkpoints, all six Adam groups have the SAME step.  The host
+frozen_opt_steps value (also optimizer_steps in meta) is larger:
+
+arm  checkpoint    host_steps  adam_step  diff
+A    frame_500       2341        2318       23
+A    frame_1000      5061        5011       50
+A    frame_1500      7706        7629       77
+A    frame_end       9769        9672       97
+A    natural_end     9770        9673       97
+C    frame_500       2898        2870       28
+C    frame_1000      5643        5587       56
+C    frame_1500      7616        7540       76
+C    frame_end       8771        8684       87
+C    natural_end     8772        8685       87
+H    frame_500       2808        2780       28
+H    frame_1000      5436        5382       54
+H    frame_1500      8067        7987       80
+H    frame_end      10063        9963      100
+H    natural_end    10064        9964      100
+
+Natural-end example (H): all groups 0..5 step=9964, host=10064; all have
+exp_avg=1 and exp_avg_sq=1.
+
+The difference is already present early (23-28 at frame 500), grows roughly
+with the number of updates, and is identical across all six groups.  This is
+not the signature of one group-specific tensor reset.  It is consistent with
+optimizer calls for which Adam does not advance its per-parameter step (for
+example no differentiable parameter contribution), but the current logs have no
+per-iteration Adam-step record, so the exact cause is NOT established.
+
+Code sites that can affect the relation (audit only, no optimizer change):
+- GaussianModelLine::trainingSetup (gaussian_model_line.cpp:2237) creates Adam.
+- replaceTensorToOptimizer (~2318-2340) carries stored step, or sets step(0) if
+  no state exists.
+- densify/clone/split state extension (~2600-2640) carries stored step and
+  zero-extends moments.
+- GaussianMapperLine::restoreRecoverySnapshot (~4974-5011) can rebuild state in
+  diagnostic replay only.
+- host increments only after optimizer_->step() (mapper ~3701 and ~4767).
+- H selection and stage counters do not touch Adam state.
+
+Do not call the difference "missed updates" without a per-step audit.  The
+Adam moments and LRs are complete; only the counter relation is unresolved.

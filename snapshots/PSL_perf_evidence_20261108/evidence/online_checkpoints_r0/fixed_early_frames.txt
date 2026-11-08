@@ -1,0 +1,12 @@
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000000.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000010.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000011.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000017.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000029.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000094.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000108.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000135.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000141.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000144.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000247.jpg
+/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000261.jpg

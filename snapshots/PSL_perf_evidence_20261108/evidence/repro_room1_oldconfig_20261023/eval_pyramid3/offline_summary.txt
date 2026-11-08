@@ -1,0 +1,8 @@
+snapshot=/workspace/code/PSL-perf/results/repro_room1_oldconfig_pyramid3_20261023/replica_rgbd_0/room1/natural_end/snapshot.pt
+frames=166
+mean_psnr_gs=31.53789151
+mean_psnr=31.52949395
+original_mean_psnr_gs=31.53789151
+original_mean_psnr=31.52949395
+zero_opacity_rows=0
+engine=native_cpp_psnr_gaussian_splatting

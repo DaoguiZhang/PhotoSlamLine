@@ -1,0 +1,2572 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0f0ce74..5a8d282 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -175,6 +175,8 @@ target_link_libraries(train_colmap gaussian_viewer gaussian_mapper)
+ 
+ add_executable(eval_common_views examples/eval_common_views.cpp)
+ target_link_libraries(eval_common_views gaussian_mapper ${TORCH_LIBRARIES} ${OpenCV_LIBRARIES})
++add_executable(eval_checkpoint_snapshot examples/eval_checkpoint_snapshot.cpp)
++target_link_libraries(eval_checkpoint_snapshot gaussian_mapper ${TORCH_LIBRARIES} ${OpenCV_LIBRARIES})
+ add_executable(view_result examples/view_result.cpp)
+ target_link_libraries(view_result gaussian_viewer gaussian_mapper)
+ 
+@@ -275,6 +277,16 @@ target_link_libraries(test_line_structure_loss PRIVATE
+     "${TORCH_LIBRARIES}"
+     Eigen3::Eigen)
+ 
++# LOOP/GBA coordinate-sync contract: pure CPU, no dataset. Exercises the same
++# applyGbaCorrections() entry used by the production LOOP callback (including
++# uniform scale, line anchor/direction, covariance, cache, once-only stamping).
++add_executable(test_loop_coord_sync tests/test_loop_coord_sync.cpp)
++target_link_libraries(test_loop_coord_sync PRIVATE
++    gaussian_mapper
++    ${OpenCV_LIBRARIES}
++    "${TORCH_LIBRARIES}"
++    Eigen3::Eigen)
++
+ 
+ 
+ if(realsense2_FOUND)
+diff --git a/examples/eval_checkpoint_snapshot.cpp b/examples/eval_checkpoint_snapshot.cpp
+new file mode 100644
+index 0000000..924f146
+--- /dev/null
++++ b/examples/eval_checkpoint_snapshot.cpp
+@@ -0,0 +1,372 @@
++// Offline re-render of a diagnostic online checkpoint.
++//
++// Loads the exact model tensors saved by GaussianModelLine::saveFullSnapshot,
++// the exact training cameras and undistort masks captured with the checkpoint,
++// and recomputes the native C++ GS-PSNR.  No new GT camera is created here.
++//
++// usage:
++//   eval_checkpoint_snapshot <gaussian_cfg> <snapshot.pt> <meta.txt>
++//     <cameras.csv> <masks.pt> <mask_cameras.txt> <orb_cfg> <out_dir>
++//
++// The checkpoint-time psnr_gaussian_splatting.txt is only compared afterwards;
++// it is not an input to this program.
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <iomanip>
++#include <iostream>
++#include <map>
++#include <memory>
++#include <sstream>
++#include <string>
++#include <vector>
++
++#include <torch/torch.h>
++#include <opencv2/opencv.hpp>
++
++#include "include/camera.h"
++#include "include/gaussian_keyframe_line.h"
++#include "include/gaussian_model_line.h"
++#include "include/gaussian_parameters_line.h"
++#include "include/gaussian_renderer_line.h"
++#include "include/loss_utils.h"
++
++namespace {
++
++std::map<std::string, std::string> readMeta(const std::filesystem::path& p)
++{
++    std::map<std::string, std::string> m;
++    std::ifstream in(p);
++    std::string line;
++    while (std::getline(in, line)) {
++        const auto pos = line.find('=');
++        if (pos == std::string::npos) continue;
++        m[line.substr(0, pos)] = line.substr(pos + 1);
++    }
++    return m;
++}
++
++struct CamRow {
++    std::size_t fid = 0;
++    std::string image;
++    double qw = 1, qx = 0, qy = 0, qz = 0;
++    double tx = 0, ty = 0, tz = 0;
++    float fx = 0, fy = 0, cx = 0, cy = 0;
++    int width = 0, height = 0;
++};
++
++std::vector<CamRow> readCameras(const std::filesystem::path& p)
++{
++    std::vector<CamRow> rows;
++    std::ifstream in(p);
++    std::string line;
++    std::getline(in, line); // header
++    while (std::getline(in, line)) {
++        if (line.empty()) continue;
++        std::stringstream ss(line);
++        std::string f;
++        std::vector<std::string> v;
++        while (std::getline(ss, f, ',')) v.push_back(f);
++        if (v.size() < 15) continue;
++        CamRow r;
++        r.fid = std::stoull(v[0]);
++        r.image = v[1];
++        r.qw = std::stod(v[2]);
++        r.qx = std::stod(v[3]);
++        r.qy = std::stod(v[4]);
++        r.qz = std::stod(v[5]);
++        r.tx = std::stod(v[6]);
++        r.ty = std::stod(v[7]);
++        r.tz = std::stod(v[8]);
++        r.fx = std::stof(v[9]);
++        r.fy = std::stof(v[10]);
++        r.cx = std::stof(v[11]);
++        r.cy = std::stof(v[12]);
++        r.width = std::stoi(v[13]);
++        r.height = std::stoi(v[14]);
++        rows.push_back(std::move(r));
++    }
++    return rows;
++}
++
++std::vector<int> readMaskIds(const std::filesystem::path& p)
++{
++    std::vector<int> ids;
++    std::ifstream in(p);
++    int id;
++    while (in >> id) ids.push_back(id);
++    return ids;
++}
++
++std::string valueOr(const std::map<std::string, std::string>& m,
++                    const std::string& k, const std::string& d)
++{
++    auto it = m.find(k);
++    return it == m.end() ? d : it->second;
++}
++
++std::vector<long long> readZeroIndices(const char* path)
++{
++    std::vector<long long> out;
++    if (!path || !path[0]) return out;
++    std::ifstream in(path);
++    std::string line;
++    while (std::getline(in, line)) {
++        if (line.empty() || line[0] == '#') continue;
++        std::stringstream ss(line);
++        std::string first;
++        std::getline(ss, first, ',');
++        try {
++            out.push_back(std::stoll(first));
++        } catch (...) {
++            // header or malformed line
++        }
++    }
++    return out;
++}
++
++void saveDiffImage(const torch::Tensor& diff, const std::filesystem::path& path)
++{
++    auto t = diff.detach().to(torch::kCPU).clamp(0.0, 1.0).mul(255.0)
++                 .to(torch::kUInt8).contiguous();
++    if (t.dim() != 3 || t.size(0) != 3) return;
++    const int H = static_cast<int>(t.size(1));
++    const int W = static_cast<int>(t.size(2));
++    std::vector<cv::Mat> ch(3);
++    for (int c = 0; c < 3; ++c)
++        ch[c] = cv::Mat(H, W, CV_8UC1, t[c].data_ptr<uint8_t>());
++    cv::Mat rgb, bgr;
++    cv::merge(ch, rgb);
++    cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
++    cv::imwrite(path.string(), bgr);
++}
++
++} // namespace
++
++int main(int argc, char** argv)
++{
++    if (argc != 9) {
++        std::cerr << "usage: " << argv[0]
++                  << " <gaussian_cfg> <snapshot.pt> <meta.txt> <cameras.csv>"
++                     " <masks.pt> <mask_cameras.txt> <orb_cfg> <out_dir>\n";
++        return 2;
++    }
++    const torch::DeviceType device =
++        torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
++    std::filesystem::path out(argv[8]);
++    std::filesystem::create_directories(out);
++
++    // Read the same model parameters that the mapper used.
++    cv::FileStorage gcfg(argv[1], cv::FileStorage::READ);
++    if (!gcfg.isOpened()) {
++        std::cerr << "cannot open " << argv[1] << "\n";
++        return 2;
++    }
++    GaussianModelParamsLine mp;
++    mp.sh_degree_ = static_cast<int>(gcfg["Model.sh_degree"]);
++    mp.white_background_ =
++        static_cast<int>(gcfg["Model.white_background"]) != 0;
++    mp.resolution_ = static_cast<float>(gcfg["Model.resolution"]);
++    mp.data_device_ = device == torch::kCUDA ? "cuda" : "cpu";
++
++    auto model = std::make_shared<GaussianModelLine>(mp);
++    model->device_type_ = device;
++    if (model->loadFullSnapshot(argv[2]) == 0) {
++        std::cerr << "[OfflineCkpt] failed to load snapshot " << argv[2] << "\n";
++        return 3;
++    }
++    const auto meta = readMeta(argv[3]);
++    const int active_sh = std::stoi(valueOr(meta, "active_sh", "3"));
++    model->active_sh_degree_ = active_sh;
++
++    long long line_n = 0;
++    if (model->is_line_.defined() && model->is_line_.numel() > 0)
++        line_n = model->is_line_.to(torch::kCPU).sum().item<int64_t>();
++    std::cerr << "[OfflineCkpt] model=" << argv[2]
++              << " n=" << model->xyz_.size(0) << " line=" << line_n
++              << " active_sh=" << model->active_sh_degree_
++              << " max_sh=" << model->max_sh_degree_ << "\n";
++
++    const auto cams = readCameras(argv[4]);
++    const auto mask_ids = readMaskIds(argv[6]);
++    std::vector<torch::Tensor> masks;
++    try {
++        torch::load(masks, argv[5]);
++    } catch (const std::exception& e) {
++        std::cerr << "[OfflineCkpt] mask load failed: " << e.what() << "\n";
++        return 4;
++    }
++    if (masks.empty() || mask_ids.empty()) {
++        std::cerr << "[OfflineCkpt] no masks\n";
++        return 4;
++    }
++
++    cv::FileStorage ocfg(argv[7], cv::FileStorage::READ);
++    if (!ocfg.isOpened()) {
++        std::cerr << "cannot open " << argv[7] << "\n";
++        return 2;
++    }
++    const float old_fx = static_cast<float>(ocfg["Camera1.fx"]);
++    const float old_fy = static_cast<float>(ocfg["Camera1.fy"]);
++    const float old_cx = static_cast<float>(ocfg["Camera1.cx"]);
++    const float old_cy = static_cast<float>(ocfg["Camera1.cy"]);
++    const float k1 = ocfg["Camera1.k1"].empty()
++                         ? 0.0f : static_cast<float>(ocfg["Camera1.k1"]);
++    const float k2 = ocfg["Camera1.k2"].empty()
++                         ? 0.0f : static_cast<float>(ocfg["Camera1.k2"]);
++    const float p1 = ocfg["Camera1.p1"].empty()
++                         ? 0.0f : static_cast<float>(ocfg["Camera1.p1"]);
++    const float p2 = ocfg["Camera1.p2"].empty()
++                         ? 0.0f : static_cast<float>(ocfg["Camera1.p2"]);
++
++    // The checkpoint stores undistorted intrinsics.  Use the same old K and
++    // distortion coefficients as the mapper to produce the GT image.
++    auto makeCamera = [&](const CamRow& r, int camera_id) {
++        Camera c(static_cast<camera_id_t>(camera_id), r.width, r.height,
++                 {r.fx, r.fy, r.cx, r.cy}, Camera::CameraModelType::PINHOLE,
++                 true);
++        c.dist_coeff_ = (cv::Mat_<float>(1, 4) << k1, k2, p1, p2);
++        cv::Mat K_old = (cv::Mat_<float>(3, 3) << old_fx, 0.f, old_cx,
++                         0.f, old_fy, old_cy, 0.f, 0.f, 1.f);
++        cv::Mat K_new = (cv::Mat_<float>(3, 3) << r.fx, 0.f, r.cx,
++                         0.f, r.fy, r.cy, 0.f, 0.f, 1.f);
++        c.initUndistortRectifyMapAndMask(K_old, cv::Size(r.width, r.height),
++                                         K_new, false);
++        return c;
++    };
++
++    GaussianPipelineParamsLine pipe(true, true);
++    torch::Tensor bg = mp.white_background_
++                           ? torch::ones({3}, torch::TensorOptions()
++                                                  .dtype(torch::kFloat32)
++                                                  .device(device))
++                           : torch::zeros({3}, torch::TensorOptions()
++                                                   .dtype(torch::kFloat32)
++                                                   .device(device));
++    torch::Tensor empty_color = torch::empty(
++        0, torch::TensorOptions().device(device));
++
++    const auto mask_id = mask_ids.front();
++    torch::Tensor mask = masks.front().to(device).to(torch::kFloat32);
++    // The saved mask is [3,H,W] for the RGB-D camera.
++    if (mask.dim() == 2) mask = mask.unsqueeze(0);
++    if (mask.size(0) == 1) mask = mask.repeat({3, 1, 1});
++
++    const auto zero_indices = readZeroIndices(
++        std::getenv("PHOTO_SLAM_ZERO_INDICES"));
++    torch::Tensor zero_idx;
++    if (!zero_indices.empty()) {
++        std::vector<int64_t> zi(zero_indices.begin(), zero_indices.end());
++        zero_idx = torch::from_blob(zi.data(),
++                                    {static_cast<long>(zi.size())},
++                                    torch::TensorOptions().dtype(torch::kLong))
++                       .clone()
++                       .to(device);
++    }
++    const char* diff_env = std::getenv("PHOTO_SLAM_DIFF_DIR");
++    std::filesystem::path diff_dir;
++    if (diff_env && diff_env[0]) {
++        diff_dir = diff_env;
++        std::filesystem::create_directories(diff_dir);
++    }
++    torch::Tensor saved_opacity = model->opacity_.detach().clone();
++    std::cerr << "[OfflineCkpt] zero_opacity_rows=" << zero_indices.size()
++              << " diff_dir=" << diff_dir << "\n";
++
++    std::ofstream csv(out / "offline_psnr.csv");
++    csv << "fid,psnr_gs,psnr,orig_psnr_gs,orig_psnr,width,height,"
++           "render_seconds\n";
++    double sum_gs = 0.0, sum_psnr = 0.0;
++    double sum_orig_gs = 0.0, sum_orig_p = 0.0;
++    std::size_t n = 0;
++    for (const auto& r : cams) {
++        cv::Mat bgr = cv::imread(r.image, cv::IMREAD_UNCHANGED);
++        if (bgr.empty()) {
++            std::cerr << "[OfflineCkpt] missing image " << r.image << "\n";
++            continue;
++        }
++        cv::Mat rgb;
++        if (bgr.channels() == 3)
++            cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
++        else
++            cv::cvtColor(bgr, rgb, cv::COLOR_GRAY2RGB);
++        rgb.convertTo(rgb, CV_32FC3, 1.0 / 255.0);
++
++        Camera cam = makeCamera(r, mask_id);
++        cv::Mat gt_undist;
++        cam.undistortImage(rgb, gt_undist);
++        torch::Tensor gt =
++            tensor_utils::cvMat2TorchTensor_Float32(gt_undist, device);
++
++        auto kf = std::make_shared<GaussianKeyframeLine>(r.fid, 0);
++        kf->setCameraParams(cam);
++        kf->setPose(r.qw, r.qx, r.qy, r.qz, r.tx, r.ty, r.tz);
++        kf->computeTransformTensors();
++
++        const auto t0 = std::chrono::steady_clock::now();
++        torch::NoGradGuard ng;
++        // Original render first; the variant is rendered from the exact same
++        // model/camera/SH/background/mask with only the selected opacity rows
++        // zeroed (logit -100).
++        model->opacity_.copy_(saved_opacity);
++        auto pkg_orig = GaussianRendererWithLine::renderWithLine(
++            kf, r.height, r.width, model, pipe, bg, empty_color);
++        torch::Tensor orig = std::get<0>(pkg_orig) * mask;
++        torch::Tensor rendered = orig;
++        if (zero_idx.defined() && zero_idx.numel() > 0) {
++            model->opacity_.index_put_({zero_idx}, -100.0f);
++            auto pkg_var = GaussianRendererWithLine::renderWithLine(
++                kf, r.height, r.width, model, pipe, bg, empty_color);
++            rendered = std::get<0>(pkg_var) * mask;
++            model->opacity_.copy_(saved_opacity);
++            if (!diff_dir.empty()) {
++                torch::Tensor diff = (0.5f + 2.0f * (orig - rendered))
++                                         .clamp(0.0f, 1.0f);
++                char name[32];
++                std::snprintf(name, sizeof(name), "%06zu.png",
++                              static_cast<std::size_t>(r.fid));
++                saveDiffImage(diff, diff_dir / name);
++            }
++        }
++        auto t1 = std::chrono::steady_clock::now();
++
++        torch::Tensor gt_t = gt;
++        float p_gs = loss_utils::psnr_gaussian_splatting(rendered, gt_t)
++                         .item().toFloat();
++        float p = loss_utils::psnr(rendered, gt_t).item().toFloat();
++        torch::Tensor orig_t = orig;
++        float orig_gs = loss_utils::psnr_gaussian_splatting(orig_t, gt_t)
++                            .item().toFloat();
++        float orig_p = loss_utils::psnr(orig_t, gt_t).item().toFloat();
++        const double sec =
++            std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0)
++                .count() / 1e6;
++        csv << r.fid << ',' << std::setprecision(10) << p_gs << ',' << p << ','
++            << orig_gs << ',' << orig_p << ',' << r.width << ',' << r.height
++            << ',' << sec << '\n';
++        sum_gs += p_gs;
++        sum_psnr += p;
++        sum_orig_gs += orig_gs;
++        sum_orig_p += orig_p;
++        ++n;
++    }
++    csv.close();
++
++    std::ofstream summary(out / "offline_summary.txt");
++    summary << "snapshot=" << argv[2] << "\n"
++            << "frames=" << n << "\n"
++            << "mean_psnr_gs=" << std::setprecision(10)
++            << (n ? sum_gs / n : 0.0) << "\n"
++            << "mean_psnr=" << (n ? sum_psnr / n : 0.0) << "\n"
++            << "original_mean_psnr_gs="
++            << (n ? sum_orig_gs / n : 0.0) << "\n"
++            << "original_mean_psnr=" << (n ? sum_orig_p / n : 0.0) << "\n"
++            << "zero_opacity_rows=" << zero_indices.size() << "\n"
++            << "engine=native_cpp_psnr_gaussian_splatting\n";
++    std::cerr << "[OfflineCkpt] frames=" << n << " mean_gs="
++              << (n ? sum_gs / n : 0.0) << " -> " << out << "\n";
++    return n ? 0 : 5;
++}
+diff --git a/examples/replica_rgbd.cpp b/examples/replica_rgbd.cpp
+index 8c95b4b..23ab27c 100644
+--- a/examples/replica_rgbd.cpp
++++ b/examples/replica_rgbd.cpp
+@@ -30,6 +30,8 @@
+ 
+ #include <opencv2/core/core.hpp>
+ 
++#include "include/online_progress.h"
++
+ #include "ORB-SLAM3/include/System.h"
+ 
+ #include "include/gaussian_mapper.h"
+@@ -81,6 +83,7 @@ int main(int argc, char **argv)
+ 
+     // Check consistency in the number of images
+     int nImages = vstrImageFilenamesRGB.size();
++    photo_slam_diag::setTotalFrames(nImages);
+     if (vstrImageFilenamesRGB.empty())
+     {
+         std::cerr << std::endl << "No images found in provided path." << std::endl;
+@@ -165,6 +168,7 @@ int main(int argc, char **argv)
+     cv::Mat imRGB, imD;
+     for (int ni = 0; ni < nImages; ni++)
+     {
++        photo_slam_diag::setInputFrame(ni + 1);
+         if (pSLAM->isShutDown())
+             break;
+         // Read image and depthmap from file
+diff --git a/include/gaussian_mapper_line.h b/include/gaussian_mapper_line.h
+index 54be229..a1aaed4 100644
+--- a/include/gaussian_mapper_line.h
++++ b/include/gaussian_mapper_line.h
+@@ -34,6 +34,9 @@
+ #include <memory>
+ #include <random>
+ #include <mutex>
++#include <cstdint>
++#include <cstring>
++#include <unordered_map>
+ 
+ #include "append_refinement.h"
+ 
+@@ -123,6 +126,11 @@ public:
+     // whatever the caller selected (C for the L acceptance run).
+     bool appendRefinementEnabled();
+     void runAppendRefinement();
++    // One-shot controlled under-training diagnostic.  Called only at the
++    // natural end of a live run, where the complete Adam/LR/counter state is
++    // still in memory.  Two fixed-topology arms (A and C) start from that same
++    // state and replay one identical view sequence.
++    void runUndertrainContinuationDiagnostic();
+ 
+     // Frozen-geometry mapper ablation. The scene produced by SLAM (keyframe
+     // poses + images, sparse point cloud, line samples) is frozen once at the
+@@ -428,7 +436,8 @@ public:
+     void evalAtFrozenStep(long long opt_steps, const std::string& tag,
+                           double& psnr_out, double& ssim_out, double& l1_out,
+                           double& struct_ori_out, double& struct_shape_out,
+-                          double& eval_seconds_out);
++                          double& eval_seconds_out,
++                          double* psnr_gs_out = nullptr);
+     void assertFrozenCounts(const char* where);
+     // Per-eval-point mechanism diagnostics (reads only, plus an env-gated
+     // separated-gradient probe that restores the gradient buffers afterwards).
+@@ -519,6 +528,20 @@ public:
+     // (not from the pre-generated sequence): 4 ints per step =
+     // {completed_optimizer_steps, keyframe fid, gaussian pyramid level, default_sh_}.
+     std::vector<int> frozen_train_views_flat_;
++    // Lightweight counters for the under-training diagnostic.  They describe
++    // the views actually consumed by the trainer, not the planned sequence.
++    int frozen_last_train_level_ = -1;
++    int frozen_last_train_width_ = 0;
++    int frozen_last_train_height_ = 0;
++    int frozen_last_train_sh_ = -1;
++    std::map<int, long long> frozen_level_counts_;
++    std::map<int, long long> frozen_sh_counts_;
++    // Next-online-run counters.  Enabled only by PHOTO_SLAM_STAGE_COUNTERS.
++    bool stage_counters_enabled_ = false;
++    long long stage_training_pixels_ = 0;
++    std::map<int, long long> stage_level_counts_;
++    std::map<int, long long> stage_sh_counts_;
++    void writeStageCounters(const std::filesystem::path& dir);
+ 
+     // ---- gba-recovery-v1: in-process state snapshot + two-arm experiment ----
+ public:
+@@ -550,6 +573,7 @@ public:
+         int active_sh = 0;
+         int default_sh = 0;
+         float ema_loss = 0.0f;
++        torch::Tensor cpu_rng_state, cuda_rng_state;
+         std::map<std::size_t, int> kfs_used_times;
+         std::map<std::size_t, RecoveryKfState> kfs;
+     };
+@@ -571,6 +595,8 @@ public:
+         std::string schedule_fp; // iteration/SH/keyframe usage/training views
+         // completed_optimizer_step -> (PSNR, SSIM)
+         std::map<long long, std::pair<double, double>> eval_quality;
++        // completed_optimizer_step -> native psnr_gaussian_splatting
++        std::map<long long, double> eval_gs;
+         // Only filled for short repeat arms (steps <= 10).
+         std::map<long long, std::string> step_param_fp;
+     };
+@@ -643,7 +669,8 @@ public:
+         unsigned long evt);
+ 
+     RecoverySnapshot captureRecoverySnapshot();
+-    void restoreRecoverySnapshot(const RecoverySnapshot& snap);
++    void restoreRecoverySnapshot(const RecoverySnapshot& snap,
++                                 bool force_rebuild = false);
+     // gba-state-audit: records the state that is actually fed to Adam, keyed by
+     // the parameter's TensorImpl, plus identity checks against the model member.
+     void writeAdamAudit(const char* stage);
+@@ -658,13 +685,25 @@ public:
+         const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+         unsigned long evt, bool apply_map, int steps,
+         const std::vector<long long>& eval_steps,
+-        const std::filesystem::path& out_dir);
++        const std::filesystem::path& out_dir,
++        bool variable_topology = false);
++    // PHOTO_SLAM_TOPO_REPLAY_AT=<iteration> + PHOTO_SLAM_TOPO_REPLAY_DIR=<dir>
++    // + PHOTO_SLAM_TOPO_REPLAY_STEPS=<n>. At the requested iteration this
++    // freezes the live state in memory and runs A0/A1/C from the SAME
++    // parameters, Adam state, cameras and scheduled view sequence, but with
++    // the production densify/clone/split/prune path enabled.
++    void maybeRunTopologyReplay();
++    // Diagnostic online checkpoints at input-frame progress. Saves model
++    // parameters, camera/image metadata, masks and native checkpoint metrics.
++    void maybeCheckpointOnline();
+     void runGbaRecoveryExperiment(
+         const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+         const std::vector<std::pair<unsigned long, Sophus::SE3f>>& after_poses,
+         unsigned long evt);
+ 
+     bool gba_recovery_done_ = false;
++    bool topo_replay_done_ = false;
++    std::size_t online_ckpt_cursor_ = 0;
+     // Diagnostic hook: ("after_backward" | "after_update"). Used only by the
+     // short gba-recovery mechanism diagnosis; null in production.
+     std::function<void(const char*)> recovery_diag_hook_;
+@@ -748,6 +787,14 @@ protected:
+     // geom-sync-v3: last GlobalBA event actually applied to the Gaussians.
+     // Used for duplicate/stale rejection and for stamping new rows.
+     unsigned long last_applied_gba_event_ = 0;
++    // ORB-SLAM3 payload id of the last accepted GlobalBA. Kept separately from
++    // the model's model-local coordinate version (LOOP events do not carry a
++    // payload id, so both event types share one monotonically increasing
++    // coordinate sequence).
++    unsigned long last_gba_payload_event_ = 0;
++    // Stable fingerprint of an immutable LOOP payload -> coordinate version.
++    // A replayed MappingOperation maps back to the same version and is a no-op.
++    std::unordered_map<std::uint64_t, unsigned long> loop_coord_event_versions_;
+     long long lm_created_rows_total_ = 0;  // ordinary LocalMapping additions
+ 
+     unsigned long min_num_initial_map_kfs_;
+diff --git a/include/gaussian_model_line.h b/include/gaussian_model_line.h
+index 15f3e6a..09e1016 100644
+--- a/include/gaussian_model_line.h
++++ b/include/gaussian_model_line.h
+@@ -113,8 +113,11 @@ public:
+     // world_deltas[i] = T_after^-1 * T_before maps the OLD world frame to the
+     // NEW one for every Gaussian anchored at kf id world_deltas[i].first.
+     // Ordinary rows: centre/rotation/anchor rigidly moved. Line rows also get
+-    // line_dir_w_ rotated. Scaling is untouched (SE(3), no scale). Adam: the
+-    // xyz first moment is rotated, the second moment is left in place.
++    // line_dir_w_ rotated. A non-unit world_scale applies the Sim(3) uniform
++    // scale to centres/anchors and adds log(world_scale) to the log-scales.
++    // Adam: the xyz first moment is transformed, the second moment is left in
++    // place. `event_id` is a model-local coordination version: LOOP and GBA
++    // share one monotonic sequence so each row is corrected exactly once.
+     struct GbaCorrectionStats
+     {
+         long long moved_rows = 0;          // rows processed (selected)
+@@ -131,7 +134,12 @@ public:
+     GbaCorrectionStats applyGbaCorrections(
+         const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+         unsigned long event_id,
+-        GbaCorrectionMode mode = GbaCorrectionMode::Full);
++        GbaCorrectionMode mode = GbaCorrectionMode::Full,
++        float world_scale = 1.0f);
++    // Every coordinate-changing event (LOOP or GBA) gets a unique model-local
++    // version. This is deliberately independent of ORB-SLAM3's GBA payload id,
++    // which LOOP events do not carry.
++    unsigned long allocateCoordEventId();
+     unsigned long lastAppliedGbaEvent() const { return last_applied_gba_event_; }
+     torch::Tensor refKfIds() const { return ref_kf_id_; }
+     torch::Tensor coordEventIds() const { return coord_event_id_; }
+@@ -307,6 +315,7 @@ public:
+     // from a replayed old event.
+     torch::Tensor coord_event_id_; // [N] int64
+     unsigned long last_applied_gba_event_ = 0;
++    unsigned long coord_event_seq_ = 0;
+ 
+     // --- Stage-1 performance: cached line subset -----------------------------
+     // Boolean-mask indexing on CUDA reads the true-count back from the device,
+@@ -360,6 +369,27 @@ public:
+     bool auditEnabled() const { return audit_enabled_; }
+     long long auditIteration() const { return audit_iter_; }
+     const std::string& auditReasonLabel() const { return audit_reason_; }
++    // Cumulative creation-audit counters. Only meaningful when
++    // PHOTO_SLAM_CREATION_AUDIT is enabled; zero otherwise.
++    long long auditCloneCount() const { return audit_clone_; }
++    long long auditSplitCount() const { return audit_split_; }
++    long long auditPruneCount() const { return audit_prune_; }
++
++    // ===== variable-topology audit (diagnostic only) ========================
++    // PHOTO_SLAM_TOPO_AUDIT=<prefix> writes one row per densify stage plus the
++    // top gradient-selected rows at the pre-prune snapshot. It is deliberately
++    // capture-only: every statistic forces a device read, so it must stay off
++    // in timing runs. `setLastTopologyLosses` is fed by the training loop.
++    bool topoAuditEnabled() const { return topo_enabled_; }
++    void setTopologyArm(const std::string& arm) { topo_arm_ = arm; }
++    void setTopologyIteration(long long it) { topo_iter_ = it; }
++    void setLastTopologyLosses(float photo, float structure)
++    {
++        last_topology_photo_loss_ = photo;
++        last_topology_struct_loss_ = structure;
++    }
++    float lastTopologyPhotoLoss() const { return last_topology_photo_loss_; }
++    float lastTopologyStructLoss() const { return last_topology_struct_loss_; }
+ 
+     // ===== mapper-budget-v1: creation-batch log + full snapshot ==============
+     // The creation log records every accepted creation batch (kind, iteration,
+@@ -405,6 +435,19 @@ public:
+     // line-population audit state
+     bool lpop_enabled_ = false, lpop_initialised_ = false;
+     std::ofstream lpop_out_, lpop_struct_out_;
++    // variable-topology audit state
++    bool topo_enabled_ = false, topo_initialised_ = false;
++    std::ofstream topo_out_, topo_selected_out_, topo_mask_out_;
++    std::string topo_arm_;
++    long long topo_iter_ = -1;
++    float last_topology_photo_loss_ = 0.0f;
++    float last_topology_struct_loss_ = 0.0f;
++    void topoAuditInitIfNeeded();
++    void topoAuditRecord(const char* stage, long long total_before,
++                         long long line_before, long long prune_opacity,
++                         long long prune_lazy, long long prune_big,
++                         long long clone_delta, long long split_delta,
++                         float grad_threshold, bool write_selected);
+     torch::Tensor point_ids_; // [N] 类型为 kLong，存储每个点的唯一 ID （用于后续处理）
+     torch::Tensor features_dc_;
+     torch::Tensor features_rest_;
+diff --git a/include/online_progress.h b/include/online_progress.h
+new file mode 100644
+index 0000000..84de343
+--- /dev/null
++++ b/include/online_progress.h
+@@ -0,0 +1,23 @@
++#pragma once
++#include <atomic>
++#include <cstddef>
++
++// Diagnostic-only input progress for the online checkpoint logger. The mapper
++// cannot otherwise distinguish "input frame reached" from "mapper iteration".
++namespace photo_slam_diag
++{
++inline std::atomic<long long>& inputFrame()
++{
++    static std::atomic<long long> v{-1};
++    return v;
++}
++inline std::atomic<long long>& totalFrames()
++{
++    static std::atomic<long long> v{-1};
++    return v;
++}
++inline void setInputFrame(long long i) { inputFrame().store(i, std::memory_order_relaxed); }
++inline void setTotalFrames(long long n) { totalFrames().store(n, std::memory_order_relaxed); }
++inline long long getInputFrame() { return inputFrame().load(std::memory_order_relaxed); }
++inline long long getTotalFrames() { return totalFrames().load(std::memory_order_relaxed); }
++} // namespace photo_slam_diag
+diff --git a/src/gaussian_mapper_line.cpp b/src/gaussian_mapper_line.cpp
+index 32ebed7..052117f 100644
+--- a/src/gaussian_mapper_line.cpp
++++ b/src/gaussian_mapper_line.cpp
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "include/gaussian_mapper_line.h"
++#include "include/loop_event_key.h"
+ 
+ #include <ATen/cuda/CUDAEvent.h>
+ 
+@@ -31,8 +32,11 @@
+ #include <sstream>
+ #include <opencv2/imgcodecs.hpp>
+ #include <opencv2/imgproc.hpp>
++#include <ATen/CPUGeneratorImpl.h>
++#include <ATen/cuda/CUDAGeneratorImpl.h>
+ 
+ #include "LineMode.h"
++#include "include/online_progress.h"
+ 
+ // defined in cuda_rasterizer/backward.cu
+ void SetRasterBackend(int b);
+@@ -528,6 +532,7 @@ void GaussianMapperLine::run()
+     // Initialize append/budget configuration BEFORE natural training so the
+     // cumulative training-time boundary is active from the first real update.
+     appendRefinementEnabled();
++    stage_counters_enabled_ = (std::getenv("PHOTO_SLAM_STAGE_COUNTERS") != nullptr);
+     // First loop: Initial gaussian mapping
+     std::cerr << "[DEBUG] Thread: GaussianMapperLine thread started." << std::endl;
+     while (!isStopped()) {
+@@ -984,6 +989,14 @@ void GaussianMapperLine::run()
+     phase_refine_s_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+         std::chrono::steady_clock::now() - refine_start).count() / 1000.0;
+ 
++    // Natural-end stage counters, before any diagnostic arm can add updates.
++    if (stage_counters_enabled_)
++        writeStageCounters(result_dir_ / "stage_counts_final");
++
++    // Controlled under-training diagnostic.  This must run while the complete
++    // optimizer state is alive; the saved snapshots do not contain Adam/LR.
++    runUndertrainContinuationDiagnostic();
++
+     // Append refinement: real extra optimizer updates on the EXISTING line
+     // model. Inserted AFTER the original final refinement and BEFORE shutdown
+     // export/signalStop(); the natural training and fixed refinement rules are
+@@ -1823,6 +1836,9 @@ void GaussianMapperLine::maybeSnapshotAndAudit()
+         const char* e = std::getenv("PHOTO_SLAM_SNAPSHOT_DIR");
+         return std::string(e ? e : "");
+     }();
++    // Topology replay is independent of the ordinary snapshot switch.
++    maybeRunTopologyReplay();
++    maybeCheckpointOnline();
+     if (dir.empty() || !gaussians_ || at.empty()) return;
+     const long long it = getIteration();
+     bool hit = false;
+@@ -1840,6 +1856,7 @@ void GaussianMapperLine::maybeSnapshotAndAudit()
+     std::cerr << "[Snapshot] step " << it << " -> " << sp << " (n="
+               << gaussians_->auditTotal() << ", sh=" << default_sh_ << ")"
+               << std::endl;
++    maybeRunTopologyReplay();
+ }
+ 
+ void GaussianMapperLine::lineSampleAuditLog(long long raw_points, long long candidates,
+@@ -2446,9 +2463,11 @@ void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string
+                                          double& psnr_out, double& ssim_out,
+                                          double& l1_out, double& struct_ori_out,
+                                          double& struct_shape_out,
+-                                         double& eval_seconds_out)
++                                         double& eval_seconds_out,
++                                         double* psnr_gs_out)
+ {
+     psnr_out = -1.0;
++    if (psnr_gs_out) *psnr_gs_out = -1.0;
+     ssim_out = -1.0;
+     l1_out = -1.0;
+     struct_ori_out = -1.0;
+@@ -2474,7 +2493,7 @@ void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string
+     std::filesystem::create_directories(gt_dir);
+     std::filesystem::create_directories(resid_dir);
+     std::ofstream pf(pdir / "per_frame.csv");
+-    pf << "step,variant,kf_index,kf_id,fid,psnr,ssim,l1\n";
++    pf << "step,variant,kf_index,kf_id,fid,psnr,psnr_gs,ssim,l1\n";
+ 
+     torch::NoGradGuard ng;
+ 
+@@ -2492,7 +2511,7 @@ void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string
+             (void)gaussians_->xyz_.select(0, 0).sum().item<double>();
+     };
+ 
+-    double sum_psnr = 0.0, sum_ssim = 0.0, sum_l1 = 0.0;
++    double sum_psnr = 0.0, sum_psnr_gs = 0.0, sum_ssim = 0.0, sum_l1 = 0.0;
+     std::size_t n = 0;
+     syncDev();
+     const auto t0 = std::chrono::steady_clock::now();
+@@ -2509,8 +2528,11 @@ void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string
+         auto gt_image = pkf->original_image_;
+         const float s = loss_utils::ssim(masked_image, gt_image, device_type_).item().toFloat();
+         const float p = loss_utils::psnr(masked_image, gt_image).item().toFloat();
++        const float pgs = loss_utils::psnr_gaussian_splatting(masked_image, gt_image)
++                              .item().toFloat();
+         const float l1 = loss_utils::l1_loss(masked_image, gt_image).item().toFloat();
+         sum_psnr += static_cast<double>(p);
++        sum_psnr_gs += static_cast<double>(pgs);
+         sum_ssim += static_cast<double>(s);
+         sum_l1 += static_cast<double>(l1);
+         ++n;
+@@ -2526,12 +2548,13 @@ void GaussianMapperLine::evalAtFrozenStep(long long opt_steps, const std::string
+         }
+         pf << opt_steps << ',' << tag << ',' << idx << ',' << ids[idx] << ','
+            << pkf->fid_ << ',' << std::fixed << std::setprecision(8) << p << ','
+-           << s << ',' << l1 << '\n';
++           << pgs << ',' << s << ',' << l1 << '\n';
+     }
+     syncDev();
+     eval_seconds_out = std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - t0).count() / 1e6;
+ 
++    if (psnr_gs_out && n > 0) *psnr_gs_out = sum_psnr_gs / static_cast<double>(n);
+     if (n > 0) {
+         psnr_out = sum_psnr / static_cast<double>(n);
+         ssim_out = sum_ssim / static_cast<double>(n);
+@@ -3321,6 +3344,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
+ {
+     const auto budget_iter_start = std::chrono::steady_clock::now();
+     increaseIteration(1);
++    if (gaussians_) gaussians_->setTopologyIteration(getIteration());
+     maybeSnapshotAndAudit();   // mapper-budget-v1: full snapshots at fixed steps
+     auto iter_start_timing = std::chrono::steady_clock::now();
+ 
+@@ -3369,6 +3393,25 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
+     // else
+         gaussians_->setShDegree(default_sh_);
+ 
++    // Under-training diagnostic: record the resolution and SH degree actually
++    // handed to this update.  Read-only counters; no effect on training.
++    if (stage_counters_enabled_ || frozen_kf_replay_ || append_phase_)
++    {
++        frozen_last_train_level_ = training_level;
++        frozen_last_train_width_ = image_width;
++        frozen_last_train_height_ = image_height;
++        frozen_last_train_sh_ = gaussians_->active_sh_degree_;
++        ++frozen_level_counts_[training_level];
++        ++frozen_sh_counts_[frozen_last_train_sh_];
++        if (stage_counters_enabled_)
++        {
++            ++stage_level_counts_[training_level];
++            ++stage_sh_counts_[frozen_last_train_sh_];
++            stage_training_pixels_ +=
++                static_cast<long long>(image_width) * image_height;
++        }
++    }
++
+     // Update learning rate
+     if (pSLAM_) {
+         int used_times = kfs_used_times_[viewpoint_cam->fid_];
+@@ -3499,6 +3542,9 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
+         }
+         
+         loss = loss + loss_str;
++        if (gaussians_->topoAuditEnabled())
++            gaussians_->setLastTopologyLosses(Ll1.item().toFloat(),
++                                              loss_str.item().toFloat());
+     }
+ 
+     g_gpu_prof.markLineLossEnd();
+@@ -3604,6 +3650,7 @@ void GaussianMapperLine::trainForOneIterationErrorGuided()
+                 gaussians_->resetOpacity();
+         }
+         g_gpu_prof.markDensifyEnd();
++        if (recovery_diag_hook_) recovery_diag_hook_("after_densify");
+ 
+         // ==========================================================
+         // 🌟 [新增代码]：补全时间结算与进度报告
+@@ -4399,6 +4446,7 @@ void GaussianMapperLine::trainForOneIteration()
+ {
+     const auto budget_iter_start = std::chrono::steady_clock::now();
+     increaseIteration(1);
++    if (gaussians_) gaussians_->setTopologyIteration(getIteration());
+     auto iter_start_timing = std::chrono::steady_clock::now();
+ 
+     // Pick a random Camera
+@@ -4574,6 +4622,9 @@ void GaussianMapperLine::trainForOneIteration()
+         }
+         
+         loss = loss + loss_str;
++        if (gaussians_->topoAuditEnabled())
++            gaussians_->setLastTopologyLosses(Ll1.item().toFloat(),
++                                              loss_str.item().toFloat());
+     }
+ 
+     g_gpu_prof.markLineLossEnd();
+@@ -4671,6 +4722,7 @@ void GaussianMapperLine::trainForOneIteration()
+                 gaussians_->resetOpacity();
+         }
+         g_gpu_prof.markDensifyEnd();
++        if (recovery_diag_hook_) recovery_diag_hook_("after_densify");
+ 
+         auto iter_end_timing = std::chrono::steady_clock::now();
+         auto iter_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+@@ -4855,6 +4907,10 @@ GaussianMapperLine::RecoverySnapshot GaussianMapperLine::captureRecoverySnapshot
+     s.active_sh = gaussians_->active_sh_degree_;
+     s.default_sh = default_sh_;
+     s.ema_loss = ema_loss_for_log_;
++    s.cpu_rng_state = at::detail::getDefaultCPUGenerator().get_state();
++    if (torch::cuda::is_available())
++        s.cuda_rng_state =
++            at::cuda::detail::getDefaultCUDAGenerator().get_state();
+     s.kfs_used_times = kfs_used_times_;
+     for (auto& kv : scene_->keyframes())
+     {
+@@ -4874,16 +4930,26 @@ GaussianMapperLine::RecoverySnapshot GaussianMapperLine::captureRecoverySnapshot
+     return s;
+ }
+ 
+-void GaussianMapperLine::restoreRecoverySnapshot(const RecoverySnapshot& s)
++void GaussianMapperLine::restoreRecoverySnapshot(const RecoverySnapshot& s,
++                                                 bool force_rebuild)
+ {
+     if (!gaussians_) return;
+     torch::NoGradGuard ng;
+-    auto cp = [](torch::Tensor& dst, const torch::Tensor& src, const char* name) {
++    bool rebuild = force_rebuild;
++    auto cp = [&](torch::Tensor& dst, const torch::Tensor& src, const char* name) {
+         if (!src.defined()) return;
+         TORCH_CHECK(dst.defined(), "[GbaRecovery] ", name, " is undefined");
+-        TORCH_CHECK(dst.sizes() == src.sizes(), "[GbaRecovery] ", name,
+-                    " shape mismatch: ", dst.sizes(), " vs ", src.sizes());
+-        dst.copy_(src);
++        if (dst.sizes() == src.sizes())
++        {
++            dst.copy_(src);
++            return;
++        }
++        // Variable-topology arms can change the row count. Rebinding the
++        // tensor (rather than copy_) is required; the optimizer is rebuilt
++        // below and the captured Adam state is reloaded afterwards.
++        dst = src.to(device_type_).detach();
++        if (src.is_floating_point()) dst.requires_grad_();
++        rebuild = true;
+     };
+     cp(gaussians_->xyz_, s.xyz, "xyz");
+     cp(gaussians_->xyz_init_, s.xyz_init, "xyz_init");
+@@ -4903,6 +4969,19 @@ void GaussianMapperLine::restoreRecoverySnapshot(const RecoverySnapshot& s)
+     cp(gaussians_->denom_, s.denom, "denom");
+     gaussians_->invalidateLineCache();
+ 
++    if (rebuild)
++    {
++        // trainingSetup() allocates fresh densification accumulators and a new
++        // Adam over the rebound tensors; restore the captured accumulators and
++        // Adam moments immediately below.
++        gaussians_->rebuildParamVectors();
++        gaussians_->trainingSetup(opt_params_);
++        cp(gaussians_->max_radii2D_, s.max_radii2D, "max_radii2D");
++        cp(gaussians_->xyz_gradient_accum_, s.xyz_grad_accum,
++           "xyz_gradient_accum");
++        cp(gaussians_->denom_, s.denom, "denom");
++    }
++
+     if (gaussians_->optimizer_)
+     {
+         auto& groups = gaussians_->optimizer_->param_groups();
+@@ -4940,6 +5019,13 @@ void GaussianMapperLine::restoreRecoverySnapshot(const RecoverySnapshot& s)
+         }
+     }
+ 
++    if (s.cpu_rng_state.defined())
++        const_cast<at::Generator&>(at::detail::getDefaultCPUGenerator())
++            .set_state(s.cpu_rng_state);
++    if (s.cuda_rng_state.defined() && torch::cuda::is_available())
++        const_cast<at::Generator&>(
++            at::cuda::detail::getDefaultCUDAGenerator())
++            .set_state(s.cuda_rng_state);
+     iteration_ = s.iteration;
+     frozen_opt_steps_ = s.frozen_opt_steps;
+     default_sh_ = s.default_sh;
+@@ -4972,12 +5058,29 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
+     const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+     unsigned long evt, bool apply_map, int steps,
+     const std::vector<long long>& eval_steps,
+-    const std::filesystem::path& out_dir)
++    const std::filesystem::path& out_dir,
++    bool variable_topology)
+ {
+     RecoveryArmResult r;
+     if (!gaussians_) return r;
+-
+-    restoreRecoverySnapshot(base);
++    gaussians_->setTopologyArm(tag);
++    if (variable_topology)
++    {
++        int seed = 12345;
++        if (const char* e = std::getenv("PHOTO_SLAM_TOPO_RNG_SEED"))
++            seed = std::atoi(e);
++        // The view sequence is already fixed, but clone/split still use
++        // at::normal. Reset the CPU/CUDA torch streams and std::rand to the
++        // same state for every arm; this is not a general RNG framework.
++        std::srand(static_cast<unsigned>(seed));
++        // The torch CPU/CUDA states are restored from the captured snapshot in
++        // restoreRecoverySnapshot(); this seed only covers std::rand, which is
++        // not called while the fixed view sequence is being replayed.
++        std::cerr << "[TopoReplay] arm=" << tag << " rng_seed=" << seed
++                  << " rng_state=restore_captured_cpu_cuda" << std::endl;
++    }
++
++    restoreRecoverySnapshot(base, variable_topology);
+     diag_snapshot_rot_data_ = base.rotation.defined()
+         ? reinterpret_cast<std::uintptr_t>(base.rotation.data_ptr()) : 0;
+     // gba-state-audit: make the two arms' paths explicit in the log, because
+@@ -4994,14 +5097,28 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
+         pkf->tracking_error_ = kv.second.tracking_error;
+         pkf->done_inactive_geo_densify_ = kv.second.done_inactive_densify;
+     }
+-    frozen_fixed_count_ = true;
++    frozen_fixed_count_ = !variable_topology;
+     frozen_kf_replay_ = true;
+     frozen_kf_step_ = 0;
+     frozen_train_views_flat_.clear();
++    frozen_last_train_level_ = -1;
++    frozen_last_train_width_ = 0;
++    frozen_last_train_height_ = 0;
++    frozen_last_train_sh_ = -1;
++    frozen_level_counts_.clear();
++    frozen_sh_counts_.clear();
+     frozen_opt_steps_ = 0;
+     result_dir_ = out_dir;
+     std::filesystem::create_directories(out_dir);
+     const long long base_count = gaussians_->xyz_.size(0);
++    if (!variable_topology)
++    {
++        frozen_count_ref_all_ = base_count;
++        frozen_count_ref_line_ =
++            (gaussians_->is_line_.defined() && gaussians_->is_line_.numel() > 0)
++                ? gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>()
++                : 0LL;
++    }
+ 
+     auto syncDev = [&]() {
+         if (device_type_ == torch::kCUDA && gaussians_->xyz_.defined() &&
+@@ -5045,9 +5162,10 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
+     r.adam_fp0 = gaussians_->adamFingerprint();
+ 
+     std::ofstream csv(out_dir / "metrics.csv");
+-    csv << "arm,step,psnr,ssim,l1,eval_seconds,cum_sync_seconds,"
++    csv << "arm,step,psnr,psnr_gs,ssim,l1,eval_seconds,cum_sync_seconds,"
+            "cum_train_seconds,total_seconds,gaussians,line_gaussians,"
+-           "iteration,active_sh,default_sh\n";
++           "iteration,active_sh,default_sh,last_train_level,last_train_width,"
++           "last_train_height,last_train_sh\n";
+ 
+     auto lineCount = [&]() -> long long {
+         if (!gaussians_->is_line_.defined() || gaussians_->is_line_.numel() == 0)
+@@ -5055,16 +5173,45 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
+         return gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>();
+     };
+ 
++    std::ofstream topo_step;
++    std::ofstream pre_update;
++    auto saved_diag_hook = recovery_diag_hook_;
++    if (variable_topology)
++    {
++        topo_step.open(out_dir / "topology_steps.csv");
++        topo_step << "step,iteration,total,line,clone_cum,split_cum,prune_cum,"
++                     "view_index,view_fid,photo_loss,struct_loss,param_fp\n";
++        pre_update.open(out_dir / "pre_update.csv");
++        pre_update << "step,iteration,total,line,clone_cum,split_cum,prune_cum,"
++                      "param_fp\n";
++        recovery_diag_hook_ = [&](const char* ev) {
++            if (std::string(ev) != "after_densify")
++                return;
++            if (iteration_ % 100 != 0)
++                return;
++            pre_update << frozen_opt_steps_ << ',' << iteration_ << ','
++                       << gaussians_->auditTotal() << ',' << lineCount() << ','
++                       << gaussians_->auditCloneCount() << ','
++                       << gaussians_->auditSplitCount() << ','
++                       << gaussians_->auditPruneCount() << ','
++                       << gaussians_->paramFingerprint() << '\n';
++            pre_update.flush();
++        };
++    }
++
+     auto doEval = [&](long long step) {
+-        double p = -1.0, s = -1.0, l1 = -1.0, ori = -1.0, shape = -1.0, et = 0.0;
+-        evalAtFrozenStep(step, tag, p, s, l1, ori, shape, et);
++        double p = -1.0, pgs = -1.0, s = -1.0, l1 = -1.0, ori = -1.0, shape = -1.0, et = 0.0;
++        evalAtFrozenStep(step, tag, p, s, l1, ori, shape, et, &pgs);
+         r.eval_quality[step] = {p, s};
++        r.eval_gs[step] = pgs;
+         csv << tag << ',' << step << ',' << std::setprecision(10) << p << ','
+-            << s << ',' << l1 << ',' << et << ',' << r.sync_seconds << ','
++            << pgs << ',' << s << ',' << l1 << ',' << et << ',' << r.sync_seconds << ','
+             << r.train_seconds << ',' << (r.sync_seconds + r.train_seconds)
+             << ',' << gaussians_->xyz_.size(0) << ',' << lineCount() << ','
+             << iteration_ << ',' << gaussians_->active_sh_degree_ << ','
+-            << default_sh_ << '\n';
++            << default_sh_ << ',' << frozen_last_train_level_ << ','
++            << frozen_last_train_width_ << ',' << frozen_last_train_height_
++            << ',' << frozen_last_train_sh_ << '\n';
+         csv.flush();
+     };
+ 
+@@ -5080,9 +5227,31 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
+         syncDev();
+         r.train_seconds += std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::steady_clock::now() - t_step0).count() / 1e6;
+-        TORCH_CHECK(gaussians_->xyz_.size(0) == base_count,
+-                    "[GbaRecovery] arm ", tag, " changed the Gaussian count: ",
+-                    base_count, " -> ", gaussians_->xyz_.size(0));
++        if (!variable_topology)
++            TORCH_CHECK(gaussians_->xyz_.size(0) == base_count,
++                        "[GbaRecovery] arm ", tag,
++                        " changed the Gaussian count: ", base_count, " -> ",
++                        gaussians_->xyz_.size(0));
++        if (topo_step.is_open())
++        {
++            long long view_idx = -1, view_fid = -1;
++            if (frozen_train_views_flat_.size() >= 3)
++            {
++                const std::size_t n = frozen_train_views_flat_.size();
++                view_idx = frozen_train_views_flat_[n - 2];
++                view_fid = frozen_train_views_flat_[n - 1];
++            }
++            topo_step << frozen_opt_steps_ << ',' << iteration_ << ','
++                      << gaussians_->auditTotal() << ',' << lineCount() << ','
++                      << gaussians_->auditCloneCount() << ','
++                      << gaussians_->auditSplitCount() << ','
++                      << gaussians_->auditPruneCount() << ',' << view_idx << ','
++                      << view_fid << ','
++                      << gaussians_->lastTopologyPhotoLoss() << ','
++                      << gaussians_->lastTopologyStructLoss() << ','
++                      << gaussians_->paramFingerprint() << '\n';
++            topo_step.flush();
++        }
+         if (frozen_opt_steps_ == before)
+         {
+             if (++stall > 5) break;
+@@ -5128,9 +5297,554 @@ GaussianMapperLine::RecoveryArmResult GaussianMapperLine::runRecoveryArm(
+         r.schedule_fp = frozenAblHashHex(ss.str());
+     }
+     r.ok = (r.steps == steps);
++    recovery_diag_hook_ = saved_diag_hook;
++
++    // Actual training opportunities consumed by this arm.  These are counts
++    // from the live trainer, not from the planned view sequence.
++    {
++        std::ofstream lv(out_dir / "train_levels.csv");
++        lv << "pyramid_level,updates\n";
++        for (const auto& kv : frozen_level_counts_)
++            lv << kv.first << ',' << kv.second << '\n';
++        std::ofstream sh(out_dir / "train_sh.csv");
++        sh << "active_sh,updates\n";
++        for (const auto& kv : frozen_sh_counts_)
++            sh << kv.first << ',' << kv.second << '\n';
++        std::ofstream tv(out_dir / "train_views.csv");
++        tv << "completed_steps,keyframe_map_index,keyframe_fid\n";
++        for (std::size_t i = 0; i + 2 < frozen_train_views_flat_.size(); i += 3)
++            tv << frozen_train_views_flat_[i] << ','
++               << frozen_train_views_flat_[i + 1] << ','
++               << frozen_train_views_flat_[i + 2] << '\n';
++    }
+     return r;
+ }
+ 
++// ---------------------------------------------------------------------------
++// variable-topology replay (diagnostic only).
++//
++// Triggered at one fixed iteration BEFORE a densification boundary. The live
++// mapper state is copied in memory; A0/A1 (backend A) and C (backend C) then
++// start from that SAME copy and run the NORMAL training entry with
++// densify/clone/split/prune enabled. The view sequence is generated once and
++// replayed; no SLAM MappingOperation is consumed during the arms.
++// ---------------------------------------------------------------------------
++void GaussianMapperLine::maybeRunTopologyReplay()
++{
++    const char* dir_env = std::getenv("PHOTO_SLAM_TOPO_REPLAY_DIR");
++    const char* at_env = std::getenv("PHOTO_SLAM_TOPO_REPLAY_AT");
++    if (!dir_env || !dir_env[0] || !at_env || !at_env[0] || topo_replay_done_ ||
++        !gaussians_ || !scene_)
++        return;
++    const long long at = std::atoll(at_env);
++    if (getIteration() != at) return;
++    topo_replay_done_ = true;
++
++    int steps = 400;
++    if (const char* e = std::getenv("PHOTO_SLAM_TOPO_REPLAY_STEPS"))
++        steps = std::max(1, std::atoi(e));
++    int views = 24;
++    if (const char* e = std::getenv("PHOTO_SLAM_TOPO_REPLAY_VIEWS"))
++        views = std::max(0, std::atoi(e));
++
++    const std::filesystem::path root(dir_env);
++    std::filesystem::create_directories(root);
++    const auto saved_result_dir = result_dir_;
++    const bool saved_fixed = frozen_fixed_count_;
++    const bool saved_replay = frozen_kf_replay_;
++    const std::size_t saved_kf_step = frozen_kf_step_;
++    const auto saved_eval_seq = frozen_eval_kf_seq_;
++    const auto saved_kf_seq = frozen_kf_seq_;
++    const auto saved_train_views = frozen_train_views_flat_;
++    const int saved_backend = RasterBackendGet();
++
++    RecoverySnapshot base = captureRecoverySnapshot();
++    const long long n0 = gaussians_->xyz_.size(0);
++    long long nl0 = 0;
++    if (gaussians_->is_line_.defined() && gaussians_->is_line_.numel() > 0)
++        nl0 = gaussians_->is_line_.to(torch::kCPU).to(torch::kBool)
++                  .sum().item<int64_t>();
++
++    // Fixed evaluation views (never trained on).
++    frozen_eval_kf_seq_.clear();
++    {
++        const std::size_t nkf = scene_->keyframes().size();
++        if (views > 0 && nkf > 0)
++        {
++            const std::size_t k = std::min<std::size_t>(
++                static_cast<std::size_t>(views), nkf);
++            for (std::size_t i = 0; i < k; ++i)
++                frozen_eval_kf_seq_.push_back((i * nkf) / k);
++        }
++    }
++
++    // Generate one sequence from the captured scheduler state, then restore the
++    // state so the first arm starts from the captured usage, not from the
++    // generator's reset. All arms replay the same `frozen_kf_seq_`.
++    preGenerateFrozenKfSequence(steps);
++    const std::size_t seq_len = frozen_kf_seq_.size();
++    restoreRecoverySnapshot(base);
++
++    {
++        std::ofstream st(root / "common_state.txt");
++        st << "head=topo-replay-v1\n"
++           << "at_iteration=" << at << "\n"
++           << "steps=" << steps << "\n"
++           << "gaussians=" << n0 << "\n"
++           << "line_gaussians=" << nl0 << "\n"
++           << "kfs=" << scene_->keyframes().size() << "\n"
++           << "iteration=" << iteration_ << "\n"
++           << "frozen_opt_steps=" << frozen_opt_steps_ << "\n"
++           << "active_sh=" << gaussians_->active_sh_degree_ << "\n"
++           << "default_sh=" << default_sh_ << "\n"
++           << "param_fp=" << gaussians_->paramFingerprint() << "\n"
++           << "adam_fp=" << gaussians_->adamFingerprint() << "\n"
++           << "sequence_len=" << seq_len << "\n"
++           << "eval_views=" << frozen_eval_kf_seq_.size() << "\n"
++           << "rng_seed=" << []() {
++                  const char* e = std::getenv("PHOTO_SLAM_TOPO_RNG_SEED");
++                  return e ? std::atoi(e) : 12345;
++              }()
++           << "\n"
++           << "rng_reset=std::rand_seed+restore_captured_torch_cpu_cuda\n"
++           << "saved_backend=" << saved_backend << "\n";
++    }
++    {
++        std::ofstream sf(root / "kf_sequence.txt");
++        sf << "# shared training sequence\n";
++        for (std::size_t i = 0; i < frozen_kf_seq_.size(); ++i)
++            sf << i << ' ' << frozen_kf_seq_[i] << '\n';
++    }
++    {
++        std::ofstream ef(root / "eval_views.txt");
++        ef << "# fixed evaluation keyframes (map order index)\n";
++        for (auto v : frozen_eval_kf_seq_) ef << v << '\n';
++    }
++
++    std::cerr << "[TopoReplay] at=" << at << " n=" << n0 << " line=" << nl0
++              << " steps=" << steps << " seq=" << seq_len << std::endl;
++
++    std::ofstream summar(root / "summary.csv");
++    summar << "arm,backend,steps,ok,gaussians,line_gaussians,psnr0,psnr100,"
++              "psnr_final,psnr_gs0,psnr_gs100,psnr_gs_final,param_fp0,"
++              "param_fp,clone_cum,split_cum,prune_cum\n";
++    const std::vector<long long> eval_steps = {0, 1, 10, 100, steps};
++    struct ArmSpec { const char* tag; int backend; };
++    const ArmSpec arms[] = {{"A0", 0}, {"A1", 0}, {"C", 2}};
++    for (const auto& a : arms)
++    {
++        SetRasterBackend(a.backend);
++        const auto out = root / a.tag;
++        auto r = runRecoveryArm(a.tag, base, base, {}, {}, 0, false, steps,
++                                eval_steps, out, true);
++        auto q = [&](long long s) {
++            auto it = r.eval_quality.find(s);
++            return it == r.eval_quality.end() ? -1.0 : it->second.first;
++        };
++        auto qg = [&](long long s) {
++            auto it = r.eval_gs.find(s);
++            return it == r.eval_gs.end() ? -1.0 : it->second;
++        };
++        summar << a.tag << ',' << a.backend << ',' << r.steps << ','
++               << (r.ok ? 1 : 0) << ',' << r.gaussians << ','
++               << r.line_gaussians << ',' << q(0) << ',' << q(100) << ','
++               << q(steps) << ',' << qg(0) << ',' << qg(100) << ','
++               << qg(steps) << ',' << r.param_fp0 << ',' << r.param_fp << ','
++               << gaussians_->auditCloneCount() << ','
++               << gaussians_->auditSplitCount() << ','
++               << gaussians_->auditPruneCount() << '\n';
++        summar.flush();
++        std::cerr << "[TopoReplay] arm=" << a.tag << " steps=" << r.steps
++                  << " n=" << r.gaussians << " line=" << r.line_gaussians
++                  << " psnr0=" << q(0) << " psnr_final=" << q(steps)
++                  << " gs0=" << qg(0) << " gs_final=" << qg(steps)
++                  << std::endl;
++    }
++
++    SetRasterBackend(saved_backend);
++    restoreRecoverySnapshot(base);
++    frozen_fixed_count_ = saved_fixed;
++    frozen_kf_replay_ = saved_replay;
++    frozen_kf_step_ = saved_kf_step;
++    frozen_eval_kf_seq_ = saved_eval_seq;
++    frozen_kf_seq_ = saved_kf_seq;
++    frozen_train_views_flat_ = saved_train_views;
++    result_dir_ = saved_result_dir;
++    // The capture is complete; do not run the remaining production sequence.
++    signalStop();
++}
++
++void GaussianMapperLine::writeStageCounters(const std::filesystem::path& dir)
++{
++    if (!stage_counters_enabled_ || !scene_ || !gaussians_) return;
++    std::filesystem::create_directories(dir);
++
++    {
++        std::ofstream out(dir / "stage_updates.csv");
++        out << "kind,key,updates\n";
++        for (const auto& kv : stage_level_counts_)
++            out << "pyramid_level," << kv.first << ',' << kv.second << '\n';
++        for (const auto& kv : stage_sh_counts_)
++            out << "active_sh," << kv.first << ',' << kv.second << '\n';
++        out << "training_pixels,,"
++            << stage_training_pixels_ << '\n';
++    }
++    {
++        std::ofstream out(dir / "kf_usage.csv");
++        out << "fid,used_times,remaining_times_of_use\n";
++        for (const auto& kv : scene_->keyframes())
++        {
++            auto it = kfs_used_times_.find(kv.first);
++            out << kv.first << ',' << (it == kfs_used_times_.end() ? 0 : it->second)
++                << ',' << kv.second->remaining_times_of_use_ << '\n';
++        }
++    }
++    {
++        const bool shutdown = pSLAM_ && pSLAM_->isShutDown();
++        const bool queue = pSLAM_ && pSLAM_->getAtlas()->hasMappingOperation();
++        std::string reason = "running";
++        if (isStopped()) reason = "mapper_stopped";
++        else if (shutdown) reason = "slam_shutdown";
++        else if (getIteration() >= opt_params_.iterations_) reason = "iteration_cap";
++        std::ofstream out(dir / "progress.csv");
++        out << "input_frame,total_input_frames,mapper_iteration,optimizer_steps,"
++               "kfs,gaussians,queue_pending,slam_shutdown,mapper_stopped,"
++               "stop_reason,local_ba_consumption\n";
++        out << photo_slam_diag::getInputFrame() << ','
++            << photo_slam_diag::getTotalFrames() << ',' << getIteration() << ','
++            << frozen_opt_steps_ << ',' << scene_->keyframes().size() << ','
++            << gaussians_->xyz_.size(0) << ',' << (queue ? 1 : 0) << ','
++            << (shutdown ? 1 : 0) << ',' << (isStopped() ? 1 : 0) << ','
++            << reason << ",not_available_in_this_build\n";
++    }
++}
++
++void GaussianMapperLine::maybeCheckpointOnline()
++{
++    const char* root_env = std::getenv("PHOTO_SLAM_ONLINE_CHECKPOINT_DIR");
++    if (!root_env || !root_env[0] || !gaussians_ || !scene_) return;
++    if (online_ckpt_cursor_ >= 8) return;
++
++    static const std::vector<long long> thresholds = []() {
++        std::vector<long long> v;
++        const char* e = std::getenv("PHOTO_SLAM_ONLINE_CHECKPOINT_FRAMES");
++        std::string s = e ? e : "500,1000,1500,end";
++        std::stringstream ss(s);
++        std::string t;
++        while (std::getline(ss, t, ','))
++        {
++            if (t == "end" || t == "END")
++                v.push_back(-1);
++            else if (!t.empty())
++                v.push_back(std::atoll(t.c_str()));
++        }
++        return v;
++    }();
++    if (thresholds.empty()) return;
++
++    const long long in_frame = photo_slam_diag::getInputFrame();
++    const long long total = photo_slam_diag::getTotalFrames();
++    while (online_ckpt_cursor_ < thresholds.size())
++    {
++        const long long th = thresholds[online_ckpt_cursor_];
++        const long long target = th < 0 ? total : th;
++        if (target < 0 || in_frame < target) return;
++        const std::string label = th < 0 ? "end" : std::to_string(th);
++        const std::filesystem::path root(root_env);
++        const auto dir = root / ("frame_" + label);
++        std::filesystem::create_directories(dir);
++        ++online_ckpt_cursor_;
++
++        const auto t0 = std::chrono::steady_clock::now();
++        const auto snap_path = dir / "snapshot.pt";
++        gaussians_->saveFullSnapshot(snap_path.string());
++        const auto t1 = std::chrono::steady_clock::now();
++
++        {
++            std::ofstream cam(dir / "cameras.csv");
++            cam << "fid,img_name,qw,qx,qy,qz,tx,ty,tz,fx,fy,cx,cy,width,height\n";
++            for (auto& kv : scene_->keyframes())
++            {
++                auto& p = kv.second;
++                if (!p) continue;
++                const Sophus::SE3d T = p->getPose();
++                const Eigen::Quaterniond q = T.unit_quaternion();
++                const Eigen::Vector3d t = T.translation();
++                cam << p->fid_ << ',' << p->img_filename_ << ',' << q.w() << ','
++                    << q.x() << ',' << q.y() << ',' << q.z() << ',' << t.x()
++                    << ',' << t.y() << ',' << t.z();
++                if (p->intr_.size() >= 4)
++                    cam << ',' << p->intr_[0] << ',' << p->intr_[1] << ','
++                        << p->intr_[2] << ',' << p->intr_[3];
++                else
++                    cam << ",0,0,0,0";
++                cam << ',' << p->image_width_ << ',' << p->image_height_ << '\n';
++            }
++        }
++        {
++            std::vector<torch::Tensor> masks;
++            std::ofstream ids(dir / "mask_cameras.txt");
++            for (auto& kv : undistort_mask_)
++            {
++                ids << kv.first << '\n';
++                masks.push_back(kv.second.detach().to(torch::kCPU));
++            }
++            torch::save(masks, (dir / "masks.pt").string());
++        }
++        {
++            long long nl = 0;
++            if (gaussians_->is_line_.defined() && gaussians_->is_line_.numel())
++                nl = gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>();
++            std::ofstream meta(dir / "meta.txt");
++            meta << "checkpoint=" << label << "\n"
++                 << "input_frame=" << in_frame << "\n"
++                 << "total_input_frames=" << total << "\n"
++                 << "mapper_kfs=" << scene_->keyframes().size() << "\n"
++                 << "iteration=" << getIteration() << "\n"
++                 << "optimizer_steps=" << frozen_opt_steps_ << "\n"
++                 << "gaussians=" << gaussians_->xyz_.size(0) << "\n"
++                 << "line_gaussians=" << nl << "\n"
++                 << "active_sh=" << gaussians_->active_sh_degree_ << "\n"
++                 << "default_sh=" << default_sh_ << "\n"
++                 << "record_rendered_image=" << (record_rendered_image_ ? 1 : 0)
++                 << "\nrecord_ground_truth_image="
++                 << (record_ground_truth_image_ ? 1 : 0) << "\n"
++                 << "render_width=" << (scene_->keyframes().empty()
++                                            ? 0 : scene_->keyframes().begin()->second->image_width_)
++                 << "\n";
++        }
++
++        writeStageCounters(dir);
++
++        // Read-only render at the checkpoint. This is a diagnostic snapshot;
++        // its timing is not a production performance result.
++        const auto t2 = std::chrono::steady_clock::now();
++        renderAndRecordAllKeyframesReadOnly("_ckpt" + label);
++        const auto t3 = std::chrono::steady_clock::now();
++        const double save_s = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                  t1 - t0).count() / 1000.0;
++        const double render_s = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                    t3 - t2).count() / 1000.0;
++        {
++            std::ofstream tm(dir / "checkpoint_timing.txt");
++            tm << "save_seconds=" << save_s << "\n"
++               << "render_seconds=" << render_s << "\n"
++               << "total_seconds=" << (save_s + render_s) << "\n";
++        }
++        std::cerr << "[OnlineCheckpoint] frame=" << target
++                  << " input=" << in_frame << " kfs="
++                  << scene_->keyframes().size() << " iter=" << getIteration()
++                  << " steps=" << frozen_opt_steps_ << " save_s=" << save_s
++                  << " render_s=" << render_s << std::endl;
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Controlled under-training diagnostic at the live natural end.
++//
++// The existing end snapshot does not contain Adam moments or learning rates,
++// so it cannot be resumed offline without silently rebuilding optimizer state.
++// This hook is therefore called while the process still owns the complete
++// in-memory state.  It runs two fixed-topology arms (A and C) from the SAME
++// captured state and the SAME pre-generated view sequence.  The original loss,
++// LR rules and opacity/scaling optimization are retained; densify/clone/split/
++// prune and opacity reset are disabled by frozen_fixed_count_.
++// ---------------------------------------------------------------------------
++void GaussianMapperLine::runUndertrainContinuationDiagnostic()
++{
++    const char* root_env = std::getenv("PHOTO_SLAM_UNDERTRAIN_DIR");
++    if (!root_env || !root_env[0] || !gaussians_ || !scene_)
++        return;
++    if (scene_->keyframes().empty())
++        return;
++
++    const std::filesystem::path root(root_env);
++    std::filesystem::create_directories(root);
++
++    int max_steps = 1230;
++    if (const char* e = std::getenv("PHOTO_SLAM_UNDERTRAIN_STEPS"))
++        max_steps = std::max(1, std::atoi(e));
++    std::vector<long long> eval_steps = {0, 100, 400, 800, 1230};
++    if (const char* e = std::getenv("PHOTO_SLAM_UNDERTRAIN_EVAL_STEPS"))
++    {
++        eval_steps.clear();
++        std::stringstream ss(e);
++        std::string t;
++        while (std::getline(ss, t, ','))
++            if (!t.empty()) eval_steps.push_back(std::atoll(t.c_str()));
++        std::sort(eval_steps.begin(), eval_steps.end());
++        eval_steps.erase(std::unique(eval_steps.begin(), eval_steps.end()),
++                         eval_steps.end());
++        if (eval_steps.empty() || eval_steps.front() != 0)
++            eval_steps.insert(eval_steps.begin(), 0);
++    }
++
++    const RecoverySnapshot base = captureRecoverySnapshot();
++    const auto saved_eval = frozen_eval_kf_seq_;
++    const auto saved_kf_seq = frozen_kf_seq_;
++    const auto saved_train_views = frozen_train_views_flat_;
++    const bool saved_fixed = frozen_fixed_count_;
++    const bool saved_replay = frozen_kf_replay_;
++    const std::size_t saved_step = frozen_kf_step_;
++    const auto saved_result_dir = result_dir_;
++    const int saved_backend = RasterBackendGet();
++
++    // Fixed views: match the previous diagnostic's image list when supplied.
++    std::vector<std::string> wanted;
++    if (const char* e = std::getenv("PHOTO_SLAM_UNDERTRAIN_IMAGE_LIST"))
++    {
++        std::ifstream in(e);
++        std::string s;
++        while (std::getline(in, s))
++            if (!s.empty()) wanted.push_back(
++                std::filesystem::path(s).filename().string());
++    }
++    std::vector<std::size_t> eval_seq;
++    {
++        std::size_t idx = 0;
++        for (auto& kv : scene_->keyframes())
++        {
++            const std::string name =
++                std::filesystem::path(kv.second->img_filename_).filename().string();
++            const bool keep = wanted.empty()
++                                  ? (eval_seq.size() < 12)
++                                  : (std::find(wanted.begin(), wanted.end(), name)
++                                     != wanted.end());
++            if (keep) eval_seq.push_back(idx);
++            ++idx;
++        }
++    }
++    const std::size_t matched_eval_views = eval_seq.size();
++    bool eval_fallback = false;
++    if (eval_seq.size() < 12)
++    {
++        // The earlier fixed set can be partially culled by the live run.  A
++        // controlled A/C pair still needs >=12 common CURRENT training views;
++        // fall back to the first 12 map-order KFs and record the fallback.
++        eval_seq.clear();
++        std::size_t idx = 0;
++        for (auto& kv : scene_->keyframes())
++        {
++            if (eval_seq.size() >= 12) break;
++            eval_seq.push_back(idx++);
++        }
++        eval_fallback = true;
++    }
++    if (eval_seq.empty())
++    {
++        std::cerr << "[Undertrain] no evaluation views; skipping" << std::endl;
++        return;
++    }
++
++    // Generate the sequence with no evaluation exclusion: the requested views
++    // are TRAINING frames, not a held-out set.
++    frozen_eval_kf_seq_.clear();
++    frozen_kf_replay_ = false;
++    frozen_kf_step_ = 0;
++    preGenerateFrozenKfSequence(max_steps);
++    const std::size_t seq_len = frozen_kf_seq_.size();
++    frozen_eval_kf_seq_ = eval_seq;
++    restoreRecoverySnapshot(base);
++
++    std::cerr << "[Undertrain] terminal state captured: n="
++              << gaussians_->xyz_.size(0) << " kfs=" << scene_->keyframes().size()
++              << " steps=" << frozen_opt_steps_ << " seq=" << seq_len
++              << " eval_views=" << frozen_eval_kf_seq_.size() << std::endl;
++
++    {
++        std::ofstream st(root / "terminal_state.txt");
++        st << "head=undertrain-live-terminal-v1\n"
++           << "source=same_process_natural_end\n"
++           << "complete_optimizer_state=1\n"
++           << "iteration=" << base.iteration << "\n"
++           << "frozen_opt_steps=" << base.frozen_opt_steps << "\n"
++           << "gaussians=" << gaussians_->xyz_.size(0) << "\n";
++        long long nl = 0;
++        if (gaussians_->is_line_.defined() && gaussians_->is_line_.numel() > 0)
++            nl = gaussians_->is_line_.to(torch::kCPU).sum().item<int64_t>();
++        st << "line_gaussians=" << nl << "\n"
++           << "active_sh=" << base.active_sh << "\n"
++           << "default_sh=" << base.default_sh << "\n"
++           << "kfs=" << scene_->keyframes().size() << "\n"
++           << "rng_cpu_defined=" << (base.cpu_rng_state.defined() ? 1 : 0) << "\n"
++           << "rng_cuda_defined=" << (base.cuda_rng_state.defined() ? 1 : 0)
++           << "\n"
++           << "adam_groups=" << base.adam.size() << "\n";
++        for (std::size_t i = 0; i < base.adam.size(); ++i)
++        {
++            st << "adam_group=" << i << " step=" << base.adam[i].step
++               << " lr=" << (i < base.lrs.size() ? base.lrs[i] : -1.0f)
++               << " exp_avg=" << (base.adam[i].exp_avg.defined() ? 1 : 0)
++               << " exp_avg_sq="
++               << (base.adam[i].exp_avg_sq.defined() ? 1 : 0) << "\n";
++        }
++        st << "view_sequence_len=" << seq_len << "\n"
++           << "eval_views=" << eval_seq.size() << "\n"
++           << "eval_views_requested_matched=" << matched_eval_views << "\n"
++           << "eval_fallback_first_current_kfs=" << (eval_fallback ? 1 : 0)
++           << "\n"
++           << "topology_frozen=1\n"
++           << "camera_frozen=1\n"
++           << "line_loss_disabled=0\n";
++    }
++    {
++        std::ofstream vf(root / "eval_views.txt");
++        vf << "index,fid,image\n";
++        std::size_t idx = 0;
++        std::size_t k = 0;
++        for (auto& kv : scene_->keyframes())
++        {
++            if (k < eval_seq.size() && eval_seq[k] == idx)
++            {
++                vf << idx << ',' << kv.second->fid_ << ','
++                   << kv.second->img_filename_ << '\n';
++                ++k;
++            }
++            ++idx;
++        }
++    }
++
++    struct ArmSpec { const char* tag; int backend; };
++    const ArmSpec arms[] = {{"END_A", 0}, {"END_C", 2}};
++    std::ofstream summary(root / "summary.csv");
++    summary << "arm,backend,requested_steps,actual_steps,ok,gaussians,"
++               "line_gaussians,psnr_gs_0,psnr_gs_100,psnr_gs_400,"
++               "psnr_gs_800,psnr_gs_1230\n";
++    for (const auto& a : arms)
++    {
++        SetRasterBackend(a.backend);
++        std::srand(12345);
++        const auto out = root / a.tag;
++        auto r = runRecoveryArm(a.tag, base, base, {}, {}, 0, false, max_steps,
++                                eval_steps, out, false);
++        auto q = [&](long long s) {
++            auto it = r.eval_gs.find(s);
++            return it == r.eval_gs.end() ? -1.0 : it->second;
++        };
++        summary << a.tag << ',' << a.backend << ',' << max_steps << ','
++                << r.steps << ',' << (r.ok ? 1 : 0) << ','
++                << r.gaussians << ',' << r.line_gaussians << ','
++                << q(0) << ',' << q(100) << ',' << q(400) << ',' << q(800)
++                << ',' << q(1230) << '\n';
++        summary.flush();
++        std::cerr << "[Undertrain] arm=" << a.tag << " steps=" << r.steps
++                  << " ok=" << (r.ok ? 1 : 0) << " gs0=" << q(0)
++                  << " gs100=" << q(100) << " gs400=" << q(400)
++                  << " gs800=" << q(800) << " gs1230=" << q(1230)
++                  << std::endl;
++    }
++
++    SetRasterBackend(saved_backend);
++    restoreRecoverySnapshot(base);
++    result_dir_ = saved_result_dir;
++    frozen_fixed_count_ = saved_fixed;
++    frozen_kf_replay_ = saved_replay;
++    frozen_kf_step_ = saved_step;
++    frozen_eval_kf_seq_ = saved_eval;
++    frozen_kf_seq_ = saved_kf_seq;
++    frozen_train_views_flat_ = saved_train_views;
++}
++
+ // ---------------------------------------------------------------------------
+ // gba-recovery mechanism diagnosis (short, no 500-step matrix).
+ // ---------------------------------------------------------------------------
+@@ -7006,123 +7720,175 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+         {
+             std::cerr << "[Gaussian Mapper]Loop Closure Detected." << std::endl;
+ 
++            // Sim(3) scale of this loop. RGB-D loops normally carry 1.0; the
++            // value is still read from the event and applied to the map so a
++            // real scale is not silently discarded.
+             float loop_kf_scale = opr.mfScale;
++            if (!std::isfinite(loop_kf_scale) || loop_kf_scale <= 1e-6f)
++            {
++                std::cerr << "[LoopSync] invalid event scale=" << loop_kf_scale
++                          << "; using 1.0" << std::endl;
++                loop_kf_scale = 1.0f;
++            }
++
+             auto& associated_kfs = opr.associatedKeyFrames();
+ 
+-            // Mark points to avoid double transform
+-            torch::Tensor point_not_transformed_flags = torch::full(
+-                    {gaussians_->xyz_.size(0)}, true,
+-                    torch::TensorOptions().device(device_type_).dtype(torch::kBool));
++            // Stable id from the immutable payload; replayed LOOP payloads map
++            // back to the same coordinate version and become no-ops.
++            const unsigned long cur_map_gen = [&]() {
++                ORB_SLAM3::Map* m = pSLAM_->getAtlas()->GetCurrentMap();
++                return m ? static_cast<unsigned long>(m->GetId()) : 0UL;
++            }();
++            if (!loop_event_key::map_matches(opr.mapGen(), cur_map_gen))
++            {
++                std::cerr << "[LoopSync] REJECTED reason=map_generation payload="
++                          << opr.mapGen() << " current=" << cur_map_gen
++                          << std::endl;
++                break;
++            }
++            std::vector<std::pair<unsigned long, Eigen::Matrix4f>> key_kfs;
++            key_kfs.reserve(associated_kfs.size());
++            for (auto& kf : associated_kfs)
++                key_kfs.emplace_back(std::get<0>(kf), std::get<2>(kf).matrix());
++            const std::uint64_t source_key = loop_event_key::fingerprint(
++                opr.mapGen(), cur_map_gen, loop_kf_scale, std::move(key_kfs));
++            const auto version_it = loop_coord_event_versions_.find(source_key);
++            const unsigned long coord_evt =
++                (version_it != loop_coord_event_versions_.end())
++                    ? version_it->second
++                    : gaussians_->allocateCoordEventId();
++            if (version_it == loop_coord_event_versions_.end())
++                loop_coord_event_versions_[source_key] = coord_evt;
++            if (coord_evt <= gaussians_->lastAppliedGbaEvent())
++            {
++                std::cerr << "[LoopSync] evt=" << coord_evt
++                          << " key=" << source_key
++                          << " DUPLICATE_OR_STALE reason="
++                          << (version_it != loop_coord_event_versions_.end()
++                                  ? "replayed_payload"
++                                  : "old_version")
++                          << " last_applied="
++                          << gaussians_->lastAppliedGbaEvent() << std::endl;
++                break;
++            }
+ 
+             if (record_loop_ply_)
+                 savePly(result_dir_ / (std::to_string(getIteration()) + "_0_before_loop_correction"));
+-            
+-            int num_transformed = 0;
+-            float sumTrans = 0.0f, sumRot = 0.0f, sumScale = 0.0f;
+-            int nLargeCorr = 0;
+-            float maxTrans = 0.0f, maxRotDeg = 0.0f;
+ 
+-            // Explicit loop-correction magnitude gate (cost-only, does NOT
+-            // affect loop validity): correct Gaussians of a KF only when
+-            //   transNorm > TRANS_THRESHOLD_METERS ||
+-            //   rotationAngleRad > ROT_THRESHOLD_RAD
+-            // Defaults 0.10 m and 2 deg; env-configurable.
+-            const char* et = std::getenv("PHOTO_SLAM_GAUSS_LOOP_TRANS_M");
+-            const float gaussLoopTransThrM = (et ? std::atof(et) : 0.10f);
+-            const char* er = std::getenv("PHOTO_SLAM_GAUSS_LOOP_ROT_DEG");
+-            const float gaussLoopRotThrRad = (er ? std::atof(er) : 2.0f) * (float)M_PI / 180.0f;
+-            int nKFsTotal = 0, nKFsWithPkf = 0, nKFsCorrected = 0, nKFsSkippedByGate = 0;
++            // One entry per keyframe whose pose the loop event changed. The
++            // model uses ref_kf_id_ ownership, so every Gaussian is corrected
++            // exactly once by the KF that created it -- no visibility mask and
++            // no creation-iteration mask can leave a row behind in the old
++            // coordinate frame.
++            std::vector<std::pair<unsigned long, Sophus::SE3f>> world_deltas;
++            world_deltas.reserve(associated_kfs.size());
++
++            int nKFsTotal = 0;
++            int nKFsWithPkf = 0;
++            int nKFsNoScene = 0;
++            int nKFsPoseChanged = 0;
++            float sumTrans = 0.0f, sumRotDeg = 0.0f;
++            float maxTrans = 0.0f, maxRotDeg = 0.0f;
+ 
+-            for (auto& kf : associated_kfs) {
+-                nKFsTotal++;
+-                auto kfid = std::get<0>(kf);
++            for (auto& kf : associated_kfs)
++            {
++                ++nKFsTotal;
++                const auto kfid = std::get<0>(kf);
++                auto& pose = std::get<2>(kf);
+                 std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
+-                
+-                // Resize mask if new points added
+-                int64_t num_new_points = gaussians_->xyz_.size(0) - point_not_transformed_flags.size(0);
+-                if (num_new_points > 0)
+-                    point_not_transformed_flags = torch::cat({
+-                        point_not_transformed_flags,
+-                        torch::full({num_new_points}, true, point_not_transformed_flags.options())},
+-                        0);
++                if (!pkf)
++                {
++                    ++nKFsNoScene;
++                    continue;
++                }
+ 
+-                if (pkf) {
+-                    nKFsWithPkf++;
+-                    auto& pose = std::get<2>(kf);
+-                    
+-                    // Logic to detect large loop drift and correct geometry
+-                    Sophus::SE3f original_pose = pkf->getPosef();
+-                    Sophus::SE3f inv_pose = pose.inverse();
+-                    Sophus::SE3f diff_pose = inv_pose * original_pose;
+-
+-                    maxTrans = std::max(maxTrans, diff_pose.translation().norm());
+-                    maxRotDeg = std::max(maxRotDeg,
+-                        (float)(Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle() * 180.0 / M_PI));
+-                    
+-                    const float transNorm = diff_pose.translation().norm();
+-                    const float rotRad = (float)Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle();
+-                    if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG") && !loop_scope_available_) {
+-                        LoopScopeKf e;
+-                        e.kf_id = kfid;
+-                        e.rot_deg = rotRad * 180.0 / M_PI;
+-                        e.trans = transNorm;
+-                        e.scene_present = true;
+-                        e.delta = diff_pose;
+-                        loop_scope_kfs_.push_back(e);
+-                    }
+-                    const bool do_correct = (transNorm > gaussLoopTransThrM) || (rotRad > gaussLoopRotThrRad);
+-                    
+-                    if (do_correct) {
+-                        nKFsCorrected++;
+-                        std::cerr << "[Gaussian Mapper] Large loop correction for KF " << kfid << std::endl;
+-                        
+-                        // Calculate transformation matrix M: P_new = M * P_old
+-                        // Logic derived from: T_new_inv * P_new = T_old_inv * P_old (relative pose const)
+-                        diff_pose.translation() -= inv_pose.translation();
+-                        diff_pose.translation() *= loop_kf_scale;
+-                        diff_pose.translation() += inv_pose.translation();
+-
+-                        sumTrans += diff_pose.translation().norm();
+-                        sumRot += Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle();
+-                        sumScale += loop_kf_scale;
+-                        nLargeCorr++;
+-                        
+-                        torch::Tensor diff_pose_tensor = tensor_utils::EigenMatrix2TorchTensor(
+-                                    diff_pose.matrix(), device_type_).transpose(0, 1);
+-                        {
+-                            std::unique_lock<std::mutex> lock_render(mutex_render_);
+-                            // Apply correction to Gaussian centroids
+-                            // Note: For Line Gaussians, rotation should also be updated ideally, 
+-                            // but since they are attached to xyz, simple rigid transform of xyz is a good approx.
+-                            // Ideally we should rotate the quaternion too.
+-                            gaussians_->scaledTransformVisiblePointsOfKeyframe(
+-                                point_not_transformed_flags,
+-                                diff_pose_tensor,
+-                                pkf->world_view_transform_,
+-                                pkf->full_proj_transform_,
+-                                pkf->creation_iter_,
+-                                stableNumIterExistence(),
+-                                num_transformed,
+-                                loop_kf_scale);
+-                        }
+-                        increaseKeyframeTimesOfUse(pkf, loop_closure_increased_times_of_use_);
+-                    }
+-                    else {
+-                        nKFsSkippedByGate++;
+-                    }
+-                    
+-                    // Update KF pose
+-                    pkf->setPose(
+-                        pose.unit_quaternion().cast<double>(),
+-                        pose.translation().cast<double>());
+-                    pkf->computeTransformTensors();
++                ++nKFsWithPkf;
++                const Sophus::SE3f original_pose = pkf->getPosef();
++                // G maps OLD world coordinates to NEW world coordinates:
++                //   G = Tcw_after^-1 * Tcw_before
++                const Sophus::SE3f diff_pose = pose.inverse() * original_pose;
++                const float transNorm = diff_pose.translation().norm();
++                const float rotRad = static_cast<float>(
++                    Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>())
++                        .angle());
++                const float rotDeg = rotRad * static_cast<float>(180.0 / M_PI);
++                maxTrans = std::max(maxTrans, transNorm);
++                maxRotDeg = std::max(maxRotDeg, rotDeg);
++                sumTrans += transNorm;
++                sumRotDeg += rotDeg;
++                if (transNorm > 1e-6f || rotRad > 1e-6f)
++                    ++nKFsPoseChanged;
++
++                if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG") && !loop_scope_available_)
++                {
++                    LoopScopeKf e;
++                    e.kf_id = kfid;
++                    e.rot_deg = rotRad * 180.0 / M_PI;
++                    e.trans = transNorm;
++                    e.scene_present = true;
++                    e.delta = diff_pose;
++                    loop_scope_kfs_.push_back(e);
+                 }
+-                else {
++                world_deltas.emplace_back(kfid, diff_pose);
++            }
++
++            if (initial_mapped_ && nKFsWithPkf == 0)
++            {
++                std::cerr << "[LoopSync] evt=" << coord_evt
++                          << " REJECTED reason=no_scene_keyframe payload_kfs="
++                          << nKFsTotal << std::endl;
++                break;
++            }
++
++            const long long count_before =
++                gaussians_ ? gaussians_->xyz_.size(0) : 0;
++
++            GaussianModelLine::GbaCorrectionStats stats;
++            if (initial_mapped_ && gaussians_ && !world_deltas.empty())
++            {
++                std::unique_lock<std::mutex> lock_render(mutex_render_);
++                stats = gaussians_->applyGbaCorrections(
++                    world_deltas, coord_evt,
++                    GaussianModelLine::GbaCorrectionMode::Full,
++                    loop_kf_scale);
++            }
++
++            const long long count_after =
++                gaussians_ ? gaussians_->xyz_.size(0) : 0;
++            TORCH_CHECK(count_after == count_before,
++                        "[LoopSync] correction changed the Gaussian count: ",
++                        count_before, " -> ", count_after);
++
++            // Scene cameras adopt the event poses only after the owned map rows
++            // have been moved. This is the coordinate-consistency contract:
++            // camera and Gaussians enter the post-event frame together.
++            for (auto& kf : associated_kfs)
++            {
++                const auto kfid = std::get<0>(kf);
++                auto& pose = std::get<2>(kf);
++                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
++                if (!pkf)
++                {
+                     handleNewKeyframe_WithLine(kf);
++                    continue;
+                 }
++                const Sophus::SE3f current = pkf->getPosef();
++                const Sophus::SE3f d = pose.inverse() * current;
++                const bool changed =
++                    d.translation().norm() > 1e-6f ||
++                    Eigen::AngleAxisd(d.rotationMatrix().cast<double>())
++                            .angle() > 1e-6;
++                pkf->setPose(
++                    pose.unit_quaternion().cast<double>(),
++                    pose.translation().cast<double>());
++                pkf->computeTransformTensors();
++                if (changed)
++                    increaseKeyframeTimesOfUse(
++                        pkf, loop_closure_increased_times_of_use_);
+             }
+ 
+-            if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG")) {
++            if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG"))
++            {
+                 loop_scope_available_ = !loop_scope_kfs_.empty();
+                 std::cerr << "[GbaDiag] LOOP scope captured kfs="
+                           << loop_scope_kfs_.size() << std::endl;
+@@ -7131,39 +7897,56 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+             if (record_loop_ply_)
+                 savePly(result_dir_ / (std::to_string(getIteration()) + "_1_after_loop_correction"));
+ 
+-            // Line-Gaussian loop-sync statistics.
++            // Line-Gaussian loop-sync statistics. Keep the old field names for
++            // log parsers; kfsSkippedByGate is now provably zero because the
++            // cost gate no longer decides whether the map is corrected.
+             {
+                 int lineGaussians = 0;
+                 int nonFinite = 0;
+-                int correctedLineGaussians = 0;
+-                if (gaussians_->xyz_.size(0) > 0) {
++                if (gaussians_ && gaussians_->xyz_.size(0) > 0)
++                {
+                     lineGaussians = gaussians_->is_line_.sum().item<int>();
+                     nonFinite = gaussians_->xyz_.size(0)
+                         - torch::isfinite(gaussians_->xyz_).all(1).sum().item<int>();
+-                    // Line Gaussians transformed by this loop (were in the
+-                    // not-transformed set before, now marked transformed).
+-                    if (lineGaussians > 0 && point_not_transformed_flags.size(0) == gaussians_->is_line_.size(0))
+-                        correctedLineGaussians = torch::logical_and(
+-                            gaussians_->is_line_, torch::logical_not(point_not_transformed_flags)).sum().item<int>();
+                 }
+-                const float meanT = (nLargeCorr > 0) ? (sumTrans / nLargeCorr) : 0.0f;
+-                const float meanR = (nLargeCorr > 0) ? (sumRot / nLargeCorr * 180.0 / M_PI) : 0.0f;
+-                const float meanS = (nLargeCorr > 0) ? (sumScale / nLargeCorr) : 1.0f;
++                const float meanT =
++                    (stats.moved_rows > 0)
++                        ? static_cast<float>(stats.translation_sum /
++                                             static_cast<double>(stats.moved_rows))
++                        : 0.0f;
++                const float meanR =
++                    (nKFsWithPkf > 0) ? (sumRotDeg / nKFsWithPkf) : 0.0f;
+                 std::cerr << "[LineLoop-Gaussian] candidates=" << lineGaussians
+-                          << " correctedLineGaussians=" << correctedLineGaussians
++                          << " correctedLineGaussians=" << stats.line_rows_moved
+                           << " kfsTotal=" << nKFsTotal
+                           << " kfsWithPkf=" << nKFsWithPkf
+-                          << " kfsCorrected=" << nKFsCorrected
+-                          << " kfsSkippedByGate=" << nKFsSkippedByGate
+-                          << " corrected=" << num_transformed
+-                          << " skippedBad=0 skippedNull=0 duplicateSkipped=0"
++                          << " kfsCorrected=" << stats.groups_applied
++                          << " kfsSkippedByGate=0"
++                          << " corrected=" << stats.moved_rows
++                          << " skippedBad=0"
++                          << " skippedNull=" << nKFsNoScene
++                          << " duplicateSkipped=" << stats.stale_rows
+                           << " nonFinite=" << nonFinite
+                           << " maxTranslation=" << maxTrans
+                           << " maxRotationDeg=" << maxRotDeg
+                           << " meanTranslation=" << meanT
+                           << " meanRotationDeg=" << meanR
+-                          << " meanScaleRatio=" << meanS << std::endl;
++                          << " meanScaleRatio=" << loop_kf_scale << std::endl;
++                std::cerr << "[LoopSync] evt=" << coord_evt
++                          << " kfs=" << world_deltas.size()
++                          << " kfsPoseChanged=" << nKFsPoseChanged
++                          << " noScene=" << nKFsNoScene
++                          << " movedRows=" << stats.moved_rows
++                          << " nonzeroMovedRows=" << stats.nonzero_moved_rows
++                          << " lineRowsMoved=" << stats.line_rows_moved
++                          << " unassignedRows=" << stats.unassigned_rows
++                          << " missingEventRows=" << stats.missing_event_rows
++                          << " staleRows=" << stats.stale_rows
++                          << " scale=" << loop_kf_scale
++                          << " count=" << count_before << "->" << count_after
++                          << std::endl;
+             }
++            last_applied_gba_event_ = coord_evt;
+ 
+             // Add new map points after loop closure
+             auto& associated_points = opr.associatedMapPoints();
+@@ -7191,8 +7974,11 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+             // The callback is a pure correction: it must never seed, densify,
+             // clone, split or prune. The row count is asserted below.
+             const unsigned long evt = opr.eventId();
+-            const unsigned long prev_evt = gaussians_
+-                ? gaussians_->lastAppliedGbaEvent() : last_applied_gba_event_;
++            // Payload duplicate/stale rejection is separate from the model's
++            // model-local coordinate sequence: LOOP events also consume a
++            // coordinate version, so lastAppliedGbaEvent() is no longer the
++            // ORB-SLAM3 payload id.
++            const unsigned long prev_evt = last_gba_payload_event_;
+             const long long count_before =
+                 gaussians_ ? gaussians_->xyz_.size(0) : 0;
+ 
+@@ -7237,6 +8023,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+                 break;
+             }
+ 
++            const unsigned long coord_evt =
++                gaussians_->allocateCoordEventId();
+             int n_in_scene = 0, n_scene_missing = 0;
+             double max_pose_mismatch = 0.0;
+             std::vector<std::pair<unsigned long, Sophus::SE3f>> deltas;
+@@ -7301,7 +8089,10 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+                              "(PHOTO_SLAM_GBA_APPLY_CORRECTION=1)"
+                           << std::endl;
+                 std::unique_lock<std::mutex> lock_render(mutex_render_);
+-                stats = gaussians_->applyGbaCorrections(deltas, evt);
++                stats = gaussians_->applyGbaCorrections(
++                    deltas, coord_evt,
++                    GaussianModelLine::GbaCorrectionMode::Full,
++                    1.0f);
+             }
+ 
+             // Scene keyframes adopt the final GBA poses (training views).
+@@ -7321,7 +8112,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+             TORCH_CHECK(count_after == count_before,
+                         "[GBA-Apply] correction changed the Gaussian count: ",
+                         count_before, " -> ", count_after);
+-            last_applied_gba_event_ = evt;
++            last_gba_payload_event_ = evt;
++            last_applied_gba_event_ = coord_evt;
+ 
+             // Explain unassigned/missing counts instead of guessing anchors.
+             long long ref_in_event = 0, ref_scene_not_event = 0;
+diff --git a/src/gaussian_model_line.cpp b/src/gaussian_model_line.cpp
+index df0949e..bdd5c2b 100644
+--- a/src/gaussian_model_line.cpp
++++ b/src/gaussian_model_line.cpp
+@@ -602,6 +602,7 @@ void GaussianModelLine::createFromPcd(
+     this->coord_event_id_ = torch::zeros(
+         {num_points}, torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+     this->last_applied_gba_event_ = 0;
++    this->coord_event_seq_ = 0;
+     long long n_missing_ref = 0;
+     for (long long v : initial_ref_kf_ids) if (v < 0) ++n_missing_ref;
+     if (n_missing_ref > 0)
+@@ -1477,6 +1478,14 @@ void GaussianModelLine::ensureGbaMetadata()
+         coord_event_id_ = coord_event_id_.to(device_type_).to(torch::kLong).contiguous();
+ }
+ 
++unsigned long GaussianModelLine::allocateCoordEventId()
++{
++    ensureGbaMetadata();
++    if (coord_event_seq_ < last_applied_gba_event_)
++        coord_event_seq_ = last_applied_gba_event_;
++    return ++coord_event_seq_;
++}
++
+ namespace { void fgmHashTensor(const torch::Tensor& t, std::uint64_t& h); }
+ 
+ std::string GaussianModelLine::adamFingerprint()
+@@ -1511,12 +1520,16 @@ std::string GaussianModelLine::adamFingerprint()
+ 
+ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+     const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+-    unsigned long event_id, GbaCorrectionMode mode)
++    unsigned long event_id, GbaCorrectionMode mode, float world_scale)
+ {
+     GbaCorrectionStats st;
+     if (!xyz_.defined() || xyz_.size(0) == 0)
+         return st;
+ 
++    const float ws =
++        (std::isfinite(world_scale) && world_scale > 1e-6f) ? world_scale : 1.0f;
++    const bool do_scale = std::abs(ws - 1.0f) > 1e-6f;
++
+     torch::NoGradGuard no_grad;
+     ensureGbaMetadata();
+     const int64_t N = xyz_.size(0);
+@@ -1563,9 +1576,10 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             .clone().to(device_type_);
+         torch::Tensor sel = torch::nonzero(active).flatten();
+ 
+-        // Centres and world anchors: p' = R p + t.
++        // Centres and world anchors: p' = ws * (R p) + t.
+         auto rigid_move = [&](torch::Tensor& dst) {
+-            torch::Tensor moved = torch::matmul(dst, R.transpose(0, 1)) + t;
++            torch::Tensor moved =
++                torch::matmul(dst, R.transpose(0, 1)) * ws + t;
+             dst.index_copy_(0, sel, moved.index_select(0, sel));
+         };
+         {
+@@ -1573,7 +1587,7 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             // "processed" and "non-zero displacement" are separate numbers.
+             torch::Tensor before = xyz_.index_select(0, sel);
+             torch::Tensor after =
+-                torch::matmul(before, R.transpose(0, 1)) + t;
++                torch::matmul(before, R.transpose(0, 1)) * ws + t;
+             torch::Tensor disp = (after - before).norm(2, 1);
+             st.nonzero_moved_rows += static_cast<long long>(
+                 disp.gt(1e-6f).sum().item<std::int64_t>());
+@@ -1610,7 +1624,8 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             rotation_.index_copy_(0, sel, qn.index_select(0, sel));
+         }
+ 
+-        // World line direction: d' = R d (rotation only, no translation).
++        // World line direction: d' = R d (rotation only, no translation and
++        // no uniform scale: a direction is scale-invariant).
+         if (have_line)
+         {
+             torch::Tensor line_active = torch::logical_and(active, is_line_);
+@@ -1627,10 +1642,30 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             }
+         }
+ 
++        // Covariance under a uniform scale: scaling_ stores log-standard
++        // deviations, so s * Sigma -> scaling_ + log(s) on the selected rows.
++        // The quaternion is scale-invariant and was already rotated above.
++        if (do_scale && scaling_.defined() && scaling_.size(0) == N)
++        {
++            torch::Tensor scaled = scaling_.index_select(0, sel) +
++                                  std::log(ws);
++            if (optimizer_)
++            {
++                torch::Tensor next = scaling_.clone();
++                next.index_copy_(0, sel, scaled);
++                scaling_ = replaceTensorToOptimizer(next, 4);
++                Tensor_vec_scaling_ = {scaling_};
++            }
++            else
++            {
++                scaling_.index_copy_(0, sel, scaled);
++            }
++        }
++
+         // Adam policy: the xyz first moment is a world-space vector and is
+-        // rotated with the geometry. The second moment is an axis-wise positive
+-        // quantity; it is left unchanged (documented approximation). Other
+-        // parameter groups are unaffected.
++        // transformed with the geometry. The second moment is an axis-wise
++        // positive quantity; it is left unchanged (documented approximation).
++        // Other parameter groups are unaffected.
+         if (optimizer_)
+         {
+             auto& xyz_param = optimizer_->param_groups()[0].params()[0];
+@@ -1643,7 +1678,8 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+                 if (adam.exp_avg().defined() && adam.exp_avg().size(0) == N)
+                 {
+                     torch::Tensor ea = adam.exp_avg();
+-                    torch::Tensor rot = torch::matmul(ea, R.transpose(0, 1));
++                    torch::Tensor rot =
++                        torch::matmul(ea, R.transpose(0, 1)) * ws;
+                     ea.index_copy_(0, sel, rot.index_select(0, sel));
+                     adam.exp_avg(ea);
+                 }
+@@ -1834,15 +1870,72 @@ static bool runGbaApplyContractTest()
+                     (vec(m.xyz_, 0) - p0ee).norm() < 1e-5f &&
+                     m.lastAppliedGbaEvent() == 2;
+ 
++    // Event 3: uniform Sim(3) scale on the kf-11 row. It must scale both the
++    // centre and the world anchor, add log(s) to the log-scale, and leave the
++    // other keyframe's rows untouched.
++    const Sophus::SE3f G3(Eigen::Matrix3f::Identity(),
++                          Eigen::Vector3f(0.f, 0.f, 0.5f));
++    std::vector<std::pair<unsigned long, Sophus::SE3f>> d3{{11u, G3}};
++    const float world_scale = 2.0f;
++    auto st3 = m.applyGbaCorrections(
++        d3, 3, GaussianModelLine::GbaCorrectionMode::Full, world_scale);
++    Eigen::Vector3f p2(0.f, 1.f, 2.f);
++    Eigen::Vector3f p2e = world_scale * p2 + G3.translation();
++    Eigen::Vector3f a2e = world_scale * p2 + G3.translation();
++    Eigen::Vector3f s2a(get(m.scaling_, 2, 0), get(m.scaling_, 2, 1),
++                        get(m.scaling_, 2, 2));
++    bool scale_apply_ok =
++        st3.moved_rows == 1 &&
++        (vec(m.xyz_, 2) - p2e).norm() < 1e-5f &&
++        (vec(m.xyz_init_, 2) - a2e).norm() < 1e-5f &&
++        (s2a - (Eigen::Vector3f(0.2f, 0.2f, 0.2f).array().log() +
++                std::log(world_scale)).matrix()).norm() < 1e-5f &&
++        (vec(m.xyz_, 0) - p0ee).norm() < 1e-6f;
++
++    // New rows created after event 3 must inherit event version 3. Replaying
++    // event 1 must not move them; a genuinely newer event 4 must.
++    torch::Tensor nx = torch::tensor({{4.f, 5.f, 6.f}}, fo);
++    torch::Tensor nfdc = torch::zeros({1, 1, 3}, fo);
++    torch::Tensor nfrest = torch::zeros({1, 0, 3}, fo);
++    torch::Tensor nopa = torch::zeros({1, 1}, fo);
++    torch::Tensor nsca = torch::log(torch::tensor({{0.1f, 0.1f, 0.1f}}, fo));
++    torch::Tensor nrot = torch::tensor({{1.f, 0.f, 0.f, 0.f}}, fo);
++    torch::Tensor nexi = torch::zeros(
++        {1}, torch::TensorOptions().dtype(torch::kInt32));
++    torch::Tensor nline = torch::zeros(
++        {1}, torch::TensorOptions().dtype(torch::kBool));
++    torch::Tensor ndir = torch::tensor({{1.f, 0.f, 0.f}}, fo);
++    torch::Tensor ninit = nx.clone();
++    torch::Tensor nref = torch::tensor(
++        {10}, torch::TensorOptions().dtype(torch::kLong));
++    const int64_t new_idx = m.xyz_.size(0);
++    m.densificationPostfixWithLineAwareness(
++        nx, nfdc, nfrest, nopa, nsca, nrot, nexi, nline, ndir, ninit, nref);
++    const long long new_stamp =
++        m.coord_event_id_.index({new_idx}).item<std::int64_t>();
++    const bool stamp_ok = new_stamp == 3 &&
++                          m.lastAppliedGbaEvent() == 3;
++    const Eigen::Vector3f np_before = vec(m.xyz_, new_idx);
++    auto st_replay = m.applyGbaCorrections(d1, 1);
++    const bool new_replay_ok =
++        st_replay.moved_rows == 0 &&
++        (vec(m.xyz_, new_idx) - np_before).norm() < 1e-6f;
++    auto st_new = m.applyGbaCorrections(d1, 4);
++    Eigen::Vector3f np_after = Rz * np_before + tG;
++    const bool new_event4_ok =
++        st_new.moved_rows >= 1 &&
++        (vec(m.xyz_, new_idx) - np_after).norm() < 1e-5f;
++
+     const bool pass = centre_ok && dir_ok && anchor_ok && residual_ok &&
+                       rows_unchanged && scale_ok && cov_ok && cache_ok &&
+-                      counts_ok && dup_ok && order_ok;
++                      counts_ok && dup_ok && order_ok && scale_apply_ok &&
++                      stamp_ok && new_replay_ok && new_event4_ok;
+     printf("[GbaContract] centre=%d dir=%d anchor=%d residual=%d rows=%d "
+            "scale=%d covariance=%d cache=%d counts=%d duplicate=%d order=%d "
+-           ": %s\n",
++           "scale_apply=%d stamp=%d new_replay=%d new_event=%d : %s\n",
+            centre_ok, dir_ok, anchor_ok, residual_ok, rows_unchanged, scale_ok,
+-           cov_ok, cache_ok, counts_ok, dup_ok, order_ok,
+-           pass ? "PASS" : "FAIL");
++           cov_ok, cache_ok, counts_ok, dup_ok, order_ok, scale_apply_ok,
++           stamp_ok, new_replay_ok, new_event4_ok, pass ? "PASS" : "FAIL");
+     fflush(stdout);
+     return pass;
+ }
+@@ -2228,9 +2321,20 @@ torch::Tensor GaussianModelLine::replaceTensorToOptimizer(torch::Tensor& tensor,
+     auto& state = optimizer_->state();
+     //auto key = c10::guts::to_string(param.unsafeGetTensorImpl());
+     auto key = param.unsafeGetTensorImpl();
+-    auto& stored_state = static_cast<torch::optim::AdamParamState&>(*state[key]);
+     auto new_state = std::make_unique<torch::optim::AdamParamState>();
+-    new_state->step(stored_state.step());
++    auto state_it = state.find(key);
++    if (state_it != state.end())
++    {
++        auto& stored_state =
++            static_cast<torch::optim::AdamParamState&>(*state_it->second);
++        new_state->step(stored_state.step());
++    }
++    else
++    {
++        // A correction can run before this parameter group has ever produced
++        // an Adam state (e.g. a scale-changing LOOP before the first step).
++        new_state->step(0);
++    }
+     new_state->exp_avg(torch::zeros_like(tensor));
+     new_state->exp_avg_sq(torch::zeros_like(tensor));
+     // new_state->max_exp_avg_sq(stored_state.max_exp_avg_sq().clone()); // needed only when options.amsgrad(true), which is false by default
+@@ -4486,6 +4590,61 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
+     // =========================================================
+     // 3. 执行物理剪裁 (先清减，再增补)
+     // =========================================================
++    // variable-topology audit: record the PRE-prune selection and population.
++    // All .item() calls are gated behind PHOTO_SLAM_TOPO_AUDIT; a normal run
++    // takes the early return in topoAuditRecord and performs no extra sync.
++    topoAuditInitIfNeeded();
++    const bool topo_on = topoAuditEnabled();
++    const long long topo_total_before = topo_on ? auditTotal() : 0;
++    long long topo_line_before = -1;
++    long long topo_prune_opacity = -1, topo_prune_lazy = -1, topo_prune_big = -1;
++    if (topo_on)
++    {
++        if (is_line_.defined() && is_line_.numel() == topo_total_before)
++            topo_line_before = is_line_.to(torch::kCPU).to(torch::kBool)
++                                   .sum().item<int64_t>();
++        topo_prune_opacity = opacity_mask.sum().item<int64_t>();
++        topo_prune_lazy = lazy_line_mask.sum().item<int64_t>();
++        if (max_screen_size > 0)
++            topo_prune_big = big_points_mask.sum().item<int64_t>();
++        topoAuditRecord("entry", topo_total_before, topo_line_before,
++                        topo_prune_opacity, topo_prune_lazy, topo_prune_big,
++                        0, 0, max_grad, true);
++        // Full selection sets, not just counts/top-16. These are the masks used
++        // by the clone/split routines at the PRE-prune snapshot.
++        auto gnorm = torch::frobenius_norm(
++            (xyz_gradient_accum_ / denom_.clamp_min(1e-12)).to(torch::kCPU),
++            /*dim=*/-1).flatten();
++        auto max_scale = std::get<0>(getScalingActivation().max(1)).to(torch::kCPU);
++        auto is_line_cpu = is_line_.to(torch::kCPU).to(torch::kBool).flatten();
++        auto writeMask = [&](const char* stage, const char* kind,
++                             const torch::Tensor& mask) {
++            auto idx = mask.to(torch::kCPU).to(torch::kBool).flatten()
++                           .nonzero().squeeze(1);
++            for (int64_t q = 0; q < idx.numel(); ++q)
++            {
++                const int row = idx.index({q}).item<int>();
++                topo_mask_out_ << topo_arm_ << ',' << topo_iter_ << ',' << stage
++                               << ',' << kind << ',' << row << ','
++                               << gnorm.index({row}).item<double>() << ','
++                               << max_scale.index({row}).item<double>() << ','
++                               << (row < is_line_cpu.numel()
++                                       ? (is_line_cpu.index({row})
++                                                  .item<float>() > 0.5f ? 1 : 0)
++                                       : -1)
++                               << '\n';
++            }
++            topo_mask_out_.flush();
++        };
++        writeMask("pre_prune", "prune", prune_mask);
++        auto clone_cand = torch::logical_and(
++            gnorm >= max_grad, max_scale <= percentDense() * extent);
++        auto split_cand = torch::logical_and(
++            gnorm >= max_grad, max_scale > percentDense() * extent);
++        writeMask("pre_prune", "clone_candidate", clone_cand);
++        writeMask("pre_prune", "split_candidate", split_cand);
++    }
++
+     // perf-stage3 audit: measure the three sub-step deltas from HOST metadata
+     // (xyz_.size(0)) only -- at this point all pending device work for the
+     // masks has already completed, so no extra synchronisation is introduced.
+@@ -4504,6 +4663,11 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
+         auditEvent("prune", 0, audit_before_prune - after);
+     }
+     const long long audit_after_prune = audit_on ? auditTotal() : 0;
++    const long long topo_after_prune = topo_on ? auditTotal() : 0;
++    if (topo_on)
++        topoAuditRecord("after_prune", topo_total_before, topo_line_before,
++                        topo_prune_opacity, topo_prune_lazy, topo_prune_big,
++                        0, 0, max_grad, false);
+ 
+     if (linePruneDiag()) {
+         auto lazy_count = lazy_line_mask.sum().item<int>();
+@@ -4520,6 +4684,38 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
+     // 因为 prune 之后原有 grads 已经失效了
+     auto grads_after_prune = this->xyz_gradient_accum_ / this->denom_;
+     grads_after_prune.index_put_({grads_after_prune.isnan()}, 0.0f);
++    if (topo_on)
++    {
++        auto gnorm = torch::frobenius_norm(grads_after_prune.to(torch::kCPU),
++                                           /*dim=*/-1).flatten();
++        auto max_scale =
++            std::get<0>(getScalingActivation().max(1)).to(torch::kCPU);
++        auto is_line_cpu = is_line_.to(torch::kCPU).to(torch::kBool).flatten();
++        auto writeMask = [&](const char* kind, const torch::Tensor& mask) {
++            auto idx = mask.to(torch::kCPU).to(torch::kBool).flatten()
++                           .nonzero().squeeze(1);
++            for (int64_t q = 0; q < idx.numel(); ++q)
++            {
++                const int row = idx.index({q}).item<int>();
++                topo_mask_out_ << topo_arm_ << ',' << topo_iter_
++                               << ",post_prune," << kind << ',' << row << ','
++                               << gnorm.index({row}).item<double>() << ','
++                               << max_scale.index({row}).item<double>() << ','
++                               << (row < is_line_cpu.numel()
++                                       ? (is_line_cpu.index({row})
++                                                  .item<float>() > 0.5f ? 1 : 0)
++                                       : -1)
++                               << '\n';
++            }
++            topo_mask_out_.flush();
++        };
++        writeMask("clone", torch::logical_and(
++                               gnorm >= max_grad,
++                               max_scale <= percentDense() * extent));
++        writeMask("split", torch::logical_and(
++                               gnorm >= max_grad,
++                               max_scale > percentDense() * extent));
++    }
+ 
+     // =========================================================
+     // 4. 执行加密 (此时 N 已变，内部会更新状态)
+@@ -4533,7 +4729,19 @@ void GaussianModelLine::densifyAndPruneWithLineAwareness(
+     // extending that metadata and break the next forward pass.
+     this->densifyAndCloneWithLineAwareness(grads_after_prune, max_grad, extent);
+     const long long audit_after_clone = audit_on ? auditTotal() : 0;
++    const long long topo_after_clone = topo_on ? auditTotal() : 0;
++    if (topo_on)
++        topoAuditRecord("after_clone", topo_total_before, topo_line_before,
++                        topo_prune_opacity, topo_prune_lazy, topo_prune_big,
++                        topo_after_clone - topo_after_prune, 0, max_grad,
++                        false);
+     this->densifyAndSplitWithLineAwareness(grads_after_prune, max_grad, extent, 2);
++    const long long topo_after_split = topo_on ? auditTotal() : 0;
++    if (topo_on)
++        topoAuditRecord("after_split", topo_total_before, topo_line_before,
++                        topo_prune_opacity, topo_prune_lazy, topo_prune_big,
++                        topo_after_clone - topo_after_prune,
++                        topo_after_split - topo_after_clone, max_grad, false);
+     if (audit_on) {
+         const long long after_split = auditTotal();
+         auditEvent("clone", audit_after_clone - audit_after_prune, 0);
+@@ -5692,7 +5900,13 @@ std::size_t GaussianModelLine::loadFullSnapshot(const std::string& path)
+     }
+     torch::NoGradGuard ng;
+     auto put = [&](torch::Tensor& dst, const torch::Tensor& src) {
+-        if (src.defined()) { dst = src.to(device_type_).detach().requires_grad_(); }
++        if (!src.defined()) return;
++        dst = src.to(device_type_).detach();
++        // Bool/long metadata tensors cannot require gradients; the old
++        // unconditional requires_grad_() made every offline snapshot load
++        // abort.  Floating-point geometry/colour tensors still do.
++        if (dst.is_floating_point() || dst.is_complex())
++            dst.requires_grad_();
+     };
+     put(xyz_, ts[0]);
+     put(features_dc_, ts[1]);
+@@ -5769,6 +5983,131 @@ void GaussianModelLine::linePopRecord(const char* stage)
+     lpop_struct_out_.flush();
+ }
+ 
++// ---------------------------------------------------------------------------
++// variable-topology audit (capture-only).
++// Records the pre-prune selection and the post-stage population at every
++// densification. Row indices are only valid for the pre-prune snapshot; after a
++// prune/clone/split they must not be used to pair rows (the order is new).
++// ---------------------------------------------------------------------------
++void GaussianModelLine::topoAuditInitIfNeeded()
++{
++    if (topo_initialised_) return;
++    topo_initialised_ = true;
++    const char* p = std::getenv("PHOTO_SLAM_TOPO_AUDIT");
++    if (p == nullptr || p[0] == '\0') return;
++    topo_enabled_ = true;
++    topo_out_.open(std::string(p) + "_topology.csv", std::ios::out | std::ios::trunc);
++    topo_selected_out_.open(std::string(p) + "_selected.csv",
++                            std::ios::out | std::ios::trunc);
++    topo_mask_out_.open(std::string(p) + "_mask.csv",
++                        std::ios::out | std::ios::trunc);
++    if (!topo_out_.good())
++    {
++        topo_enabled_ = false;
++        return;
++    }
++    topo_out_ << "arm,iteration,stage,total_before,line_before,total_after,"
++                 "line_after,prune_opacity,prune_lazy,prune_big,clone_delta,"
++                 "split_delta,clone_cum,split_cum,prune_cum,grad_threshold,"
++                 "grad_p50,grad_p95,grad_max,near_threshold,scale_mean,"
++                 "scale_p50,opacity_mean,photo_loss,struct_loss\n";
++    topo_selected_out_ << "arm,iteration,stage,rank,row,grad,ratio,is_line,"
++                          "max_scale,opacity\n";
++    topo_mask_out_ << "arm,iteration,stage,kind,row,grad,max_scale,is_line\n";
++    std::cerr << "[TopoAudit] enabled -> " << p << "_topology.csv" << std::endl;
++}
++
++void GaussianModelLine::topoAuditRecord(const char* stage,
++                                        long long total_before,
++                                        long long line_before,
++                                        long long prune_opacity,
++                                        long long prune_lazy,
++                                        long long prune_big,
++                                        long long clone_delta,
++                                        long long split_delta,
++                                        float grad_threshold,
++                                        bool write_selected)
++{
++    topoAuditInitIfNeeded();
++    if (!topo_enabled_) return;
++    torch::NoGradGuard ng;
++    const long long total_after = auditTotal();
++    long long line_after = -1;
++    if (is_line_.defined() && is_line_.numel() == total_after)
++        line_after = is_line_.to(torch::kCPU).to(torch::kBool).sum().item<int64_t>();
++
++    double p50 = -1.0, p95 = -1.0, gmax = -1.0, near = -1.0;
++    double scale_mean = -1.0, scale_p50 = -1.0, opacity_mean = -1.0;
++    torch::Tensor gnorm, max_scale, opacity;
++    if (xyz_gradient_accum_.defined() && denom_.defined() &&
++        xyz_gradient_accum_.numel() > 0 && denom_.numel() == xyz_gradient_accum_.size(0))
++    {
++        auto grads = (xyz_gradient_accum_ / denom_.clamp_min(1e-12)).to(torch::kCPU);
++        grads.index_put_({grads.isnan()}, 0.0f);
++        gnorm = torch::frobenius_norm(grads, /*dim=*/-1).flatten();
++        if (gnorm.numel() > 0)
++        {
++            gmax = gnorm.max().item<double>();
++            p50 = gnorm.quantile(0.50).item<double>();
++            p95 = gnorm.quantile(0.95).item<double>();
++            if (grad_threshold > 0.0f)
++                near = ((gnorm >= 0.9f * grad_threshold) &
++                        (gnorm <= 1.1f * grad_threshold))
++                           .to(torch::kCPU).sum().item<double>();
++        }
++    }
++    if (scaling_.defined() && scaling_.numel() > 0)
++    {
++        max_scale = std::get<0>(getScalingActivation().max(1)).to(torch::kCPU);
++        scale_mean = max_scale.mean().item<double>();
++        scale_p50 = max_scale.quantile(0.50).item<double>();
++    }
++    if (opacity_.defined() && opacity_.numel() > 0)
++        opacity_mean = getOpacityActivation().mean().item<double>();
++
++    topo_out_ << topo_arm_ << ',' << topo_iter_ << ',' << stage << ',' << total_before << ','
++              << line_before << ',' << total_after << ',' << line_after << ','
++              << prune_opacity << ',' << prune_lazy << ',' << prune_big << ','
++              << clone_delta << ',' << split_delta << ',' << audit_clone_ << ','
++              << audit_split_ << ',' << audit_prune_ << ',' << grad_threshold
++              << ',' << p50 << ',' << p95 << ',' << gmax << ',' << near << ','
++              << scale_mean << ',' << scale_p50 << ',' << opacity_mean << ','
++              << last_topology_photo_loss_ << ',' << last_topology_struct_loss_
++              << '\n';
++    topo_out_.flush();
++
++    if (write_selected && gnorm.defined() && gnorm.numel() > 0)
++    {
++        const int64_t k = std::min<int64_t>(16, gnorm.numel());
++        auto vals = std::get<0>(gnorm.topk(k));
++        auto idxs = std::get<1>(gnorm.topk(k));
++        auto op = opacity_.defined()
++                      ? getOpacityActivation().flatten().to(torch::kCPU)
++                      : torch::Tensor();
++        for (int64_t r = 0; r < k; ++r)
++        {
++            const int row = idxs.index({r}).item<int>();
++            const double g = vals.index({r}).item<double>();
++            double ms = -1.0, opv = -1.0;
++            if (max_scale.defined() && row < max_scale.numel())
++                ms = max_scale.index({row}).item<double>();
++            if (op.defined() && row < op.numel())
++                opv = op.index({row}).item<double>();
++            const int is_l = (is_line_.defined() && row < is_line_.numel())
++                                 ? (is_line_.index({row})
++                                            .to(torch::kCPU)
++                                            .item<float>() > 0.5f
++                                        ? 1 : 0)
++                                 : -1;
++            topo_selected_out_ << topo_arm_ << ',' << topo_iter_ << ',' << stage << ',' << r << ','
++                               << row << ',' << g << ','
++                               << (grad_threshold > 0.0f ? g / grad_threshold : -1.0)
++                               << ',' << is_l << ',' << ms << ',' << opv << '\n';
++        }
++        topo_selected_out_.flush();
++    }
++}
++
+ void GaussianModelLine::auditInitIfNeeded()
+ {
+     if (audit_initialised_) return;

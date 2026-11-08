@@ -1,0 +1,2 @@
+tag,arm_ref,param_max_abs,grad_max_abs,exp_avg_max_abs,exp_avg_sq_max_abs,state_step_ref,state_step_tag,quat_angle_deg,cov_max_abs,lr_ref,lr_tag,eps_ref,eps_tag,wd_ref,wd_tag,beta1_ref,beta1_tag,same_impl_ref,same_impl_tag,grad_defined_ref,grad_defined_tag,state_found_ref,state_found_tag
+RepeatB,ref,0,1.42318e-08,0,0,15563,15563,6.61947e-06,0,0.001,0.001,1e-15,1e-15,0,0,0.9,0.9,1,1,1,1,1,1

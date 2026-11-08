@@ -1,0 +1,5 @@
+densify_from_iter=0
+densify_until_iter=15000
+densification_interval=100
+opacity_reset_interval=0
+iterations=50100

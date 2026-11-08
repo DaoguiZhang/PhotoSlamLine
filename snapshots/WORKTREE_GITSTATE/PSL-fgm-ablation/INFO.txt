@@ -1,0 +1,4 @@
+# worktree: /workspace/code/PSL-fgm-ablation
+# HEAD: 0e2f7fc4001019c61984fc7e266b80f188c8a12e
+# branch: feat/fixed-geometry-mapper-ablation
+# tracked-dirty files: 171

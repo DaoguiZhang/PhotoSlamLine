@@ -1,0 +1,94 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Model Parameters
+#--------------------------------------------------------------------------------------------
+
+Model.sh_degree: 3 # maximum
+Model.resolution: -1.0
+Model.white_background: 0  # 0:false, 1 or other integer:true
+Model.eval: 0  # 0:false, 1 or other integer:true
+
+#--------------------------------------------------------------------------------------------
+# Pipeline Parameters
+#--------------------------------------------------------------------------------------------
+
+Camera.z_near: 0.01
+Camera.z_far: 100.0
+Monocular.inactive_geo_densify_max_pixel_dist: 1.0 # (squared distance)
+Stereo.min_disparity: 8
+Stereo.num_disparity: 128
+RGBD.min_depth: 0.0000000001
+RGBD.max_depth: 100.0 #50.0  # 🌟 针对室外大场景合理截断，防止单目远点无限外推导致 CUDA 越界崩溃
+
+Mapper.inactive_geo_densify: 1  # 0:false, 1 or other integer:true
+Mapper.depth_cache: 10
+Mapper.min_num_initial_map_kfs: 5 # 🌟 核心修改：从28降到5！让高斯后端尽早启动，死死咬住单目的初始尺度
+Mapper.new_keyframe_times_of_use: 8 # 🌟 从2提高到8：单目特征较稀疏，增加新关键帧的迭代优化次数，增强稳健性
+Mapper.local_BA_increased_times_of_use: 0
+Mapper.loop_closure_increased_times_of_use_: 2
+Mapper.cull_keyframes: 0  # 0:false, 1 or other integer:true
+Mapper.large_rotation_threshold: 30.0
+Mapper.large_translation_threshold: 3.0 #2.0 #1.0
+Mapper.stable_num_iter_existence: 1
+
+GausPyramid.do: 1  # 0:false, 1 or other integer:true
+GausPyramid.num_sub_levels: 2 # 🌟 提高到3层金字塔：增强小车运动模糊时的鲁棒性
+GausPyramid.sub_level_times_of_use: 8
+
+Pipeline.convert_SHs: 0  # 0:false, 1 or other integer:true
+Pipeline.compute_cov3D: 0  # 0:false, 1 or other integer:true
+
+Record.keyframe_record_interval: 0 
+Record.all_keyframes_record_interval: 0 
+Record.record_rendered_image: 1 
+Record.record_ground_truth_image: 0 
+Record.record_loss_image: 0 
+Record.training_report_interval: 0 
+Record.record_loop_ply: 0 
+
+#--------------------------------------------------------------------------------------------
+# Optimization Parameters
+#--------------------------------------------------------------------------------------------
+
+# Learning rate
+Optimization.max_num_iterations: 100100 #30100
+Optimization.position_lr_init: 0.00032 
+Optimization.position_lr_final: 0.00016 # 🌟 允许学习率后期衰减，有助于室外场景全局精细化收敛
+Optimization.position_lr_delay_mult: 0.01
+Optimization.position_lr_max_steps: 24
+Optimization.feature_lr: 0.0025
+Optimization.opacity_lr: 0.05 
+Optimization.scaling_lr: 0.005 
+Optimization.rotation_lr: 0.001 
+
+# Densification
+Optimization.percent_dense: 0.01
+Optimization.lambda_dssim: 0.2
+Optimization.densification_interval: 100
+Optimization.opacity_reset_interval: 0  
+Optimization.prune_big_point_after_iter: 15000 # 🌟 从30000提前到15000：针对大场景（Garden/Campus）防止高斯球无限无用分裂，保护显存
+Optimization.densify_min_opacity: 0.1 
+Optimization.densify_from_iter: 800
+Optimization.densify_until_iter: 15000 # 🌟 同步缩短至15000：前半程疯狂长球，后半程死磕已有高斯球的画质精细化
+Optimization.densify_grad_threshold: 0.001 # 🌟 保持0.001：防止室外草坪和树叶区域高斯球数量爆炸引发 OOM
+Optimization.refined_gaussian_max_iter_num: 10000  # was 'training_global_refined_iters' (dead key: never read; effective default was 10000)
+
+# Line Weight Setting (for line-aware Gaussian mapper)
+Optimization.weight_line_coherence: 0.001
+Optimization.weight_line_shape_ori: 0.005
+Optimization.weight_line_shape_ecc: 0.002
+Optimization.line_sample_step: 0.15
+Optimization.line_view_weight: 2.0
+Optimization.line_sigma: 3.0
+Optimization.line_top_k: 3
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+
+GaussianViewer.glfw_window_width: 1400
+GaussianViewer.glfw_window_height: 1050
+GaussianViewer.image_scale: 0.5
+GaussianViewer.image_scale_main: 1.0
+GaussianViewer.camera_watch_dist: 0.000001

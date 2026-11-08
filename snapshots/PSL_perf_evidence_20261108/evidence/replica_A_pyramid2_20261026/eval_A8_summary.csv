@@ -1,0 +1,9 @@
+scene,exit_code,eval_txt,metrics_traj,log
+office0,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_office0.log
+office1,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_office1.log
+office2,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_office2.log
+office3,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_office3.log
+office4,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_office4.log
+room0,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_room0.log
+room1,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_room1.log
+room2,0,1,1,/workspace/code/PSL-perf/evidence/replica_A_pyramid2_20261026/eval_A8_room2.log

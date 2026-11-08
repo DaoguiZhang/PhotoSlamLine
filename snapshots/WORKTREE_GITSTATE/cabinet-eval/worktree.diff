@@ -1,0 +1,447 @@
+diff --git a/ORB-SLAM3/include/MapEventLog.h b/ORB-SLAM3/include/MapEventLog.h
+index 5e7819ae4b..1fd3ca22a3 100644
+--- a/ORB-SLAM3/include/MapEventLog.h
++++ b/ORB-SLAM3/include/MapEventLog.h
+@@ -18,6 +18,7 @@
+ #ifndef ORB_SLAM3_MAP_EVENT_LOG_H
+ #define ORB_SLAM3_MAP_EVENT_LOG_H
+ 
++#include <atomic>
+ #include <cstdlib>
+ #include <fstream>
+ #include <iostream>
+@@ -35,6 +36,52 @@ inline bool Enabled()
+     return p != nullptr && p[0] != '\0';
+ }
+ 
++// [MEASUREMENT] Input frame index currently being tracked, published by the
++// entry point before each Track* call. Without it an event has only a sequence
++// number, and a merge cannot be bound to a frame boundary: any claim that "this
++// reference-keyframe jump is that merge" would be an inference from jump size.
++// With it, the event names the frame it happened on and the claim is checkable.
++inline std::atomic<int>& CurrentFrameIndexRef()
++{
++    static std::atomic<int> f{-1};
++    return f;
++}
++
++inline void SetFrameIndex(int f)
++{
++    CurrentFrameIndexRef().store(f, std::memory_order_relaxed);
++}
++
++inline int CurrentFrameIndex()
++{
++    return CurrentFrameIndexRef().load(std::memory_order_relaxed);
++}
++
++// [MEASUREMENT] Coordinate-frame epoch. Incremented INSIDE Emit(), i.e. under
++// the same mutex that serialises the event rows, so "an event was written" and
++// "the epoch advanced" are one indivisible step rather than two racy ones. The
++// entry point reads it after Track* returns, which is ordered after whatever the
++// tracker did during that call, and stores it with the frame's pose. The
++// evaluator then splits alignment intervals on a change of this number instead
++// of guessing from map ids or keyframe jumps.
++inline std::atomic<int>& EpochRef()
++{
++    static std::atomic<int> e{0};
++    return e;
++}
++
++inline int CurrentEpoch()
++{
++    return EpochRef().load(std::memory_order_acquire);
++}
++
++inline bool AdvancesEpoch(const char* event)
++{
++    return event && (std::string(event) == "MAP_CREATE"
++                     || std::string(event) == "MAP_MERGE"
++                     || std::string(event) == "MAP_RESET");
++}
++
+ inline std::mutex& Mtx()
+ {
+     static std::mutex* m = new std::mutex();
+@@ -51,7 +98,7 @@ inline std::ofstream& Sink()
+         if (s->good())
+         {
+             (*s) << "# map lifecycle events; seq is monotonic per process\n";
+-            (*s) << "seq,event,map_id,kf_id,reason\n";
++            (*s) << "seq,event,map_id,kf_id,reason,frame,epoch\n";
+             s->flush();
+         }
+     }
+@@ -64,13 +111,18 @@ inline void Emit(const char* event, long long mapId, long long kfId,
+     if (!Enabled()) return;
+     static long long seq = 0;
+     std::lock_guard<std::mutex> g(Mtx());
++    // The epoch advance happens under the same lock as the row write.
++    if (AdvancesEpoch(event))
++        EpochRef().fetch_add(1, std::memory_order_acq_rel);
+     std::ofstream& o = Sink();
+     if (!o.good()) return;
+     o << (seq++) << ',' << event << ',' << mapId << ',' << kfId << ','
+-      << (reason ? reason : "") << '\n';
++      << (reason ? reason : "") << ',' << CurrentFrameIndex() << ','
++      << CurrentEpoch() << '\n';
+     o.flush();
+     std::cerr << "[MAP-EVENT] " << event << " map=" << mapId
+               << " kf=" << kfId
++              << " frame=" << CurrentFrameIndex()
+               << (reason && reason[0] ? " reason=" : "")
+               << (reason ? reason : "") << std::endl;
+ }
+diff --git a/ORB-SLAM3/include/System.h b/ORB-SLAM3/include/System.h
+index 6c18d5fceb..8024660424 100755
+--- a/ORB-SLAM3/include/System.h
++++ b/ORB-SLAM3/include/System.h
+@@ -172,6 +172,14 @@ public:
+     // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
+     void SaveKeyFrameTrajectoryTUM(const string &filename);
+ 
++    // [MEASUREMENT] Write the FINAL (reconstructed, post-BA) keyframe trajectory
++    // of EVERY map in the Atlas, one file per map, plus a summary row per map.
++    // SaveTrajectoryTUM writes only the single map chosen by SelectExportMap, so
++    // without this the poses of every other map are lost at exit. Read-only: it
++    // reads Map/KeyFrame state and writes files, and nothing in the estimation
++    // path consumes its output. `prefix` is a path prefix, e.g. "/out/traj_".
++    void SaveAllMapsTrajectoryTUM(const string &prefix);
++
+     void SaveTrajectoryEuRoC(const string &filename);
+     void SaveKeyFrameTrajectoryEuRoC(const string &filename);
+ 
+diff --git a/ORB-SLAM3/src/Frame.cc b/ORB-SLAM3/src/Frame.cc
+index 373308fb9a..9e7ca412d0 100755
+--- a/ORB-SLAM3/src/Frame.cc
++++ b/ORB-SLAM3/src/Frame.cc
+@@ -2610,9 +2610,19 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
+         if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
+             u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
+             continue;
++        // [CRASH FIX] the float check above is not enough: cvRound(rows-0.4)
++        // is rows, so a keyline endpoint just inside the border rounds one row
++        // PAST the image. ASan on ETH3D/sfm_house_loop reported a 4-byte READ a
++        // few kilobytes beyond the depth buffer, in this exact statement. The
++        // rounded indices are therefore validated before use.
++        const int vv1 = cvRound(v1), uu1 = cvRound(u1);
++        const int vv2 = cvRound(v2), uu2 = cvRound(u2);
++        if (uu1 < 0 || uu1 >= cols || vv1 < 0 || vv1 >= rows ||
++            uu2 < 0 || uu2 >= cols || vv2 < 0 || vv2 >= rows)
++            continue;
+         // 读取两端深度
+-        float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
+-        float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
++        float d1 = imDepth.at<float>(vv1, uu1);
++        float d2 = imDepth.at<float>(vv2, uu2);
+         bool valid1 = (d1 > minDepth && d1 < maxDepth);
+         bool valid2 = (d2 > minDepth && d2 < maxDepth);
+         if (!valid1 && !valid2) continue; // 两端都无效
+diff --git a/ORB-SLAM3/src/KeyFrame.cc b/ORB-SLAM3/src/KeyFrame.cc
+index ea8bc8982b..9e9083cb5d 100755
+--- a/ORB-SLAM3/src/KeyFrame.cc
++++ b/ORB-SLAM3/src/KeyFrame.cc
+@@ -17,6 +17,7 @@
+ */
+ 
+ #include "KeyFrame.h"
++#include <algorithm>
+ #include "Converter.h"
+ #include "ImuTypes.h"
+ #include "AuditTrail.h"
+@@ -90,6 +91,14 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
+ {
+     mnId=nNextId++;
+ 
++    // [CRASH FIX, root cause] mvpMapLines was never sized, so it stayed empty
++    // while NL > 0 and every reader that indexes it by line index (for example
++    // GetKeyLineInfo) ran off the end of an empty vector: ASan reported a SEGV
++    // at 0x0 on ETH3D/sfm_house_loop. The vector holds one observation slot per
++    // detected line, all null until a MapLine is associated, which is the
++    // invariant the readers already assume.
++    mvpMapLines.assign(NL, static_cast<MapLine*>(NULL));
++
+     mGrid.resize(mnGridCols);
+     if(F.Nleft != -1)  mGridRight.resize(mnGridCols);
+     for(int i=0; i<mnGridCols;i++)
+@@ -2081,11 +2090,26 @@ void KeyFrame::GetKeyLineInfo(
+     unique_lock<mutex> lock(mMutexFeatures);
+ 
+     // Save the id of each MapLine in this KF, there can be null pointer in the vector
++    // [CRASH FIX] NL is copied from the Frame, but the two vectors this loop
++    // indexes can be shorter than NL (a KeyFrame built from a frame whose line
++    // vectors were later resized, and mvpMapLines which is filled in a separate
++    // step). ASan on ETH3D/sfm_house_loop showed the unbounded loop reading
++    // through an empty vector's null data pointer: SEGV at 0x0 in this exact
++    // function. Clamping skips entries that do not exist; for every KeyFrame
++    // where the invariant NL == mvKeyLines.size() == mvpMapLines.size() holds,
++    // the loop is unchanged.
++    const int nLines = std::min(NL, (int)std::min(mvKeyLines.size(),
++                                                  mvpMapLines.size()));
++    if (nLines != NL) {
++        std::cerr << "[KF-NL-MISMATCH] kf=" << mnId << " NL=" << NL
++                  << " mvKeyLines=" << mvKeyLines.size()
++                  << " mvpMapLines=" << mvpMapLines.size() << std::endl;
++    }
+     pixelsUndist.clear();
+-    pixelsUndist.reserve(NL * 4);
++    pixelsUndist.reserve(nLines * 4);
+     pointsLocal.clear();
+-    pointsLocal.reserve(NL * 6);
+-    for(int i = 0; i < NL; ++i)
++    pointsLocal.reserve(nLines * 6);
++    for(int i = 0; i < nLines; ++i)
+     {
+         pixelsUndist.push_back(mvKeyLines[i].startPointX);
+         pixelsUndist.push_back(mvKeyLines[i].startPointY);
+diff --git a/ORB-SLAM3/src/LineExtractor.cc b/ORB-SLAM3/src/LineExtractor.cc
+index ad1dcf8e72..951a04ac81 100755
+--- a/ORB-SLAM3/src/LineExtractor.cc
++++ b/ORB-SLAM3/src/LineExtractor.cc
+@@ -948,7 +948,7 @@ namespace ORB_SLAM3
+         double cost=0;
+         static int c=0;
+         c++;
+-        assert(ptr->pts.size()==n);
++        assert(dptr->pts.size()==n);
+         for(int i=0; i<dptr->pts.size(); ++i)
+             cost+=error[i]*error[i];
+         //	cout<<cost<<"\t";
+diff --git a/ORB-SLAM3/src/LoopClosing.cc b/ORB-SLAM3/src/LoopClosing.cc
+index 7f751f3c59..8928620286 100755
+--- a/ORB-SLAM3/src/LoopClosing.cc
++++ b/ORB-SLAM3/src/LoopClosing.cc
+@@ -26,6 +26,7 @@
+ #include "G2oTypes.h"
+ #include "LineMode.h"
+ #include "AuditTrail.h"
++#include "MapEventLog.h"
+ 
+ #include<mutex>
+ #include<thread>
+@@ -2993,6 +2994,15 @@ void LoopClosing::MergeLocal()
+             pCurrentMap->EraseMapPoint(pMPi);
+         }
+ 
++        // [MEASUREMENT] MAP_MERGE: the map that is about to be discarded here is
++        // absorbed into pMergeMap. Gated by PHOTO_SLAM_MAP_EVENTS_CSV like every
++        // other map event; the kf_id column carries the ABSORBING map id for
++        // this event, because a merge has two maps and one id field. No
++        // estimation path reads this.
++        map_events::Emit("MAP_MERGE",
++                         pCurrentMap ? (long long)pCurrentMap->GetId() : -1LL,
++                         pMergeMap ? (long long)pMergeMap->GetId() : -1LL,
++                         "LoopClosing::MergeLocal");
+         mpAtlas->ChangeMap(pMergeMap);
+         mpAtlas->SetMapBad(pCurrentMap);
+         pMergeMap->IncreaseChangeIndex();
+@@ -3577,6 +3587,10 @@ void LoopClosing::MergeLocalWithLine()
+             pCurrentMap->EraseMapLine(pMLi);
+         }
+ 
++        map_events::Emit("MAP_MERGE",
++                         pCurrentMap ? (long long)pCurrentMap->GetId() : -1LL,
++                         pMergeMap ? (long long)pMergeMap->GetId() : -1LL,
++                         "LoopClosing::MergeLocalWithLine");
+         mpAtlas->ChangeMap(pMergeMap);
+         mpAtlas->SetMapBad(pCurrentMap);
+         pMergeMap->IncreaseChangeIndex();
+diff --git a/ORB-SLAM3/src/OptimizableTypes.cpp b/ORB-SLAM3/src/OptimizableTypes.cpp
+index dccd82e007..8ac3fa49d9 100755
+--- a/ORB-SLAM3/src/OptimizableTypes.cpp
++++ b/ORB-SLAM3/src/OptimizableTypes.cpp
+@@ -148,7 +148,7 @@ namespace ORB_SLAM3 {
+         double y = xyz_trans[1];
+         double z = xyz_trans[2];
+ 
+-        auto projectJac = -pCamera->projectJac(xyz_trans);
++        const Eigen::Matrix<double,2,3> projectJac = -pCamera->projectJac(xyz_trans);
+ 
+         _jacobianOplusXi =  projectJac * T.rotation().toRotationMatrix();
+ 
+diff --git a/ORB-SLAM3/src/Optimizer.cc b/ORB-SLAM3/src/Optimizer.cc
+index a83974a5c0..85cc69b8ec 100644
+--- a/ORB-SLAM3/src/Optimizer.cc
++++ b/ORB-SLAM3/src/Optimizer.cc
+@@ -18,6 +18,7 @@
+ 
+ 
+ #include "Optimizer.h"
++#include "OptimizerVertexIds.h"
+ #include "PoCapture.h"
+ 
+ 
+@@ -276,7 +277,14 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const
+ 
+     // Compute offset to avoid ID collision. MP vertex ids are mnId+maxKFid+1
+     // (sparse mnId), so line ids must start after maxMPid, NOT after vpMP.size().
+-    int nextVertexId = (int)maxKFid + (int)maxMPid + 2; 
++    int nextVertexId = 0;
++    if (!optids::NextFreeVertexId(optimizer, 2LL * (long long)vpML.size() + 8,
++                                  nextVertexId)) {
++        std::cerr << "[LBA-LINE] vertex id space exhausted, line vertices skipped"
++                  << std::endl;
++        nextVertexId = -1;
++    }
++    if (nextVertexId >= 0) --nextVertexId;
+ 
+     // Store G2O IDs for endpoints
+     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
+@@ -1057,7 +1065,14 @@ void Optimizer::BundleAdjustmentWithLine(const vector<KeyFrame *> &vpKFs, const
+     std::vector<ORB_SLAM3::EdgeSE3ProjectPointToLine2D*> vpEdgesLineMono;
+ 
+     // Compute offset to avoid ID collision
+-    int nextVertexId = (int)maxKFid + vpMP.size() + 2; 
++    int nextVertexId = 0;
++    if (!optids::NextFreeVertexId(optimizer, 2LL * (long long)vpML.size() + 8,
++                                  nextVertexId)) {
++        std::cerr << "[GBA-LINE] vertex id space exhausted, line vertices skipped"
++                  << std::endl;
++        nextVertexId = -1;
++    }
++    if (nextVertexId >= 0) --nextVertexId;
+ 
+     // Store G2O IDs for endpoints
+     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
+@@ -17428,8 +17443,29 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
+     std::vector<KeyFrame*> vpEdgeKFLineMono;
+     std::vector<MapLine*> vpMapLineEdgeMono;
+     
++    // ---- P1/P2 contract in the MAP-MERGE bundle adjuster ---------------
++    // This overload previously added line projection edges unconditionally: it
++    // consulted neither PHOTO_SLAM_LINE_MODE nor PHOTO_SLAM_LBA_LINE, so arm P1
++    // (line frontend on, line edges OFF) silently optimised with line edges.
++    // The gate is applied to the EDGE/VERTEX block only; line detection,
++    // matching, MapLines and the merge itself are untouched.
++    const bool lineEdgesEnabledHere =
++        (GetLineMode() >= 2 && GetLbaLineEnabled());
++    if (IsLineEdgeDiag())
++        std::cout << "[LineEdgeDiag] site=LBA_MERGE lineEdges="
++                  << (lineEdgesEnabledHere ? "on" : "gated=1 lineEdges=0")
++                  << " nML=" << vpMLs.size() << std::endl;
++
+     // 计算安全的线段顶点ID偏移
+-    int nextVertexId = (int)maxKFid + vpMPs.size() + 2; 
++    int nextVertexId = 0;
++    if (!optids::NextFreeVertexId(optimizer, 2LL * (long long)vpMLs.size() + 8,
++                                  nextVertexId))
++    {
++        std::cerr << "[LBA-MERGE] vertex id space exhausted, line vertices skipped"
++                  << std::endl;
++        nextVertexId = -1;
++    }
++    --nextVertexId;
+ 
+     unordered_map<MapLine*, pair<int,int>> mapLineVertexId;
+     mapLineVertexId.reserve(vpMLs.size() * 2);
+@@ -17439,6 +17475,7 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
+ 
+     for (MapLine* pML : vpMLs)
+     {
++        if (!lineEdgesEnabledHere) break;  // arm P1: zero line edges
+         if (!pML || pML->isBad()) continue;
+ 
+         auto endpoints = pML->GetLineWorldPos();
+@@ -17468,8 +17505,7 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
+         bool ok2 = optimizer.addVertex(vP2);
+ 
+         if (!ok1 || !ok2) {
+-            if (ok1) optimizer.removeVertex(vP1);
+-            delete vP1; delete vP2;
++            optids::ReleaseEndpointVertices(optimizer, vP1, ok1, vP2, ok2);
+             continue;
+         }
+ 
+@@ -17683,6 +17719,28 @@ void Optimizer::LocalBundleAdjustmentWithLine(KeyFrame* pMainKF, std::vector<Key
+         }
+     }
+ 
++    // ---- [MEASUREMENT] real merge-BA line edge counts ---------------------
++    // The pre-gate row above reports the GATE only: "lineEdges=on" is a state
++    // flag, not evidence that an edge exists in this graph. The counts below
++    // come from vpEdgesLineMono, which is appended to only AFTER
++    // optimizer.addEdge() returned (and only for endpoints whose vertices were
++    // accepted), so they are edges actually present; lnActive is what g2o kept
++    // active (level 0) at the final iteration, lnToErase is what the 9.0 inlier
++    // test rejected. No numeric path is touched: this is read-only reporting
++    // behind the same IsLineEdgeDiag() switch as the rest of the diagnostics.
++    if (IsLineEdgeDiag())
++    {
++        int nLnActive = 0;
++        for (size_t i = 0; i < vpEdgesLineMono.size(); ++i)
++            if (vpEdgesLineMono[i]->level() == 0) ++nLnActive;
++        std::cout << "[LineEdgeDiag] site=LBA_MERGE_DONE lnEdgesAdded="
++                  << vpEdgesLineMono.size()
++                  << " lnActive=" << nLnActive
++                  << " lnToErase=" << vLineToErase.size()
++                  << " nML=" << vpMLs.size()
++                  << " enabled=" << (lineEdgesEnabledHere ? 1 : 0) << std::endl;
++    }
++
+     unique_lock<mutex> lock(pMainKF->GetMap()->mMutexMapUpdate);
+ 
+     if(!vToErase.empty())
+diff --git a/ORB-SLAM3/src/System.cc b/ORB-SLAM3/src/System.cc
+index c0af715d86..ce7b039b1a 100644
+--- a/ORB-SLAM3/src/System.cc
++++ b/ORB-SLAM3/src/System.cc
+@@ -1276,6 +1276,59 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
+          << " refKFs=" << vpKFs.size() << endl;
+ }
+ 
++void System::SaveAllMapsTrajectoryTUM(const string &prefix)
++{
++    // [MEASUREMENT] Every map, not just the exported one. The single-map export
++    // above drops the keyframes of every other map in the Atlas, which for a
++    // run with resets is most of the trajectory. This method only reads
++    // Map/KeyFrame state and writes one file per map plus a summary table.
++    cout << endl << "[System] SaveAllMapsTrajectoryTUM: prefix=" << prefix
++         << endl;
++
++    vector<Map*> vpMaps = mpAtlas->GetAllMaps();
++    std::sort(vpMaps.begin(), vpMaps.end(),
++              [](Map* a, Map* b) { return a->GetId() < b->GetId(); });
++
++    ofstream fIdx((prefix + "maps_summary.csv").c_str());
++    fIdx << "map_id,is_in_use,is_bad,n_keyframes,n_mappoints,n_maplines,"
++            "n_exported_kf,traj_file\n";
++
++    for (Map* pM : vpMaps)
++    {
++        if (!pM) continue;
++        vector<KeyFrame*> vpKFs = pM->GetAllKeyFrames();
++        std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
++
++        const string fn = prefix + "traj_map" +
++                          std::to_string(pM->GetId()) + ".txt";
++        ofstream f(fn.c_str());
++        f << fixed;
++        int nExp = 0;
++        for (KeyFrame* pKF : vpKFs)
++        {
++            if (!pKF || pKF->isBad()) continue;
++            Sophus::SE3f Twc = pKF->GetPoseInverse();
++            Eigen::Quaternionf q = Twc.unit_quaternion();
++            Eigen::Vector3f t = Twc.translation();
++            f << setprecision(6) << pKF->mTimeStamp << setprecision(7) << " "
++              << t(0) << " " << t(1) << " " << t(2) << " "
++              << q.x() << " " << q.y() << " " << q.z() << " " << q.w()
++              << endl;
++            ++nExp;
++        }
++        f.close();
++        fIdx << pM->GetId() << "," << (pM->IsInUse() ? 1 : 0) << ","
++             << (pM->IsBad() ? 1 : 0) << "," << pM->KeyFramesInMap() << ","
++             << pM->MapPointsInMap() << "," << pM->MapLinesInMap() << ","
++             << nExp << "," << fn << "\n";
++        cout << "[System] all-maps export: map=" << pM->GetId()
++             << " kfs=" << nExp << " in_use=" << (pM->IsInUse() ? 1 : 0)
++             << " bad=" << (pM->IsBad() ? 1 : 0) << endl;
++    }
++    fIdx.close();
++    cout << "[System] SaveAllMapsTrajectoryTUM: maps=" << vpMaps.size() << endl;
++}
++
+ void System::SaveTrajectoryEuRoC(const string &filename)
+ {
+ 

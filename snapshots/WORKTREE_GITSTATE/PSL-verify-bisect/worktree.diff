@@ -1,0 +1,476 @@
+diff --git a/.gitignore b/.gitignore
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/include/AuditTrail.h b/ORB-SLAM3/include/AuditTrail.h
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/include/LineMode.h b/ORB-SLAM3/include/LineMode.h
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/include/StereoLineDebug.h b/ORB-SLAM3/include/StereoLineDebug.h
+old mode 100644
+new mode 100755
+diff --git a/ORB-SLAM3/src/KeyFrame.cc b/ORB-SLAM3/src/KeyFrame.cc
+index ea8bc8982b..b087cb4fc5 100755
+--- a/ORB-SLAM3/src/KeyFrame.cc
++++ b/ORB-SLAM3/src/KeyFrame.cc
+@@ -21,6 +21,7 @@
+ #include "ImuTypes.h"
+ #include "AuditTrail.h"
+ #include <sstream>
++#include <cstdlib>
+ #include<mutex>
+ 
+ namespace ORB_SLAM3
+@@ -178,7 +179,21 @@ void KeyFrame::SetPose(const Sophus::SE3f &Tcw)
+     //
+     // Callers whose pose rule is not a common rigid factor suppress this and do
+     // their own carry with the matching rule (Map::ApplyScaledRotation).
+-    if(!CarrySuppressRef())
++    // ---- ABLATION SWITCH (temporary, default OFF) --------------------------
++    // PHOTO_SLAM_NO_CULL_CARRY=1 disables the culled-dependents carry. On a
++    // sequence that never culls (office0) the carry itself never fires, so the
++    // only EFFECTIVE change is that SetPose no longer calls
++    // GetCulledDependents() and therefore no longer takes mMutexConnections on
++    // every keyframe pose update. This isolates "extra lock traffic added to the
++    // SetPose hot path" as a single factor. It is a probe, not a proposal.
++    static const bool bNoCarry = []() {
++        const char* e = std::getenv("PHOTO_SLAM_NO_CULL_CARRY");
++        const bool on = (e != nullptr && std::atoi(e) != 0);
++        if (on)
++            std::cerr << "[ABLATION] PHOTO_SLAM_NO_CULL_CARRY=1 : culled-chain carry DISABLED" << std::endl;
++        return on;
++    }();
++    if(!bNoCarry && !CarrySuppressRef())
+         CarryCulledDependents(TBefore, Tcw);
+ 
+     if(bAudit)
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_desk_3.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_desk_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_mono.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_mono.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_2.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_2.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_3.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_sfm_garden.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_table_7.yaml b/cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_table_7.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_1.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_3.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_2.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_2.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_3.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_plant_scene_1.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_plant_scene_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_bench.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_bench.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_garden.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_table_7.yaml b/cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_table_7.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/Rover/rover_campus_small_1.yaml b/cfg/ORB_SLAM3/RGB-D/Rover/rover_campus_small_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/Rover/rover_garden_large_1.yaml b/cfg/ORB_SLAM3/RGB-D/Rover/rover_garden_large_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far_150.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far_150.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near_150.txt b/cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near_150.txt
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_far_lowfast.yaml b/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_far_lowfast.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_near_lowfast.yaml b/cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_near_lowfast.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_desk_3.yaml b/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_desk_3.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_sfm_garden.yaml b/cfg/gaussian_mapper/Monocular/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg1_room_diag.yaml b/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg1_room_diag.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg3_long_office_household_diag.yaml b/cfg/gaussian_mapper/Monocular/TUM/tum_freiburg3_long_office_household_diag.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_plant_scene_1.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_plant_scene_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_bench.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_bench.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_garden.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_garden.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml b/cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/Rover/rover_campus_small_1.yaml b/cfg/gaussian_mapper/RGB-D/Rover/rover_campus_small_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/Rover/rover_garden_large_1.yaml b/cfg/gaussian_mapper/RGB-D/Rover/rover_garden_large_1.yaml
+old mode 100644
+new mode 100755
+diff --git a/cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household_diag.yaml b/cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household_diag.yaml
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/SUMMARY.md b/evidence/line_ablation_multiscene/SUMMARY.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/all_runs.csv b/evidence/line_ablation_multiscene/all_runs.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/common_window.csv b/evidence/line_ablation_multiscene/common_window.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/far_mono.csv b/evidence/line_ablation_multiscene/far_mono.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/far_rgbd.csv b/evidence/line_ablation_multiscene/far_rgbd.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/gate_rescue_summary.txt b/evidence/line_ablation_multiscene/gate_rescue_summary.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/logs.tar.gz b/evidence/line_ablation_multiscene/logs.tar.gz
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/near_mono.csv b/evidence/line_ablation_multiscene/near_mono.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_ablation_multiscene/near_rgbd.csv b/evidence/line_ablation_multiscene/near_rgbd.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/SUMMARY.md b/evidence/line_rescue_audit/SUMMARY.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/eth3d_scan.csv b/evidence/line_rescue_audit/eth3d_scan.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/ladder_inventory_interrupted.txt b/evidence/line_rescue_audit/ladder_inventory_interrupted.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/gdb_B1_no_repro.txt b/evidence/line_rescue_audit/merge_deadlock/gdb_B1_no_repro.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/gdb_B2_interrupted_backtrace.txt b/evidence/line_rescue_audit/merge_deadlock/gdb_B2_interrupted_backtrace.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/repro_attempts.txt b/evidence/line_rescue_audit/merge_deadlock/repro_attempts.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/run.meta.drop30_B b/evidence/line_rescue_audit/merge_deadlock/run.meta.drop30_B
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/validation_resampler_guard.txt b/evidence/line_rescue_audit/merge_deadlock/validation_resampler_guard.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/merge_deadlock/wait_graph.md b/evidence/line_rescue_audit/merge_deadlock/wait_graph.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/opportunity_scan_7seq.txt b/evidence/line_rescue_audit/opportunity_scan_7seq.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/opportunity_scan_stress.txt b/evidence/line_rescue_audit/opportunity_scan_stress.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/scan_logs.tar.gz b/evidence/line_rescue_audit/scan_logs.tar.gz
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stress_logs.tar.gz b/evidence/line_rescue_audit/stress_logs.tar.gz
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stuck_frame1778/log_snapshot.txt b/evidence/line_rescue_audit/stuck_frame1778/log_snapshot.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stuck_frame1778/run.meta b/evidence/line_rescue_audit/stuck_frame1778/run.meta
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/stuck_frame1778/threads.txt b/evidence/line_rescue_audit/stuck_frame1778/threads.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_audit/tum_scan.csv b/evidence/line_rescue_audit/tum_scan.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/SUMMARY.md b/evidence/line_rescue_diag/SUMMARY.md
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/ate_preserved_A1B1C1.txt b/evidence/line_rescue_diag/ate_preserved_A1B1C1.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/ate_preserved_A1B1C1_rpeOLD_definition.txt b/evidence/line_rescue_diag/ate_preserved_A1B1C1_rpeOLD_definition.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/bc_compare_r1.txt b/evidence/line_rescue_diag/bc_compare_r1.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/bc_perframe_r1.csv b/evidence/line_rescue_diag/bc_perframe_r1.csv
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/gate_summary_all_runs.txt b/evidence/line_rescue_diag/gate_summary_all_runs.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/interleave_aggregate.txt b/evidence/line_rescue_diag/interleave_aggregate.txt
+old mode 100644
+new mode 100755
+diff --git a/evidence/line_rescue_diag/line_quality_B_C_r1.txt b/evidence/line_rescue_diag/line_quality_B_C_r1.txt
+old mode 100644
+new mode 100755
+diff --git a/scripts/ablation_aggregate.py b/scripts/ablation_aggregate.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/ablation_common_window.py b/scripts/ablation_common_window.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/ablation_replica_rgbd.sh b/scripts/ablation_replica_rgbd.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/aggregate_abc.py b/scripts/aggregate_abc.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/analyze_export_diag.py b/scripts/analyze_export_diag.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/build_asan.sh b/scripts/build_asan.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/chain_error_check.py b/scripts/chain_error_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/classify_a6.py b/scripts/classify_a6.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/compare_runs.py b/scripts/compare_runs.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eth3d_ablation_run.sh b/scripts/eth3d_ablation_run.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_batch.py b/scripts/eval_batch.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_mono_stability.py b/scripts/eval_mono_stability.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_tum_se3.py b/scripts/eval_tum_se3.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval_tum_se3_v2.py b/scripts/eval_tum_se3_v2.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/export_acceptance.py b/scripts/export_acceptance.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_abc_interleave.sh b/scripts/fr3_abc_interleave.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_ablation_repeats.sh b/scripts/fr3_ablation_repeats.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_ablation_run.sh b/scripts/fr3_ablation_run.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/fr3_line_diag_abc.sh b/scripts/fr3_line_diag_abc.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/gdb_catch_lba.txt b/scripts/gdb_catch_lba.txt
+old mode 100644
+new mode 100755
+diff --git a/scripts/group_common_window.py b/scripts/group_common_window.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/ladder_report.py b/scripts/ladder_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/line_bc_compare.py b/scripts/line_bc_compare.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/line_diag_report.py b/scripts/line_diag_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/line_quality_report.py b/scripts/line_quality_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/make_tandt_rgb_txt.sh b/scripts/make_tandt_rgb_txt.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/mapper_ablation_full.sh b/scripts/mapper_ablation_full.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/mapper_ablation_replica_rgbd.sh b/scripts/mapper_ablation_replica_rgbd.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/mapper_ablation_report.py b/scripts/mapper_ablation_report.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/p6_eval_tum.py b/scripts/p6_eval_tum.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/p6_rgbd_loop_matrix.sh b/scripts/p6_rgbd_loop_matrix.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/pose_rebuild_check.py b/scripts/pose_rebuild_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/pose_trace_compare.py b/scripts/pose_trace_compare.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_ab_stability.sh b/scripts/repro_ab_stability.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_ab_suite.sh b/scripts/repro_ab_suite.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_accept_30x.sh b/scripts/repro_accept_30x.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_accept_gauss_10x.sh b/scripts/repro_accept_gauss_10x.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_accept_xseq.sh b/scripts/repro_accept_xseq.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_iso_suite.sh b/scripts/repro_iso_suite.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_office1_line_lba_crash.sh b/scripts/repro_office1_line_lba_crash.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_office1_nocsv.sh b/scripts/repro_office1_nocsv.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_plucker_e2e.sh b/scripts/repro_plucker_e2e.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/repro_regression.sh b/scripts/repro_regression.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/rescue_frame_audit.py b/scripts/rescue_frame_audit.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rescue_opportunity_scan.py b/scripts/rescue_opportunity_scan.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rot_convention_check.py b/scripts/rot_convention_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rotation_axis_check.py b/scripts/rotation_axis_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/rotation_spec_check.py b/scripts/rotation_spec_check.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/round_stats.py b/scripts/round_stats.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_asan.sh b/scripts/run_asan.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_exp3_stability.sh b/scripts/run_exp3_stability.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_exp4_gw.sh b/scripts/run_exp4_gw.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_frame_table.py b/scripts/run_frame_table.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diag2.sh b/scripts/run_office2_diag2.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diag2_batch.sh b/scripts/run_office2_diag2_batch.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diagnosis.sh b/scripts/run_office2_diagnosis.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/run_office2_diagnosis_batch.sh b/scripts/run_office2_diagnosis_batch.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/smallbatch_2x.sh b/scripts/smallbatch_2x.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/stability_table.py b/scripts/stability_table.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/stress_rescue_repeats.sh b/scripts/stress_rescue_repeats.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/summarize_office2_diag2.py b/scripts/summarize_office2_diag2.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/summarize_office2_diagnosis.py b/scripts/summarize_office2_diagnosis.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/tandt_mono.sh b/scripts/tandt_mono.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/traj_continuity_audit.py b/scripts/traj_continuity_audit.py
+old mode 100644
+new mode 100755
+diff --git a/tests/cull_chain_invariant.cc b/tests/cull_chain_invariant.cc
+old mode 100644
+new mode 100755
+diff --git a/tests/test_line_loop.cpp b/tests/test_line_loop.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_line_loop_audit.cpp b/tests/test_line_loop_audit.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_line_loop_gaussian.cpp b/tests/test_line_loop_gaussian.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_line_structure_loss.cpp b/tests/test_line_structure_loss.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_mapline_default.cpp b/tests/test_mapline_default.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_plucker_lba_audit.cpp b/tests/test_plucker_lba_audit.cpp
+old mode 100644
+new mode 100755
+diff --git a/tests/test_stereo_line_jacobian.cpp b/tests/test_stereo_line_jacobian.cpp
+old mode 100644
+new mode 100755

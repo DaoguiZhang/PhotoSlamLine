@@ -1,0 +1,161 @@
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_scan/near_rgbd_B/log.txt
+====================================================================================
+  decisions: 1052   frames: 1052
+  stages    : {'TrackReferenceKeyFrame': 1, 'MotionModel': 1051}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 0
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 0
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=0 p90=1 max=5   lnOk=1 in 0 decisions
+    lnEdges  min=0 p50=0 max=5
+    lnSpread min=0.0 p50=0.0 p90=0.0 max=106.1 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_scan/far_rgbd_B/log.txt
+====================================================================================
+  decisions: 792   frames: 792
+  stages    : {'TrackReferenceKeyFrame': 1, 'MotionModel': 791}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 0
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 0
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=0 p90=3 max=4   lnOk=1 in 0 decisions
+    lnEdges  min=0 p50=0 max=4
+    lnSpread min=0.0 p50=0.0 p90=70.2 max=110.7 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_scan/near_mono_B/log.txt
+====================================================================================
+  decisions: 433   frames: 432
+  stages    : {'TrackReferenceKeyFrame': 3, 'MotionModel': 430}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 2
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 0
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=0 p90=0 max=2   lnOk=1 in 0 decisions
+    lnEdges  min=0 p50=0 max=2
+    lnSpread min=0.0 p50=0.0 p90=0.0 max=89.7 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {1: 2}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_scan/far_mono_B/log.txt
+====================================================================================
+  decisions: 606   frames: 606
+  stages    : {'TrackReferenceKeyFrame': 1, 'MotionModel': 605}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 0
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 0
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=0 p90=1 max=3   lnOk=1 in 0 decisions
+    lnEdges  min=0 p50=0 max=3
+    lnSpread min=0.0 p50=0.0 p90=0.0 max=63.3 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_scan/eth3d_planar_2/log.txt
+====================================================================================
+  decisions: 629   frames: 629
+  stages    : {'TrackReferenceKeyFrame': 1, 'MotionModel': 628}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 0
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 0
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=0 p90=0 max=88   lnOk=1 in 5 decisions
+    lnEdges  min=0 p50=0 max=88
+    lnSpread min=0.0 p50=0.0 p90=0.0 max=110.7 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_scan/eth3d_planar_3/log.txt
+====================================================================================
+  decisions: 899   frames: 899
+  stages    : {'TrackReferenceKeyFrame': 1, 'MotionModel': 898}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 0
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 0
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=0 p90=1 max=131   lnOk=1 in 28 decisions
+    lnEdges  min=0 p50=0 max=131
+    lnSpread min=0.0 p50=0.0 p90=0.0 max=141.9 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+
+====================================================================================
+RESCUE OPPORTUNITY SCAN: /tmp/lr_scan/eth3d_desk_3/log.txt
+====================================================================================
+  decisions: 1977   frames: 1976
+  stages    : {'TrackReferenceKeyFrame': 2, 'MotionModel': 1974, 'LocalMapVisual': 1}
+
+  oldPtVerdict=FAIL (rescue would be attempted) : 1
+  ... AND lnOk=1  (NATURAL OPPORTUNITY)          : 0
+  ... AND ptAfterPO >= 10 (point floor)          : 0
+
+  line evidence over ALL decisions:
+    lnUniq   min=0 p50=0 p90=0 max=32   lnOk=1 in 42 decisions
+    lnEdges  min=0 p50=0 max=32
+    lnSpread min=0.0 p50=0.0 p90=0.0 max=141.5 deg
+
+  rejection reasons when oldPtVerdict=FAIL:
+    {1: 1}
+  (lnReason 1=too few unique lines, 2=parallel/degenerate, 3=bad inlier ratio; 0/OK means the line test passed)
+
+  VO gate flags recorded on the same frames:
+    gateMmOldFail=1     : 0
+    gateTrkRefOldFail=1 : 0
+

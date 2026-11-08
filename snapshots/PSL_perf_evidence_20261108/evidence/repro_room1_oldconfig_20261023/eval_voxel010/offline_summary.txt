@@ -1,0 +1,8 @@
+snapshot=/workspace/code/PSL-perf/results/repro_room1_oldconfig_voxel010_20261023/replica_rgbd_0/room1/natural_end/snapshot.pt
+frames=176
+mean_psnr_gs=36.08207864
+mean_psnr=36.07442283
+original_mean_psnr_gs=36.08207864
+original_mean_psnr=36.07442283
+zero_opacity_rows=0
+engine=native_cpp_psnr_gaussian_splatting

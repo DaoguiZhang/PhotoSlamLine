@@ -1,0 +1,50 @@
+# 本轮（共同输入 + 事件流重放 + A/V/N 归因）复现命令
+# 所有命令在 /workspace/code/PSL-evtrepl 或 /workspace/code/PSL-review 下执行。
+# 数据集与 build 目录不在交付包内。
+
+## 0. 构建 PSL-replay（唯一使用的 L 二进制）
+cd /workspace/code/PSL-replay
+cmake -S ORB-SLAM3 -B ORB-SLAM3/build -DCMAKE_BUILD_TYPE=Release
+cmake --build ORB-SLAM3/build -j20
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j20            # -> bin/replica_mono bin/eth3d_rgbd
+sha256sum lib/libgaussian_mapper.so # d82b9ccae0368d72ea0fd52118884f2a
+
+## 1. 官方测试账本（含加载库身份 / 退出码 / 完整 stderr）
+cd /workspace/code/PSL-review
+# bin_O_raw / bin_O_core 的链接命令见 run_official_ledger.sh 头部注释与
+# REPORT_REPLAY_AVN.md §2.1；关键是 env -u LD_LIBRARY_PATH
+./run_official_ledger.sh 3
+cat ledger/ledger.csv
+ls ledger/raw/                      # 每 (tree, rep, case) 一个独立日志
+
+## 2. 异常最小复现（torch Adam 第一步）
+cd /workspace/code/PSL-review
+env -u LD_LIBRARY_PATH ./bin_repro 1    # 修复 fixture 前后各跑 60 次对比
+
+## 3. 共同输入导出 + 事件流重放（每场景 3 个种子，每种子 1 次导出）
+cd /workspace/code/PSL-evtrepl
+./run_all.sh                        # 内部调用 run_seed.sh <scene> <seed> 5000
+# 单个别种子：
+./run_seed.sh office0_mono 0 5000
+./run_seed.sh desk3_rgbd   0 5000
+
+# run_seed.sh 关键环境变量：
+#   PHOTO_SLAM_EXPORT_DIR=<export>   导出共同输入 + 完整 MappingOperation 流
+#   PHOTO_SLAM_REPLAY_DIR=<export>   从该目录重放
+#   PHOTO_SLAM_REPLAY_CONDS="A,A_repeat,V,N,VN"
+#   PHOTO_SLAM_REPLAY_STEPS=5000     每条件真实 optimizer.step() 次数
+#   PHOTO_SLAM_REPLAY_ROTATE=<seed>  条件顺序轮转，避免某条件总在第一个
+#   PHOTO_SLAM_DEDUP_VOXEL=1 PHOTO_SLAM_DEDUP_NOTIFY=1  （live 段用生产默认值）
+
+## 4. 汇总
+cd /workspace/code/PSL-evtrepl
+python3 analyze.py                  # -> report/*.csv
+
+## 5. 校验共同输入一致
+for s in 0 1 2; do
+  echo "office0 seed $s"
+  cu=$(cut -d= -f2 export/office0_mono_s$s/../office0_mono_s$s/snapshot.hash 2>/dev/null)
+  grep -h input_snapshot_hash replay/office0_mono_s$s/*/summary.txt | sort -u
+  grep -h kf_sequence_hash     replay/office0_mono_s$s/*/summary.txt | sort -u
+done

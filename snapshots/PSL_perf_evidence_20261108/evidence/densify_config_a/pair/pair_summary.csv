@@ -1,0 +1,3 @@
+arm,effective_from,source,optimizer_step_calls,training_backward_rounds,adam_advance_total,adam_advance_per_group,ordinary_densify_events,local_mapping_supplement_events,kfs,gaussians,line_gaussians,mapping_seconds,slam_end_seconds,native_psnr_all_frames,native_psnr_common_frames,common_frames
+from0,0,canonical,9538,9538,56658,9443,95,190,176,530674,708,65.288,85.454,30.6067,32.4847,31
+from600,600,canonical,10223,10223,60762,10127,96,202,183,512388,891,69.285,91.282,31.4838,32.7827,31

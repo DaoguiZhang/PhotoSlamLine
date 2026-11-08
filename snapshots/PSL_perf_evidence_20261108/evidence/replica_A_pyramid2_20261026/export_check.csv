@@ -1,0 +1,9 @@
+scene,export_ok,ply,ply_bytes,cameras_json,cameras_json_bytes,trajectory_ok,keyframe_traj_ok,meta_kfs,gaussians,line_gaussians,optimizer_step_calls,total_operation_s
+office0,1,9262_shutdown/ply/point_cloud/iteration_9262/point_cloud.ply,44838443,9262_shutdown/ply/cameras.json,63001,1,1,113,180794,1525,9262,75.6099
+office1,1,8335_shutdown/ply/point_cloud/iteration_8335/point_cloud.ply,34703675,8335_shutdown/ply/cameras.json,58160,1,1,104,139928,0,8335,72.4627
+office2,1,9920_shutdown/ply/point_cloud/iteration_9920/point_cloud.ply,88218603,9920_shutdown/ply/cameras.json,86718,1,1,155,355714,20724,9920,87.1024
+office3,1,10124_shutdown/ply/point_cloud/iteration_10124/point_cloud.ply,63155227,10124_shutdown/ply/cameras.json,79327,1,1,142,254652,4343,10124,90.3495
+office4,1,9795_shutdown/ply/point_cloud/iteration_9795/point_cloud.ply,64525675,9795_shutdown/ply/cameras.json,107484,1,1,192,260178,7928,9795,87.3459
+room0,1,9596_shutdown/ply/point_cloud/iteration_9596/point_cloud.ply,49777363,9596_shutdown/ply/cameras.json,94200,1,1,169,200709,79,9596,100.908
+room1,1,9219_shutdown/ply/point_cloud/iteration_9219/point_cloud.ply,119045747,9219_shutdown/ply/cameras.json,98274,1,1,176,480017,307,9219,88.2585
+room2,1,10471_shutdown/ply/point_cloud/iteration_10471/point_cloud.ply,88881755,10471_shutdown/ply/cameras.json,118325,1,1,212,358388,4319,10471,99.65

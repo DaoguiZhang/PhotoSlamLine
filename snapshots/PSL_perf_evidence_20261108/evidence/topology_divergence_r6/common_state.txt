@@ -1,0 +1,17 @@
+head=topo-replay-v1
+at_iteration=6999
+steps=120
+gaussians=408494
+line_gaussians=864
+kfs=164
+iteration=6999
+frozen_opt_steps=6998
+active_sh=3
+default_sh=3
+param_fp=82ad3316c419a9f2_n408494_nline864
+adam_fp=5625cfc3d7c30853
+sequence_len=120
+eval_views=24
+rng_seed=12345
+rng_reset=std::rand+torch_cpu+torch_cuda_per_arm
+saved_backend=2

@@ -1,0 +1,3 @@
+[OfflineCkpt] model=/workspace/code/PSL-perf/results/repro_room1_oldruntime_20261023/replica_rgbd_0/room1/natural_end/snapshot.pt n=528864 line=671 active_sh=3 max_sh=3
+[OfflineCkpt] zero_opacity_rows=0 diff_dir=""
+[OfflineCkpt] frames=185 mean_gs=35.8298 -> "/workspace/code/PSL-perf/evidence/repro_room1_oldconfig_20261023/eval_oldruntime"

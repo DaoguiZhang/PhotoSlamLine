@@ -1,0 +1,4 @@
+# worktree: /workspace/code/PSL-perf
+# HEAD: ec85e80886e2f0494acb87781e075334bcf2ba58
+# branch: feat/mapper-budget-v1
+# tracked-dirty files: 1745

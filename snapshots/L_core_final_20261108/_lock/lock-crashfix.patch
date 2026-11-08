@@ -1,0 +1,74 @@
+diff --git a/ORB-SLAM3/src/Frame.cc b/ORB-SLAM3/src/Frame.cc
+index 373308fb9a..849e91a6df 100755
+--- a/ORB-SLAM3/src/Frame.cc
++++ b/ORB-SLAM3/src/Frame.cc
+@@ -2610,9 +2610,17 @@ void Frame::ComputeLineStereoFromRGBD(const cv::Mat &imDepth)
+         if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
+             u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
+             continue;
++        // [CRASH FIX] the float check above is not enough: cvRound(rows-0.4)
++        // is rows, so a keyline endpoint just inside the border rounds one row
++        // PAST the image. Validate the rounded indices before indexing.
++        const int vv1 = cvRound(v1), uu1 = cvRound(u1);
++        const int vv2 = cvRound(v2), uu2 = cvRound(u2);
++        if (uu1 < 0 || uu1 >= cols || vv1 < 0 || vv1 >= rows ||
++            uu2 < 0 || uu2 >= cols || vv2 < 0 || vv2 >= rows)
++            continue;
+         // 读取两端深度
+-        float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
+-        float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
++        float d1 = imDepth.at<float>(vv1, uu1);
++        float d2 = imDepth.at<float>(vv2, uu2);
+         bool valid1 = (d1 > minDepth && d1 < maxDepth);
+         bool valid2 = (d2 > minDepth && d2 < maxDepth);
+         if (!valid1 && !valid2) continue; // 两端都无效
+diff --git a/ORB-SLAM3/src/KeyFrame.cc b/ORB-SLAM3/src/KeyFrame.cc
+index ea8bc8982b..8940e47dd8 100755
+--- a/ORB-SLAM3/src/KeyFrame.cc
++++ b/ORB-SLAM3/src/KeyFrame.cc
+@@ -17,6 +17,7 @@
+ */
+ 
+ #include "KeyFrame.h"
++#include <algorithm>
+ #include "Converter.h"
+ #include "ImuTypes.h"
+ #include "AuditTrail.h"
+@@ -90,6 +91,12 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
+ {
+     mnId=nNextId++;
+ 
++    // [CRASH FIX, root cause] mvpMapLines was never sized, so it stayed empty
++    // while NL > 0 and every reader that indexes it by line index ran off the
++    // end of an empty vector. One null slot per detected line, as the readers
++    // already assume.
++    mvpMapLines.assign(NL, static_cast<MapLine*>(NULL));
++
+     mGrid.resize(mnGridCols);
+     if(F.Nleft != -1)  mGridRight.resize(mnGridCols);
+     for(int i=0; i<mnGridCols;i++)
+@@ -2081,11 +2088,21 @@ void KeyFrame::GetKeyLineInfo(
+     unique_lock<mutex> lock(mMutexFeatures);
+ 
+     // Save the id of each MapLine in this KF, there can be null pointer in the vector
++    // [CRASH FIX] NL is copied from the Frame, but mvKeyLines / mvpMapLines can
++    // be shorter than NL. Clamp the loop; when the invariant holds it is
++    // unchanged.
++    const int nLines = std::min(NL, (int)std::min(mvKeyLines.size(),
++                                                  mvpMapLines.size()));
++    if (nLines != NL) {
++        std::cerr << "[KF-NL-MISMATCH] kf=" << mnId << " NL=" << NL
++                  << " mvKeyLines=" << mvKeyLines.size()
++                  << " mvpMapLines=" << mvpMapLines.size() << std::endl;
++    }
+     pixelsUndist.clear();
+-    pixelsUndist.reserve(NL * 4);
++    pixelsUndist.reserve(nLines * 4);
+     pointsLocal.clear();
+-    pointsLocal.reserve(NL * 6);
+-    for(int i = 0; i < NL; ++i)
++    pointsLocal.reserve(nLines * 6);
++    for(int i = 0; i < nLines; ++i)
+     {
+         pixelsUndist.push_back(mvKeyLines[i].startPointX);
+         pixelsUndist.push_back(mvKeyLines[i].startPointY);

@@ -1,0 +1,5 @@
+snapshot=/tmp/psl-room1-control/online-diag-C/ckpt/frame_500/snapshot.pt
+frames=38
+mean_psnr_gs=36.4516705
+mean_psnr=36.43958935
+engine=native_cpp_psnr_gaussian_splatting

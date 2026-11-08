@@ -1,0 +1,4 @@
+# worktree: /workspace/deliv/cabinet-eval
+# HEAD: 72a6cc63af4ed82d0c013ff5927c02ac1be40e29
+# branch: fix/line-reproj-triangulate-po-reeval
+# tracked-dirty files: 54

@@ -1,0 +1,3 @@
+tag,param_impl,member_impl,same_impl,grad_defined,state_found,state_step,replay_repeat_raw_max_abs,replay_repeat_quat_deg,replay_repeat_cov_max_abs,actual_vs_replay_raw_max_abs,actual_vs_replay_quat_deg,actual_vs_replay_cov_max_abs,actual_normalized_vs_replay_quat_deg
+RepeatA,139921983910336,139921983910336,1,1,1,15563,0,4.92237e-06,0,0,4.92237e-06,0,4.82967e-06
+RepeatB,139921983910336,139921983910336,1,1,1,15563,0,4.92237e-06,0,0,4.92237e-06,0,4.82967e-06

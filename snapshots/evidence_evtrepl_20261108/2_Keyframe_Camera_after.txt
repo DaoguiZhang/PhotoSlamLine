@@ -1,0 +1,18 @@
+KeyFrame ID: 2
+Camera Position:  -0.063775  0.0157378 -0.0379521
+Camera Rotation: 
+  0.981797    0.11971  -0.147461
+ -0.113071   0.992192    0.05264
+  0.152611 -0.0350083   0.987666
+KeyFrame ID: 1
+Camera Position: -0.0572766  0.0126851 -0.0331814
+Camera Rotation: 
+  0.985193   0.105351   -0.13526
+-0.0996108   0.993841  0.0485486
+  0.139542 -0.0343564    0.98962
+KeyFrame ID: 0
+Camera Position: 0 0 0
+Camera Rotation: 
+1 0 0
+0 1 0
+0 0 1

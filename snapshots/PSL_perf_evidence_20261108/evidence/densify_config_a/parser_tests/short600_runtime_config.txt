@@ -1,0 +1,9 @@
+densify_from_iter=600
+densify_from_iter_source=canonical
+densify_legacy_present=0
+densify_until_iter=15000
+densify_until_iter_source=config:Optimization.densify_until_iter
+densification_interval=100
+densification_interval_source=config:Optimization.densification_interval
+opacity_reset_interval=0
+iterations=50100

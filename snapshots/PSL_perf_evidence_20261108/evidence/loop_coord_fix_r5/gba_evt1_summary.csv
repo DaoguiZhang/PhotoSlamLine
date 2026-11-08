@@ -1,0 +1,2 @@
+event,evt,views,psnr_before_camera_before_model,psnr_after_camera_before_model,psnr_after_camera_corrected_model,dpsnr_pose,dpsnr_map
+gba,1,24,28.28043334,24.01426466,29.23053519,-4.266168674,0.9501018524

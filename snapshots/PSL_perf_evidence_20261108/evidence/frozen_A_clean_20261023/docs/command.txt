@@ -1,0 +1,21 @@
+E=/workspace/code/PSL-perf/evidence/densify_config_a
+OUT=/tmp/room1_a600_clean
+mkdir -p "$OUT"
+LD_LIBRARY_PATH="$E/bin" \
+env -u CUDA_LAUNCH_BLOCKING \
+  -u PHOTO_SLAM_STAGE_COUNTERS \
+  -u PHOTO_SLAM_ADAM_TOPO_DIAG_DIR \
+  -u PHOTO_SLAM_ONLINE_CHECKPOINT_DIR \
+  -u PHOTO_SLAM_SHUTDOWN_DIAG \
+  -u PHOTO_SLAM_RASTER_AGG_SELFCHECK \
+  -u PHOTO_SLAM_RASTER_PROF \
+  -u PHOTO_SLAM_GPU_PROF \
+  PHOTO_SLAM_LINE_MODE=2 PHOTO_SLAM_LINE_LOOP=0 \
+  PHOTO_SLAM_GBA_APPLY_CORRECTION=0 PHOTO_SLAM_APPEND_STEPS=0 \
+  PHOTO_SLAM_SEED=0 PHOTO_SLAM_RASTER_BACKEND=A \
+  "$E/bin/replica_rgbd" \
+  /workspace/code/PSL-perf/ORB-SLAM3/Vocabulary/ORBvoc.txt \
+  "$E/runs/clean_a600/room1_orb.yaml" \
+  "$E/runs/clean_a600/room1_gaussian.yaml" \
+  /workspace/code/SEGS-SLAM/datasets/replica/room1 \
+  "$OUT/out" no_viewer

@@ -1,0 +1,123 @@
+### O_raw -> O_core : cuda_rasterizer/operate_points.h
+--- O_raw/cuda_rasterizer/operate_points.h	2026-11-05 19:06:44.851437988 +0000
++++ O_core/cuda_rasterizer/operate_points.h	2026-11-07 15:16:33.585570885 +0000
+@@ -172,8 +172,9 @@
+     float* rots)
+ {
+     int rotidx = 4 * idx;
+-    rots[rotidx] = rotq.w;
++    // [O_core] w,x,y,z: the 4th slot was never written (y overwritten by z)
++    rots[rotidx]     = rotq.w;
+     rots[rotidx + 1] = rotq.x;
+     rots[rotidx + 2] = rotq.y;
+-    rots[rotidx + 2] = rotq.z;
++    rots[rotidx + 3] = rotq.z;
+ }
+### O_raw -> O_core : src/gaussian_model.cpp
+--- O_raw/src/gaussian_model.cpp	2026-11-07 15:16:03.062242111 +0000
++++ O_core/src/gaussian_model.cpp	2026-11-07 15:17:43.096429029 +0000
+@@ -13,6 +13,9 @@
+  * as part of Photo-SLAM.
+  */
+ 
++#include <cmath>
++#include <stdexcept>
++#include <iostream>
+ #include "include/gaussian_model.h"
+ 
+ GaussianModel::GaussianModel(const int sh_degree)
+@@ -381,6 +384,12 @@
+     const Sophus::SE3f T)
+ {
+     torch::NoGradGuard no_grad;
++    // [O_core] refuse an unrepresentable scale before touching any state
++    if (!(std::isfinite(s) && s > 0.0f)) {
++        std::cerr << "[O_core][ERROR] applyScaledTransformation: invalid scale s="
++                  << s << "; update refused" << std::endl;
++        throw std::invalid_argument("invalid scale");
++    }
+     // pt <- (s * Ryw * pt + tyw)
+     this->xyz_ *= s;
+     torch::Tensor T_tensor =
+@@ -393,7 +402,26 @@
+ // scales = torch::log(torch::sqrt(dist2));
+ // auto scales_ndimension = scales.ndimension();
+ // scales = scales.unsqueeze(scales_ndimension).repeat({1, 3});
+-    this->scaling_ *= s;
++    // [O_core] scaling_ is log-sigma (getScalingActivation == exp), so a uniform
++    // dilation by s is scaling_ += log(s), not scaling_ *= s.
++    this->scaling_ += std::log(s);
++    // [O_core] the gaussian orientation must use the same physical rotation
++    Eigen::Matrix3f R_math = T.so3().matrix();
++    if (!R_math.isApprox(Eigen::Matrix3f::Identity(), 1e-6f)) {
++        Eigen::Quaternionf qR(R_math); qR.normalize();
++        auto q = this->rotation_;
++        auto w1=qR.w(), x1=qR.x(), y1=qR.y(), z1=qR.z();
++        auto w2=q.index({torch::indexing::Slice(),0});
++        auto x2=q.index({torch::indexing::Slice(),1});
++        auto y2=q.index({torch::indexing::Slice(),2});
++        auto z2=q.index({torch::indexing::Slice(),3});
++        torch::Tensor qn = torch::stack({w1*w2-x1*x2-y1*y2-z1*z2,
++                                         w1*x2+x1*w2+y1*z2-z1*y2,
++                                         w1*y2-x1*z2+y1*w2+z1*x2,
++                                         w1*z2+x1*y2-y1*x2+z1*w2}, 1).contiguous();
++        this->rotation_ = replaceTensorToOptimizer(qn, 5);
++        this->Tensor_vec_rotation_ = {this->rotation_};
++    }
+     scaledTransformationPostfix(this->xyz_, this->scaling_);
+ }
+ 
+@@ -434,6 +462,13 @@
+         true,
+         false);
+ 
++    // [O_core] remember which gaussians this call touched
++    torch::Tensor pre_mask = point_not_transformed_flags.clone();
++    if (!(std::isfinite(scale) && scale > 0.0f)) {
++        std::cerr << "[O_core][ERROR] invalid loop scale " << scale
++                  << "; update refused" << std::endl;
++        throw std::invalid_argument("invalid loop scale");
++    }
+     scaleAndTransformThenMarkVisiblePoints(
+         points,
+         rots,
+@@ -445,6 +480,20 @@
+         num_transformed,
+         scale
+     );
++    // [O_core] uniform dilation must scale the standard deviations of exactly the
++    // same subset (log-sigma: += log(scale)), otherwise the gaussians keep their
++    // old size while their centres are dilated.
++    if (std::abs(scale - 1.0f) > 1e-6f && this->scaling_.size(0) == points.size(0)) {
++        torch::Tensor newly = torch::logical_and(
++            pre_mask, torch::logical_not(point_not_transformed_flags));
++        if (newly.any().item<bool>()) {
++            torch::Tensor m = newly.unsqueeze(1).expand({-1, this->scaling_.size(1)});
++            torch::Tensor scaled = this->scaling_ + std::log(scale);
++            torch::Tensor new_scaling = torch::where(m, scaled, this->scaling_);
++            this->scaling_ = replaceTensorToOptimizer(new_scaling, 4);
++            this->Tensor_vec_scaling_ = {this->scaling_};
++        }
++    }
+ 
+ // torch::Tensor point_cloud_copy = points.clone();
+ // torch::Tensor dist2 = torch::clamp_min(distCUDA2(point_cloud_copy), 0.0000001);
+@@ -569,11 +618,16 @@
+     auto& param = this->optimizer_->param_groups()[tensor_idx].params()[0];
+     auto& state = optimizer_->state();
+     auto key = param.unsafeGetTensorImpl();
+-    auto& stored_state = static_cast<torch::optim::AdamParamState&>(*state[key]);
++    // [O_core] the Adam state may not exist yet; never dereference a null entry
+     auto new_state = std::make_unique<torch::optim::AdamParamState>();
+-    new_state->step(stored_state.step());
+     new_state->exp_avg(torch::zeros_like(tensor));
+     new_state->exp_avg_sq(torch::zeros_like(tensor));
++    auto it = state.find(key);
++    if (it != state.end()) {
++        if (it->second)
++            new_state->step(static_cast<torch::optim::AdamParamState&>(*it->second).step());
++        state.erase(it);
++    }
+     // new_state->max_exp_avg_sq(stored_state.max_exp_avg_sq().clone()); // needed only when options.amsgrad(true), which is false by default
+ 
+     state.erase(key);

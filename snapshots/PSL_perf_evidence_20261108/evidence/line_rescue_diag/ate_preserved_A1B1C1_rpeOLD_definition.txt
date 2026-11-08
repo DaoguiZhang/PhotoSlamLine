@@ -1,0 +1,19 @@
+[ATE v2/interp] pairs=1052/1054 (unmatched=2)  dt med=0.0000s max=0.0047s
+[ATE v2] rmse=0.022824 mean=0.021576 median=0.020784 std=0.007448 max=0.054364 p95=0.033679 m
+[RPE v2] d=1 n=1051 drift_rms=0.250732 m/s mean=0.224867 std=0.110964
+[RPE v2] d=10 n=1042 drift_rms=0.161395 m/s mean=0.144558 std=0.071805
+[RPE v2] d=30 n=1022 drift_rms=0.144484 m/s mean=0.130833 std=0.061336
+[ATE v2/interp] pairs=1052/1054 (unmatched=2)  dt med=0.0000s max=0.0047s
+[ATE v2] rmse=0.030187 mean=0.028259 median=0.026969 std=0.010619 max=0.056302 p95=0.044701 m
+[RPE v2] d=1 n=1051 drift_rms=0.246080 m/s mean=0.219381 std=0.111531
+[RPE v2] d=10 n=1042 drift_rms=0.160545 m/s mean=0.143467 std=0.072088
+[RPE v2] d=30 n=1022 drift_rms=0.143756 m/s mean=0.130039 std=0.061314
+[ATE v2/interp] pairs=1052/1054 (unmatched=2)  dt med=0.0000s max=0.0047s
+[ATE v2] rmse=0.020544 mean=0.018730 median=0.019131 std=0.008446 max=0.050777 p95=0.031184 m
+[RPE v2] d=1 n=1051 drift_rms=0.247451 m/s mean=0.220858 std=0.111650
+[RPE v2] d=10 n=1042 drift_rms=0.162135 m/s mean=0.145674 std=0.071216
+[RPE v2] d=30 n=1022 drift_rms=0.145370 m/s mean=0.132373 std=0.060112
+
+### OLD scripts/eval_tum_se3.py -- argument-order defect
+  gt-first : [SE3 ATE] rmse=0.022837 m mean=0.021577 median=0.020778 max=0.054657 n=3551
+  est-first: [SE3 ATE] rmse=0.022824 m mean=0.021574 median=0.020804 max=0.054262 n=1052

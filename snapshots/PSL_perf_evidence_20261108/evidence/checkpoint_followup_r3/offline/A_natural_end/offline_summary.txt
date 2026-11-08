@@ -1,0 +1,8 @@
+snapshot=/tmp/psl-room1-control/h-round3/A/natural_end/snapshot.pt
+frames=179
+mean_psnr_gs=30.99334509
+mean_psnr=30.98523067
+original_mean_psnr_gs=30.99334509
+original_mean_psnr=30.98523067
+zero_opacity_rows=0
+engine=native_cpp_psnr_gaussian_splatting

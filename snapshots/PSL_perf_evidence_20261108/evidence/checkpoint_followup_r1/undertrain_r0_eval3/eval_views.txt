@@ -1,0 +1,4 @@
+index,fid,image
+0,0,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000000.jpg
+1,1,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000010.jpg
+2,2,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000011.jpg

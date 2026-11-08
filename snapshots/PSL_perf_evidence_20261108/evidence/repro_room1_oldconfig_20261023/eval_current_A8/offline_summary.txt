@@ -1,0 +1,8 @@
+snapshot=/workspace/code/PSL-perf/results/replica_A_baseline_20261023_A8/replica_rgbd_0/room1/natural_end/snapshot.pt
+frames=182
+mean_psnr_gs=31.98489558
+mean_psnr=31.97580113
+original_mean_psnr_gs=31.98489558
+original_mean_psnr=31.97580113
+zero_opacity_rows=0
+engine=native_cpp_psnr_gaussian_splatting

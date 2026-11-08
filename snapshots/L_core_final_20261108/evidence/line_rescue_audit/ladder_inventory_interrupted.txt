@@ -1,0 +1,7 @@
+ladder inventory (exit code / last frame / completeness)
+
+drop30_desk_3_rgbd_B           exit=139    traj=0      last_frame=1784   saved_kf_traj=0
+drop30_desk_3_rgbd_C           exit=143    traj=0      last_frame=1778   saved_kf_traj=0
+drop30_desk_3_rgbd_P           exit=0      traj=2058   last_frame=2060   saved_kf_traj=1
+drop50_desk_3_rgbd_B           exit=       traj=0      last_frame=19     saved_kf_traj=0
+drop50_desk_3_rgbd_P           exit=       traj=0      last_frame=1569   saved_kf_traj=0

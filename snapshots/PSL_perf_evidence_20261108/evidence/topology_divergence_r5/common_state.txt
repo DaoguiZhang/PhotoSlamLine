@@ -1,0 +1,15 @@
+head=topo-replay-v1
+at_iteration=6999
+steps=400
+gaussians=400630
+line_gaussians=1982
+kfs=167
+iteration=6999
+frozen_opt_steps=6998
+active_sh=3
+default_sh=3
+param_fp=4bd3a983781e0a9c_n400630_nline1982
+adam_fp=d557cfcfe949aa6f
+sequence_len=400
+eval_views=24
+saved_backend=2

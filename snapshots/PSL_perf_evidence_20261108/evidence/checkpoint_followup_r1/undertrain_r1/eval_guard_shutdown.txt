@@ -1,0 +1,9 @@
+ok=1
+fail_reason=none
+iteration=8712
+optimizer_steps=8712
+training_timer=77326
+params_changed=0
+adam_steps_changed=0
+training_counters_changed=0
+viewport_or_pyramid_budget_changed=0

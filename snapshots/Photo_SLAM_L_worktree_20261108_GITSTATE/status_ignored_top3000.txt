@@ -1,0 +1,562 @@
+ M .gitignore
+ M ORB-SLAM3/include/AuditTrail.h
+ M ORB-SLAM3/include/LineMode.h
+ M ORB-SLAM3/include/StereoLineDebug.h
+ M ORB-SLAM3/src/Frame.cc
+ M ORB-SLAM3/src/KeyFrame.cc
+ M cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_desk_3.yaml
+ M cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_mono.yaml
+ M cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_2.yaml
+ M cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_planar_3.yaml
+ M cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_sfm_garden.yaml
+ M cfg/ORB_SLAM3/Monocular/ETH3D/eth3d_table_7.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_desk_3.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_1.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_mannequin_3.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_2.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_planar_3.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_plant_scene_1.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_bench.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_garden.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml
+ M cfg/ORB_SLAM3/RGB-D/ETH3D/eth3d_table_7.yaml
+ M cfg/ORB_SLAM3/RGB-D/Rover/rover_campus_small_1.yaml
+ M cfg/ORB_SLAM3/RGB-D/Rover/rover_garden_large_1.yaml
+ M cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far.txt
+ M cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_far_150.txt
+ M cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near.txt
+ M cfg/ORB_SLAM3/RGB-D/TUM/associations/fr3_structure_notexture_near_150.txt
+ M cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_far_lowfast.yaml
+ M cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_structure_notexture_near_lowfast.yaml
+ M cfg/gaussian_mapper/Monocular/ETH3D/eth3d_desk_3.yaml
+ M cfg/gaussian_mapper/Monocular/ETH3D/eth3d_sfm_garden.yaml
+ M cfg/gaussian_mapper/Monocular/TUM/tum_freiburg1_room_diag.yaml
+ M cfg/gaussian_mapper/Monocular/TUM/tum_freiburg3_long_office_household_diag.yaml
+ M cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_plant_scene_1.yaml
+ M cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_bench.yaml
+ M cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_garden.yaml
+ M cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_house_loop.yaml
+ M cfg/gaussian_mapper/RGB-D/ETH3D/eth3d_sfm_lab_room_1.yaml
+ M cfg/gaussian_mapper/RGB-D/Rover/rover_campus_small_1.yaml
+ M cfg/gaussian_mapper/RGB-D/Rover/rover_garden_large_1.yaml
+ M cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household_diag.yaml
+ M evidence/line_ablation_multiscene/SUMMARY.md
+ M evidence/line_ablation_multiscene/all_runs.csv
+ M evidence/line_ablation_multiscene/common_window.csv
+ M evidence/line_ablation_multiscene/far_mono.csv
+ M evidence/line_ablation_multiscene/far_rgbd.csv
+ M evidence/line_ablation_multiscene/gate_rescue_summary.txt
+ M evidence/line_ablation_multiscene/logs.tar.gz
+ M evidence/line_ablation_multiscene/near_mono.csv
+ M evidence/line_ablation_multiscene/near_rgbd.csv
+ M evidence/line_rescue_audit/SUMMARY.md
+ M evidence/line_rescue_audit/eth3d_scan.csv
+ M evidence/line_rescue_audit/ladder_inventory_interrupted.txt
+ M evidence/line_rescue_audit/merge_deadlock/gdb_B1_no_repro.txt
+ M evidence/line_rescue_audit/merge_deadlock/gdb_B2_interrupted_backtrace.txt
+ M evidence/line_rescue_audit/merge_deadlock/repro_attempts.txt
+ M evidence/line_rescue_audit/merge_deadlock/run.meta.drop30_B
+ M evidence/line_rescue_audit/merge_deadlock/validation_resampler_guard.txt
+ M evidence/line_rescue_audit/merge_deadlock/wait_graph.md
+ M evidence/line_rescue_audit/opportunity_scan_7seq.txt
+ M evidence/line_rescue_audit/opportunity_scan_stress.txt
+ M evidence/line_rescue_audit/scan_logs.tar.gz
+ M evidence/line_rescue_audit/stress_logs.tar.gz
+ M evidence/line_rescue_audit/stuck_frame1778/log_snapshot.txt
+ M evidence/line_rescue_audit/stuck_frame1778/run.meta
+ M evidence/line_rescue_audit/stuck_frame1778/threads.txt
+ M evidence/line_rescue_audit/tum_scan.csv
+ M evidence/line_rescue_diag/SUMMARY.md
+ M evidence/line_rescue_diag/ate_preserved_A1B1C1.txt
+ M evidence/line_rescue_diag/ate_preserved_A1B1C1_rpeOLD_definition.txt
+ M evidence/line_rescue_diag/bc_compare_r1.txt
+ M evidence/line_rescue_diag/bc_perframe_r1.csv
+ M evidence/line_rescue_diag/gate_summary_all_runs.txt
+ M evidence/line_rescue_diag/interleave_aggregate.txt
+ M evidence/line_rescue_diag/line_quality_B_C_r1.txt
+ M scripts/ablation_aggregate.py
+ M scripts/ablation_common_window.py
+ M scripts/ablation_replica_rgbd.sh
+ M scripts/aggregate_abc.py
+ M scripts/analyze_export_diag.py
+ M scripts/build_asan.sh
+ M scripts/chain_error_check.py
+ M scripts/classify_a6.py
+ M scripts/compare_runs.py
+ M scripts/eth3d_ablation_run.sh
+ M scripts/eval_batch.py
+ M scripts/eval_mono_stability.py
+ M scripts/eval_tum_se3.py
+ M scripts/eval_tum_se3_v2.py
+ M scripts/export_acceptance.py
+ M scripts/fr3_abc_interleave.sh
+ M scripts/fr3_ablation_repeats.sh
+ M scripts/fr3_ablation_run.sh
+ M scripts/fr3_line_diag_abc.sh
+ M scripts/gdb_catch_lba.txt
+ M scripts/group_common_window.py
+ M scripts/ladder_report.py
+ M scripts/line_bc_compare.py
+ M scripts/line_diag_report.py
+ M scripts/line_quality_report.py
+ M scripts/make_tandt_rgb_txt.sh
+ M scripts/mapper_ablation_full.sh
+ M scripts/mapper_ablation_replica_rgbd.sh
+ M scripts/mapper_ablation_report.py
+ M scripts/p6_eval_tum.py
+ M scripts/p6_rgbd_loop_matrix.sh
+ M scripts/pose_rebuild_check.py
+ M scripts/pose_trace_compare.py
+ M scripts/repro_ab_stability.sh
+ M scripts/repro_ab_suite.sh
+ M scripts/repro_accept_30x.sh
+ M scripts/repro_accept_gauss_10x.sh
+ M scripts/repro_accept_xseq.sh
+ M scripts/repro_iso_suite.sh
+ M scripts/repro_office1_line_lba_crash.sh
+ M scripts/repro_office1_nocsv.sh
+ M scripts/repro_plucker_e2e.sh
+ M scripts/repro_regression.sh
+ M scripts/rescue_frame_audit.py
+ M scripts/rescue_opportunity_scan.py
+ M scripts/rot_convention_check.py
+ M scripts/rotation_axis_check.py
+ M scripts/rotation_spec_check.py
+ M scripts/round_stats.py
+ M scripts/run_asan.sh
+ M scripts/run_exp3_stability.sh
+ M scripts/run_exp4_gw.sh
+ M scripts/run_frame_table.py
+ M scripts/run_office2_diag2.sh
+ M scripts/run_office2_diag2_batch.sh
+ M scripts/run_office2_diagnosis.sh
+ M scripts/run_office2_diagnosis_batch.sh
+ M scripts/smallbatch_2x.sh
+ M scripts/stability_table.py
+ M scripts/stress_rescue_repeats.sh
+ M scripts/summarize_office2_diag2.py
+ M scripts/summarize_office2_diagnosis.py
+ M scripts/tandt_mono.sh
+ M scripts/traj_continuity_audit.py
+ M tests/cull_chain_invariant.cc
+ M tests/test_line_loop.cpp
+ M tests/test_line_loop_audit.cpp
+ M tests/test_line_loop_gaussian.cpp
+ M tests/test_line_structure_loss.cpp
+ M tests/test_mapline_default.cpp
+ M tests/test_plucker_lba_audit.cpp
+ M tests/test_stereo_line_jacobian.cpp
+ M todolist.txt
+?? .cache/
+?? 2_Keyframe_Camera_after.txt
+?? 2_Keyframe_Camera_before.txt
+?? 2_Keyframe_MapPoints_after.obj
+?? 2_Keyframe_MapPoints_before.obj
+?? 2_Keyframe_Maplines_after.obj
+?? 2_Keyframe_Maplines_before.obj
+?? ExecMean.txt
+?? LBA_Stats.txt
+?? LocalMapTimeStats.txt
+?? ORB-SLAM3/build_asan/
+?? ORB-SLAM3/lib_asan/
+?? SessionInfo.txt
+?? Temp/
+?? TrackingTimeStats.txt
+?? artifact_manifest.sha256
+?? myresult/
+?? no_viewer/
+?? readme.txt
+?? scripts/analyze_jump_terms.py
+?? scripts/dump_window.py
+?? scripts/merge_transform_audit.py
+?? scripts/stability_report.py
+?? "\346\266\210\350\236\215\345\256\236\351\252\214\347\232\204\346\200\273\347\273\223/"
+!! .vscode/
+!! ORB-SLAM3/Thirdparty/DBoW2/build/
+!! ORB-SLAM3/Thirdparty/DBoW2/lib/
+!! ORB-SLAM3/Thirdparty/Sophus/build/
+!! ORB-SLAM3/Thirdparty/g2o/build/
+!! ORB-SLAM3/Thirdparty/g2o/config.h
+!! ORB-SLAM3/Thirdparty/g2o/lib/
+!! ORB-SLAM3/Vocabulary/ORBvoc.txt
+!! ORB-SLAM3/build/
+!! ORB-SLAM3/build_asan/CMakeFiles/Makefile2
+!! ORB-SLAM3/build_asan/Makefile
+!! ORB-SLAM3/build_asan/Thirdparty/g2o/Makefile
+!! ORB-SLAM3/lib/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office0/7475_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office0/7475_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office1/6403_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office1/6403_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office2/7732_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office2/7732_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office4/7773_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/office4/7773_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/room0/8277_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/room0/8277_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/room1/7611_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_0/room1/7611_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/office0/7586_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/office0/7586_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/office1/6575_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/office1/6575_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/office2/7995_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/office2/7995_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/room0/8198_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/room0/8198_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/room1/8097_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_1/room1/8097_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/office0/7491_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/office0/7491_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/office1/6710_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/office1/6710_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/office4/7702_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/office4/7702_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/room0/8410_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/room0/8410_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/room1/7599_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/room1/7599_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/room2/8366_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_2/room2/8366_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office0/7545_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office0/7545_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office1/6365_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office1/6365_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office2/7809_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office2/7809_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office3/8005_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office3/8005_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office4/7685_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/office4/7685_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/room0/8370_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/room0/8370_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/room1/7659_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_3/room1/7659_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office0/7430_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office0/7430_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office1/6279_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office1/6279_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office2/8025_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office2/8025_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office3/7963_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office3/7963_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office4/7691_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/office4/7691_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/room0/8314_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/room0/8314_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/room1/7825_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/room1/7825_shutdown/ply/point_cloud/
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/room2/8483_shutdown/ply/input.ply
+!! Temp/0_iterations/replica_rgbd/replica_rgbd_4/room2/8483_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_0/office0/19278_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_0/office0/19278_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_0/office1/17075_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_0/office1/17075_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_0/office2/18383_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_0/office2/18383_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_0/office4/17886_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_0/office4/17886_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_0/room0/17958_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_0/room0/17958_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_0/room1/18337_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_0/room1/18337_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_0/room2/18813_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_0/room2/18813_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_1/office0/17445_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_1/office0/17445_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_1/office1/16785_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_1/office1/16785_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_1/office2/17853_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_1/office2/17853_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_1/office3/18841_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_1/office3/18841_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_1/office4/17711_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_1/office4/17711_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_1/room0/18298_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_1/room0/18298_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_1/room1/17780_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_1/room1/17780_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_2/office0/17469_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_2/office0/17469_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_2/office1/16497_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_2/office1/16497_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_2/office2/17900_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_2/office2/17900_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_2/office4/17677_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_2/office4/17677_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_2/room0/18267_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_2/room0/18267_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_2/room1/18032_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_2/room1/18032_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_3/office0/17676_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_3/office0/17676_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_3/office1/16562_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_3/office1/16562_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_3/office3/18132_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_3/office3/18132_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_3/office4/17800_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_3/office4/17800_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_3/room0/18440_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_3/room0/18440_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_3/room1/17886_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_3/room1/17886_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_3/room2/18390_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_3/room2/18390_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_4/office0/17545_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_4/office0/17545_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_4/office1/16511_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_4/office1/16511_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_4/office2/17901_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_4/office2/17901_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_4/office4/17908_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_4/office4/17908_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_4/room0/18157_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_4/room0/18157_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_4/room1/17721_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_4/room1/17721_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/T/replica_rgbd_4/room2/18453_shutdown/ply/input.ply
+!! Temp/10000_iterations/T/replica_rgbd_4/room2/18453_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_0/rgbd_dataset_freiburg1_desk/16340_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_0/rgbd_dataset_freiburg1_desk/16340_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_0/rgbd_dataset_freiburg2_xyz/46133_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_0/rgbd_dataset_freiburg2_xyz/46133_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_0/rgbd_dataset_freiburg3_long_office_household/34319_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_0/rgbd_dataset_freiburg3_long_office_household/34319_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_1/rgbd_dataset_freiburg1_desk/15787_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_1/rgbd_dataset_freiburg1_desk/15787_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_1/rgbd_dataset_freiburg2_xyz/32117_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_1/rgbd_dataset_freiburg2_xyz/32117_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_1/rgbd_dataset_freiburg3_long_office_household/30739_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_1/rgbd_dataset_freiburg3_long_office_household/30739_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_2/rgbd_dataset_freiburg1_desk/15775_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_2/rgbd_dataset_freiburg1_desk/15775_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_2/rgbd_dataset_freiburg2_xyz/36842_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_2/rgbd_dataset_freiburg2_xyz/36842_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_2/rgbd_dataset_freiburg3_long_office_household/28152_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_2/rgbd_dataset_freiburg3_long_office_household/28152_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_3/rgbd_dataset_freiburg1_desk/15738_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_3/rgbd_dataset_freiburg1_desk/15738_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_3/rgbd_dataset_freiburg2_xyz/41016_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_3/rgbd_dataset_freiburg2_xyz/41016_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_4/rgbd_dataset_freiburg1_desk/15811_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_4/rgbd_dataset_freiburg1_desk/15811_shutdown/ply/point_cloud/
+!! Temp/10000_iterations/tum_rgbd_4/rgbd_dataset_freiburg2_xyz/33602_shutdown/ply/input.ply
+!! Temp/10000_iterations/tum_rgbd_4/rgbd_dataset_freiburg2_xyz/33602_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_0/rgbd_dataset_freiburg1_desk/4241_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_0/rgbd_dataset_freiburg1_desk/4241_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_1/rgbd_dataset_freiburg1_desk/4122_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_1/rgbd_dataset_freiburg1_desk/4122_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_2/rgbd_dataset_freiburg1_desk/4232_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_2/rgbd_dataset_freiburg1_desk/4232_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_2/rgbd_dataset_freiburg2_xyz/24284_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_2/rgbd_dataset_freiburg2_xyz/24284_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_2/rgbd_dataset_freiburg3_long_office_household/20482_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_2/rgbd_dataset_freiburg3_long_office_household/20482_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_3/rgbd_dataset_freiburg1_desk/4272_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_3/rgbd_dataset_freiburg1_desk/4272_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_4/rgbd_dataset_freiburg1_desk/4372_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_4/rgbd_dataset_freiburg1_desk/4372_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0_refined_mono/tum_mono_4/rgbd_dataset_freiburg3_long_office_household/20071_shutdown/ply/input.ply
+!! Temp/replica_mono/0_refined_mono/tum_mono_4/rgbd_dataset_freiburg3_long_office_household/20071_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_0/office0/6049_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_0/office0/6049_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_0/office1/5151_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_0/office1/5151_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_0/office2/6135_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_0/office2/6135_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_0/office4/5175_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_0/office4/5175_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_0/room0/6919_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_0/room0/6919_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_0/room1/6043_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_0/room1/6043_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_0/room2/5983_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_0/room2/5983_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/office0/6148_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/office0/6148_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/office1/5277_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/office1/5277_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/office2/5810_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/office2/5810_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/office3/6162_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/office3/6162_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/office4/5222_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/office4/5222_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/room0/6645_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/room0/6645_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/room1/6074_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/room1/6074_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_1/room2/5877_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_1/room2/5877_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/office0/6272_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/office0/6272_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/office1/5236_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/office1/5236_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/office2/5945_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/office2/5945_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/office3/5086_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/office3/5086_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/office4/5287_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/office4/5287_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/room0/6764_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/room0/6764_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/room1/6141_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/room1/6141_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_2/room2/5423_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_2/room2/5423_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/office0/6259_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/office0/6259_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/office1/5139_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/office1/5139_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/office2/5659_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/office2/5659_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/office3/5739_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/office3/5739_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/office4/5157_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/office4/5157_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/room0/7026_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/room0/7026_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/room1/6224_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/room1/6224_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_3/room2/5776_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_3/room2/5776_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/office0/6075_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/office0/6075_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/office1/5154_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/office1/5154_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/office2/5954_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/office2/5954_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/office3/6179_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/office3/6179_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/office4/5300_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/office4/5300_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/room0/6920_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/room0/6920_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/room1/5869_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/room1/5869_shutdown/ply/point_cloud/
+!! Temp/replica_mono/0refined/replica_mono_4/room2/5344_shutdown/ply/input.ply
+!! Temp/replica_mono/0refined/replica_mono_4/room2/5344_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_0/office0/15191_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_0/office0/15191_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_0/office1/15404_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_0/office1/15404_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_0/office3/16149_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_0/office3/16149_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_0/office4/15624_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_0/office4/15624_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_0/room0/17199_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_0/room0/17199_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_0/room1/16453_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_0/room1/16453_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_0/room2/16188_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_0/room2/16188_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/office0/16072_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/office0/16072_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/office1/14586_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/office1/14586_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/office2/15122_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/office2/15122_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/office3/15985_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/office3/15985_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/office4/15189_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/office4/15189_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/room0/16381_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/room0/16381_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/room1/15854_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/room1/15854_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_1/room2/15684_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_1/room2/15684_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/office0/15359_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/office0/15359_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/office1/15040_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/office1/15040_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/office2/15891_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/office2/15891_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/office3/15658_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/office3/15658_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/office4/14952_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/office4/14952_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/room0/16600_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/room0/16600_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/room1/15914_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/room1/15914_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_2/room2/15801_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_2/room2/15801_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/office0/15720_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/office0/15720_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/office1/15051_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/office1/15051_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/office2/15716_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/office2/15716_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/office3/15702_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/office3/15702_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/office4/14868_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/office4/14868_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/room0/16705_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/room0/16705_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/room1/16000_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/room1/16000_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_3/room2/15807_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_3/room2/15807_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/office0/15260_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/office0/15260_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/office1/15111_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/office1/15111_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/office2/15354_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/office2/15354_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/office3/15757_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/office3/15757_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/office4/15043_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/office4/15043_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/room0/16811_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/room0/16811_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/room1/16145_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/room1/16145_shutdown/ply/point_cloud/
+!! Temp/replica_mono/10000refined/replica_mono_4/room2/15596_shutdown/ply/input.ply
+!! Temp/replica_mono/10000refined/replica_mono_4/room2/15596_shutdown/ply/point_cloud/
+!! Temp/replica_mono/Test/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_0/rgbd_dataset_freiburg1_desk/7206_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_0/rgbd_dataset_freiburg1_desk/7206_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_0/rgbd_dataset_freiburg2_xyz/33796_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_0/rgbd_dataset_freiburg2_xyz/33796_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_1/rgbd_dataset_freiburg1_desk/7109_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_1/rgbd_dataset_freiburg1_desk/7109_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_1/rgbd_dataset_freiburg2_xyz/29831_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_1/rgbd_dataset_freiburg2_xyz/29831_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_1/rgbd_dataset_freiburg3_long_office_household/24758_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_1/rgbd_dataset_freiburg3_long_office_household/24758_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_2/rgbd_dataset_freiburg1_desk/6822_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_2/rgbd_dataset_freiburg1_desk/6822_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_2/rgbd_dataset_freiburg2_xyz/31945_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_2/rgbd_dataset_freiburg2_xyz/31945_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_2/rgbd_dataset_freiburg3_long_office_household/19383_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_2/rgbd_dataset_freiburg3_long_office_household/19383_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_3/rgbd_dataset_freiburg1_desk/6968_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_3/rgbd_dataset_freiburg1_desk/6968_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_3/rgbd_dataset_freiburg2_xyz/31055_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_3/rgbd_dataset_freiburg2_xyz/31055_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_3/rgbd_dataset_freiburg3_long_office_household/19411_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_3/rgbd_dataset_freiburg3_long_office_household/19411_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_4/rgbd_dataset_freiburg1_desk/6908_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_4/rgbd_dataset_freiburg1_desk/6908_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_4/rgbd_dataset_freiburg2_xyz/22094_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_4/rgbd_dataset_freiburg2_xyz/22094_shutdown/ply/point_cloud/
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_4/rgbd_dataset_freiburg3_long_office_household/19276_shutdown/ply/input.ply
+!! Temp/tum_rgbd/100_iterations/tum_rgbd_4/rgbd_dataset_freiburg3_long_office_household/19276_shutdown/ply/point_cloud/
+!! Test/
+!! bin/
+!! build/
+!! lib/
+!! myresult/5904_shutdown/ply/input.ply
+!! myresult/5904_shutdown/ply/point_cloud/
+!! no_viewer/7087_shutdown/ply/input.ply
+!! no_viewer/7087_shutdown/ply/point_cloud/
+!! no_viewer/7171_shutdown/ply/input.ply
+!! no_viewer/7171_shutdown/ply/point_cloud/
+!! results/
+!! scripts/2_Keyframe_MapPoints_after.obj
+!! scripts/2_Keyframe_MapPoints_before.obj
+!! scripts/2_Keyframe_Maplines_after.obj
+!! scripts/2_Keyframe_Maplines_before.obj
+!! scripts/__pycache__/

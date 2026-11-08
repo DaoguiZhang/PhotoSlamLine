@@ -1,0 +1,134 @@
+--- a/ORB-SLAM3/src/Frame.cc
++++ b/ORB-SLAM3/src/Frame.cc
+@@ -2610,9 +2610,17 @@
+         if (u1 < 0 || u1 >= cols || v1 < 0 || v1 >= rows ||
+             u2 < 0 || u2 >= cols || v2 < 0 || v2 >= rows)
+             continue;
++        // [CRASH FIX] the float check above is not enough: cvRound(rows-0.4)
++        // is rows, so a keyline endpoint just inside the border rounds one row
++        // PAST the image. Validate the rounded indices before indexing.
++        const int vv1 = cvRound(v1), uu1 = cvRound(u1);
++        const int vv2 = cvRound(v2), uu2 = cvRound(u2);
++        if (uu1 < 0 || uu1 >= cols || vv1 < 0 || vv1 >= rows ||
++            uu2 < 0 || uu2 >= cols || vv2 < 0 || vv2 >= rows)
++            continue;
+         // 读取两端深度
+-        float d1 = imDepth.at<float>(cvRound(v1), cvRound(u1));
+-        float d2 = imDepth.at<float>(cvRound(v2), cvRound(u2));
++        float d1 = imDepth.at<float>(vv1, uu1);
++        float d2 = imDepth.at<float>(vv2, uu2);
+         bool valid1 = (d1 > minDepth && d1 < maxDepth);
+         bool valid2 = (d2 > minDepth && d2 < maxDepth);
+         if (!valid1 && !valid2) continue; // 两端都无效
+--- a/ORB-SLAM3/src/KeyFrame.cc
++++ b/ORB-SLAM3/src/KeyFrame.cc
+@@ -17,6 +17,7 @@
+ */
+ 
+ #include "KeyFrame.h"
++#include <algorithm>
+ #include "Converter.h"
+ #include "ImuTypes.h"
+ #include "AuditTrail.h"
+@@ -90,6 +91,12 @@
+ {
+     mnId=nNextId++;
+ 
++    // [CRASH FIX, root cause] mvpMapLines was never sized, so it stayed empty
++    // while NL > 0 and every reader that indexes it by line index ran off the
++    // end of an empty vector. One null slot per detected line, as the readers
++    // already assume.
++    mvpMapLines.assign(NL, static_cast<MapLine*>(NULL));
++
+     mGrid.resize(mnGridCols);
+     if(F.Nleft != -1)  mGridRight.resize(mnGridCols);
+     for(int i=0; i<mnGridCols;i++)
+@@ -2081,11 +2088,21 @@
+     unique_lock<mutex> lock(mMutexFeatures);
+ 
+     // Save the id of each MapLine in this KF, there can be null pointer in the vector
++    // [CRASH FIX] NL is copied from the Frame, but mvKeyLines / mvpMapLines can
++    // be shorter than NL. Clamp the loop; when the invariant holds it is
++    // unchanged.
++    const int nLines = std::min(NL, (int)std::min(mvKeyLines.size(),
++                                                  mvpMapLines.size()));
++    if (nLines != NL) {
++        std::cerr << "[KF-NL-MISMATCH] kf=" << mnId << " NL=" << NL
++                  << " mvKeyLines=" << mvKeyLines.size()
++                  << " mvpMapLines=" << mvpMapLines.size() << std::endl;
++    }
+     pixelsUndist.clear();
+-    pixelsUndist.reserve(NL * 4);
++    pixelsUndist.reserve(nLines * 4);
+     pointsLocal.clear();
+-    pointsLocal.reserve(NL * 6);
+-    for(int i = 0; i < NL; ++i)
++    pointsLocal.reserve(nLines * 6);
++    for(int i = 0; i < nLines; ++i)
+     {
+         pixelsUndist.push_back(mvKeyLines[i].startPointX);
+         pixelsUndist.push_back(mvKeyLines[i].startPointY);
+--- a/src/gaussian_mapper_line.cpp
++++ b/src/gaussian_mapper_line.cpp
+@@ -898,7 +898,22 @@
+     prof_refine_phase_ = true;
+     const auto refine_start = std::chrono::steady_clock::now();
+ 
+-    while (getIteration() < target_stop_iter || isKeepingTraining()) {
++    // [CRASH FIX] If initial mapping never started (e.g. the sequence produced
++    // fewer than Mapper.min_num_initial_map_kfs keyframes), gaussians_ is still
++    // an empty model. The refinement loop would render from undefined tensors
++    // and the shutdown export would dereference them. Nothing can be refined or
++    // exported in that case; report it and fall through to the statistics.
++    const bool gaussian_model_empty =
++        !(gaussians_ && gaussians_->xyz_.defined()
++          && gaussians_->xyz_.size(0) > 0);
++    if (gaussian_model_empty) {
++        std::cerr << "[Gaussian Mapper] Gaussian model is empty (initial mapping "
++                     "never started); skipping final refinement and shutdown "
++                     "render/PLY export." << std::endl;
++    }
++
++    while (!gaussian_model_empty
++           && (getIteration() < target_stop_iter || isKeepingTraining())) {
+         // Guard: when SLAM produced no keyframes (short/sparse run), the scene is
+         // empty and getIteration() can never advance -> the loop would spin
+         // forever. Stop refinement in that case.
+@@ -944,8 +959,8 @@
+         std::chrono::steady_clock::now() - refine_start).count() / 1000.0;
+ 
+     // Save and clear
+-    if (scene_->keyframes().empty()) {
+-        std::cerr << "[Gaussian Mapper] No keyframes in scene; skipping shutdown render/PLY export." << std::endl;
++    if (scene_->keyframes().empty() || gaussian_model_empty) {
++        std::cerr << "[Gaussian Mapper] No usable scene/model; skipping shutdown render/PLY export." << std::endl;
+     } else {
+         renderAndRecordAllKeyframes("_shutdown");
+         savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
+@@ -3672,10 +3687,22 @@
+     ++depth_cached_;
+ 
+     if (depth_cached_ >= max_depth_cached_) {
+-        depth_cached_ = 0;
+-        // Add new points to the model
+-        std::unique_lock<std::mutex> lock_render(mutex_render_);
+-        gaussians_->increasePcd(depth_cache_points_, depth_cache_colors_, getIteration());
++        // [CRASH FIX] The inactive-geo cache can reach its flush threshold
++        // BEFORE the Gaussian model is initialised (mono: the first
++        // min_num_initial_map_kfs keyframes run this path while gaussians_ is
++        // still an empty model). densificationPostfix then concatenates
++        // undefined shadow tensors and segfaults. Keep the cache and retry
++        // once the model has points; no point is dropped.
++        const bool model_ready = (gaussians_ && gaussians_->xyz_.defined()
++                                  && gaussians_->xyz_.size(0) > 0);
++        const bool cache_ready = (depth_cache_points_.defined()
++                                  && depth_cache_points_.size(0) > 0);
++        if (model_ready && cache_ready) {
++            depth_cached_ = 0;
++            // Add new points to the model
++            std::unique_lock<std::mutex> lock_render(mutex_render_);
++            gaussians_->increasePcd(depth_cache_points_, depth_cache_colors_, getIteration());
++        }
+     }
+ 
+ // auto end_timing = std::chrono::steady_clock::now();

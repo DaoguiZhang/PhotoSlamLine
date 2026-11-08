@@ -1,0 +1,204 @@
+{
+  "A0_vs_A1": {
+    "first_clone": {
+      "a": 3134,
+      "b": 3133,
+      "key": "clone_arm",
+      "step": 101
+    },
+    "first_line": {
+      "a": 1969,
+      "b": 1966,
+      "key": "line",
+      "step": 101
+    },
+    "first_prune": {
+      "a": 10863,
+      "b": 10888,
+      "key": "prune_arm",
+      "step": 101
+    },
+    "first_split": {
+      "a": 6115,
+      "b": 6079,
+      "key": "split_arm",
+      "step": 101
+    },
+    "first_topo_event": {
+      "a": "395829",
+      "b": "395803",
+      "field": "total_after",
+      "iteration": 7100,
+      "stage": "after_clone"
+    },
+    "first_total": {
+      "a": 401944,
+      "b": 401882,
+      "key": "total",
+      "step": 101
+    },
+    "selected_hash_equal": false
+  },
+  "A0_vs_C": {
+    "first_clone": {
+      "a": 3134,
+      "b": 3097,
+      "key": "clone_arm",
+      "step": 101
+    },
+    "first_line": {
+      "a": 1969,
+      "b": 1968,
+      "key": "line",
+      "step": 101
+    },
+    "first_prune": {
+      "a": 10863,
+      "b": 10911,
+      "key": "prune_arm",
+      "step": 101
+    },
+    "first_split": {
+      "a": 6115,
+      "b": 6043,
+      "key": "split_arm",
+      "step": 101
+    },
+    "first_topo_event": {
+      "a": "395829",
+      "b": "395744",
+      "field": "total_after",
+      "iteration": 7100,
+      "stage": "after_clone"
+    },
+    "first_total": {
+      "a": 401944,
+      "b": 401787,
+      "key": "total",
+      "step": 101
+    },
+    "selected_hash_equal": false
+  },
+  "arms": {
+    "A0": {
+      "first": {
+        "clone_cum": 96211,
+        "iteration": 7000,
+        "line": 1978,
+        "prune_cum": 295348,
+        "split_cum": 303592,
+        "step": 1,
+        "total": 403558,
+        "view_fid": 29,
+        "view_index": 29
+      },
+      "last": {
+        "clone_cum": 105518,
+        "iteration": 7399,
+        "line": 1937,
+        "prune_cum": 313331,
+        "split_cum": 318280,
+        "step": 400,
+        "total": 409570,
+        "view_fid": 52,
+        "view_index": 52
+      },
+      "n_steps": 400,
+      "psnr": {
+        "0": 25.13174661,
+        "1": 24.98438589,
+        "10": 26.38787325,
+        "100": 28.90115849,
+        "400": 29.56301864
+      },
+      "psnr_gs": {
+        "0": 25.14139644,
+        "1": 24.99389307,
+        "10": 26.3988897,
+        "100": 28.91008568,
+        "400": 29.5709722
+      }
+    },
+    "A1": {
+      "first": {
+        "clone_cum": 108910,
+        "iteration": 7000,
+        "line": 1978,
+        "prune_cum": 318885,
+        "split_cum": 323370,
+        "step": 1,
+        "total": 403558,
+        "view_fid": 29,
+        "view_index": 29
+      },
+      "last": {
+        "clone_cum": 118251,
+        "iteration": 7399,
+        "line": 1939,
+        "prune_cum": 337096,
+        "split_cum": 338070,
+        "step": 400,
+        "total": 409388,
+        "view_fid": 52,
+        "view_index": 52
+      },
+      "n_steps": 400,
+      "psnr": {
+        "0": 25.13174661,
+        "1": 24.96502662,
+        "10": 26.36854339,
+        "100": 28.89794834,
+        "400": 29.60836784
+      },
+      "psnr_gs": {
+        "0": 25.14139644,
+        "1": 24.97468678,
+        "10": 26.37948942,
+        "100": 28.90697241,
+        "400": 29.61551205
+      }
+    },
+    "C": {
+      "first": {
+        "clone_cum": 121643,
+        "iteration": 7000,
+        "line": 1978,
+        "prune_cum": 342650,
+        "split_cum": 343160,
+        "step": 1,
+        "total": 403558,
+        "view_fid": 29,
+        "view_index": 29
+      },
+      "last": {
+        "clone_cum": 130944,
+        "iteration": 7399,
+        "line": 1934,
+        "prune_cum": 360787,
+        "split_cum": 357813,
+        "step": 400,
+        "total": 409375,
+        "view_fid": 52,
+        "view_index": 52
+      },
+      "n_steps": 400,
+      "psnr": {
+        "0": 25.13174661,
+        "1": 24.97786617,
+        "10": 26.401824,
+        "100": 28.90756782,
+        "400": 29.62308407
+      },
+      "psnr_gs": {
+        "0": 25.14139644,
+        "1": 24.98747166,
+        "10": 26.41279928,
+        "100": 28.91658171,
+        "400": 29.63050365
+      }
+    }
+  },
+  "root": "/tmp/psl-room1-control/topo-room1-r5"
+}
+
+wrote /tmp/psl-room1-control/topo-room1-r5/analysis.json

@@ -1,0 +1,4 @@
+arm,loop_kfs,loop_pose_changed,loop_moved_rows,loop_nonzero_moved,loop_line_rows,loop_missing_event_rows,max_translation,max_rotation_deg,mean_translation,mean_rotation_deg,mean_scale_ratio,gba_evt,gba_map,gba_kfs,gba_in_scene,gba_deltas,gba_moved,gba_nonzero_moved,gba_pose_mismatch,gba_translation_mean,gba_translation_max
+A,,,,,,,,,,,,,,,,,,,,,
+C,119,0,359170,0,1055,10837,2.6656e-07,5.60263e-06,1.44504e-08,3.49345e-07,1,1,0,121,121,121,0,0,0.0000,0.00000,0.00000
+H,116,112,374605,336452,1084,5747,0.00709992,0.216205,0.00274961,0.1067,1,1,0,117,117,117,0,0,0.0000,0.00000,0.00000

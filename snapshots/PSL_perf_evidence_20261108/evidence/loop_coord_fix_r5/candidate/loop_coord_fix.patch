@@ -1,0 +1,806 @@
+diff --git a/include/gaussian_mapper_line.h b/include/gaussian_mapper_line.h
+index 54be229..6b2dc06 100644
+--- a/include/gaussian_mapper_line.h
++++ b/include/gaussian_mapper_line.h
+@@ -34,6 +34,9 @@
+ #include <memory>
+ #include <random>
+ #include <mutex>
++#include <cstdint>
++#include <cstring>
++#include <unordered_map>
+ 
+ #include "append_refinement.h"
+ 
+@@ -748,6 +751,14 @@ protected:
+     // geom-sync-v3: last GlobalBA event actually applied to the Gaussians.
+     // Used for duplicate/stale rejection and for stamping new rows.
+     unsigned long last_applied_gba_event_ = 0;
++    // ORB-SLAM3 payload id of the last accepted GlobalBA. Kept separately from
++    // the model's model-local coordinate version (LOOP events do not carry a
++    // payload id, so both event types share one monotonically increasing
++    // coordinate sequence).
++    unsigned long last_gba_payload_event_ = 0;
++    // Stable fingerprint of an immutable LOOP payload -> coordinate version.
++    // A replayed MappingOperation maps back to the same version and is a no-op.
++    std::unordered_map<std::uint64_t, unsigned long> loop_coord_event_versions_;
+     long long lm_created_rows_total_ = 0;  // ordinary LocalMapping additions
+ 
+     unsigned long min_num_initial_map_kfs_;
+diff --git a/include/gaussian_model_line.h b/include/gaussian_model_line.h
+index 15f3e6a..c8644bb 100644
+--- a/include/gaussian_model_line.h
++++ b/include/gaussian_model_line.h
+@@ -113,8 +113,11 @@ public:
+     // world_deltas[i] = T_after^-1 * T_before maps the OLD world frame to the
+     // NEW one for every Gaussian anchored at kf id world_deltas[i].first.
+     // Ordinary rows: centre/rotation/anchor rigidly moved. Line rows also get
+-    // line_dir_w_ rotated. Scaling is untouched (SE(3), no scale). Adam: the
+-    // xyz first moment is rotated, the second moment is left in place.
++    // line_dir_w_ rotated. A non-unit world_scale applies the Sim(3) uniform
++    // scale to centres/anchors and adds log(world_scale) to the log-scales.
++    // Adam: the xyz first moment is transformed, the second moment is left in
++    // place. `event_id` is a model-local coordination version: LOOP and GBA
++    // share one monotonic sequence so each row is corrected exactly once.
+     struct GbaCorrectionStats
+     {
+         long long moved_rows = 0;          // rows processed (selected)
+@@ -131,7 +134,12 @@ public:
+     GbaCorrectionStats applyGbaCorrections(
+         const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+         unsigned long event_id,
+-        GbaCorrectionMode mode = GbaCorrectionMode::Full);
++        GbaCorrectionMode mode = GbaCorrectionMode::Full,
++        float world_scale = 1.0f);
++    // Every coordinate-changing event (LOOP or GBA) gets a unique model-local
++    // version. This is deliberately independent of ORB-SLAM3's GBA payload id,
++    // which LOOP events do not carry.
++    unsigned long allocateCoordEventId();
+     unsigned long lastAppliedGbaEvent() const { return last_applied_gba_event_; }
+     torch::Tensor refKfIds() const { return ref_kf_id_; }
+     torch::Tensor coordEventIds() const { return coord_event_id_; }
+@@ -307,6 +315,7 @@ public:
+     // from a replayed old event.
+     torch::Tensor coord_event_id_; // [N] int64
+     unsigned long last_applied_gba_event_ = 0;
++    unsigned long coord_event_seq_ = 0;
+ 
+     // --- Stage-1 performance: cached line subset -----------------------------
+     // Boolean-mask indexing on CUDA reads the true-count back from the device,
+diff --git a/include/loop_event_key.h b/include/loop_event_key.h
+new file mode 100644
+index 0000000..c4fc92f
+--- /dev/null
++++ b/include/loop_event_key.h
+@@ -0,0 +1,51 @@
++#pragma once
++
++#include <algorithm>
++#include <cstdint>
++#include <cstring>
++#include <utility>
++#include <vector>
++
++#include <Eigen/Core>
++
++namespace loop_event_key
++{
++inline std::uint64_t fingerprint(
++    unsigned long payload_map_gen,
++    unsigned long current_map_gen,
++    float scale,
++    std::vector<std::pair<unsigned long, Eigen::Matrix4f>> kfs)
++{
++    std::uint64_t h = 1469598103934665603ULL;
++    auto mix = [&](std::uint64_t v) {
++        h ^= v;
++        h *= 1099511628211ULL;
++    };
++    auto mixf = [&](float v) {
++        std::uint32_t u = 0;
++        std::memcpy(&u, &v, sizeof(u));
++        mix(static_cast<std::uint64_t>(u));
++    };
++    mix(static_cast<std::uint64_t>(payload_map_gen));
++    mix(static_cast<std::uint64_t>(current_map_gen));
++    mixf(scale);
++    mix(static_cast<std::uint64_t>(kfs.size()));
++    std::sort(kfs.begin(), kfs.end(),
++              [](const auto& a, const auto& b) { return a.first < b.first; });
++    for (const auto& kf : kfs)
++    {
++        mix(static_cast<std::uint64_t>(kf.first));
++        for (int r = 0; r < 4; ++r)
++            for (int c = 0; c < 4; ++c)
++                mixf(kf.second(r, c));
++    }
++    return h;
++}
++
++inline bool map_matches(unsigned long payload_map_gen,
++                        unsigned long current_map_gen)
++{
++    return payload_map_gen == 0 || payload_map_gen == current_map_gen;
++}
++
++} // namespace loop_event_key
+diff --git a/src/gaussian_mapper_line.cpp b/src/gaussian_mapper_line.cpp
+index 32ebed7..bce0e21 100644
+--- a/src/gaussian_mapper_line.cpp
++++ b/src/gaussian_mapper_line.cpp
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "include/gaussian_mapper_line.h"
++#include "include/loop_event_key.h"
+ 
+ #include <ATen/cuda/CUDAEvent.h>
+ 
+@@ -7006,123 +7007,175 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+         {
+             std::cerr << "[Gaussian Mapper]Loop Closure Detected." << std::endl;
+ 
++            // Sim(3) scale of this loop. RGB-D loops normally carry 1.0; the
++            // value is still read from the event and applied to the map so a
++            // real scale is not silently discarded.
+             float loop_kf_scale = opr.mfScale;
++            if (!std::isfinite(loop_kf_scale) || loop_kf_scale <= 1e-6f)
++            {
++                std::cerr << "[LoopSync] invalid event scale=" << loop_kf_scale
++                          << "; using 1.0" << std::endl;
++                loop_kf_scale = 1.0f;
++            }
++
+             auto& associated_kfs = opr.associatedKeyFrames();
+ 
+-            // Mark points to avoid double transform
+-            torch::Tensor point_not_transformed_flags = torch::full(
+-                    {gaussians_->xyz_.size(0)}, true,
+-                    torch::TensorOptions().device(device_type_).dtype(torch::kBool));
++            // Stable id from the immutable payload; replayed LOOP payloads map
++            // back to the same coordinate version and become no-ops.
++            const unsigned long cur_map_gen = [&]() {
++                ORB_SLAM3::Map* m = pSLAM_->getAtlas()->GetCurrentMap();
++                return m ? static_cast<unsigned long>(m->GetId()) : 0UL;
++            }();
++            if (!loop_event_key::map_matches(opr.mapGen(), cur_map_gen))
++            {
++                std::cerr << "[LoopSync] REJECTED reason=map_generation payload="
++                          << opr.mapGen() << " current=" << cur_map_gen
++                          << std::endl;
++                break;
++            }
++            std::vector<std::pair<unsigned long, Eigen::Matrix4f>> key_kfs;
++            key_kfs.reserve(associated_kfs.size());
++            for (auto& kf : associated_kfs)
++                key_kfs.emplace_back(std::get<0>(kf), std::get<2>(kf).matrix());
++            const std::uint64_t source_key = loop_event_key::fingerprint(
++                opr.mapGen(), cur_map_gen, loop_kf_scale, std::move(key_kfs));
++            const auto version_it = loop_coord_event_versions_.find(source_key);
++            const unsigned long coord_evt =
++                (version_it != loop_coord_event_versions_.end())
++                    ? version_it->second
++                    : gaussians_->allocateCoordEventId();
++            if (version_it == loop_coord_event_versions_.end())
++                loop_coord_event_versions_[source_key] = coord_evt;
++            if (coord_evt <= gaussians_->lastAppliedGbaEvent())
++            {
++                std::cerr << "[LoopSync] evt=" << coord_evt
++                          << " key=" << source_key
++                          << " DUPLICATE_OR_STALE reason="
++                          << (version_it != loop_coord_event_versions_.end()
++                                  ? "replayed_payload"
++                                  : "old_version")
++                          << " last_applied="
++                          << gaussians_->lastAppliedGbaEvent() << std::endl;
++                break;
++            }
+ 
+             if (record_loop_ply_)
+                 savePly(result_dir_ / (std::to_string(getIteration()) + "_0_before_loop_correction"));
+-            
+-            int num_transformed = 0;
+-            float sumTrans = 0.0f, sumRot = 0.0f, sumScale = 0.0f;
+-            int nLargeCorr = 0;
+-            float maxTrans = 0.0f, maxRotDeg = 0.0f;
+ 
+-            // Explicit loop-correction magnitude gate (cost-only, does NOT
+-            // affect loop validity): correct Gaussians of a KF only when
+-            //   transNorm > TRANS_THRESHOLD_METERS ||
+-            //   rotationAngleRad > ROT_THRESHOLD_RAD
+-            // Defaults 0.10 m and 2 deg; env-configurable.
+-            const char* et = std::getenv("PHOTO_SLAM_GAUSS_LOOP_TRANS_M");
+-            const float gaussLoopTransThrM = (et ? std::atof(et) : 0.10f);
+-            const char* er = std::getenv("PHOTO_SLAM_GAUSS_LOOP_ROT_DEG");
+-            const float gaussLoopRotThrRad = (er ? std::atof(er) : 2.0f) * (float)M_PI / 180.0f;
+-            int nKFsTotal = 0, nKFsWithPkf = 0, nKFsCorrected = 0, nKFsSkippedByGate = 0;
++            // One entry per keyframe whose pose the loop event changed. The
++            // model uses ref_kf_id_ ownership, so every Gaussian is corrected
++            // exactly once by the KF that created it -- no visibility mask and
++            // no creation-iteration mask can leave a row behind in the old
++            // coordinate frame.
++            std::vector<std::pair<unsigned long, Sophus::SE3f>> world_deltas;
++            world_deltas.reserve(associated_kfs.size());
++
++            int nKFsTotal = 0;
++            int nKFsWithPkf = 0;
++            int nKFsNoScene = 0;
++            int nKFsPoseChanged = 0;
++            float sumTrans = 0.0f, sumRotDeg = 0.0f;
++            float maxTrans = 0.0f, maxRotDeg = 0.0f;
+ 
+-            for (auto& kf : associated_kfs) {
+-                nKFsTotal++;
+-                auto kfid = std::get<0>(kf);
++            for (auto& kf : associated_kfs)
++            {
++                ++nKFsTotal;
++                const auto kfid = std::get<0>(kf);
++                auto& pose = std::get<2>(kf);
+                 std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
+-                
+-                // Resize mask if new points added
+-                int64_t num_new_points = gaussians_->xyz_.size(0) - point_not_transformed_flags.size(0);
+-                if (num_new_points > 0)
+-                    point_not_transformed_flags = torch::cat({
+-                        point_not_transformed_flags,
+-                        torch::full({num_new_points}, true, point_not_transformed_flags.options())},
+-                        0);
++                if (!pkf)
++                {
++                    ++nKFsNoScene;
++                    continue;
++                }
+ 
+-                if (pkf) {
+-                    nKFsWithPkf++;
+-                    auto& pose = std::get<2>(kf);
+-                    
+-                    // Logic to detect large loop drift and correct geometry
+-                    Sophus::SE3f original_pose = pkf->getPosef();
+-                    Sophus::SE3f inv_pose = pose.inverse();
+-                    Sophus::SE3f diff_pose = inv_pose * original_pose;
+-
+-                    maxTrans = std::max(maxTrans, diff_pose.translation().norm());
+-                    maxRotDeg = std::max(maxRotDeg,
+-                        (float)(Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle() * 180.0 / M_PI));
+-                    
+-                    const float transNorm = diff_pose.translation().norm();
+-                    const float rotRad = (float)Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle();
+-                    if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG") && !loop_scope_available_) {
+-                        LoopScopeKf e;
+-                        e.kf_id = kfid;
+-                        e.rot_deg = rotRad * 180.0 / M_PI;
+-                        e.trans = transNorm;
+-                        e.scene_present = true;
+-                        e.delta = diff_pose;
+-                        loop_scope_kfs_.push_back(e);
+-                    }
+-                    const bool do_correct = (transNorm > gaussLoopTransThrM) || (rotRad > gaussLoopRotThrRad);
+-                    
+-                    if (do_correct) {
+-                        nKFsCorrected++;
+-                        std::cerr << "[Gaussian Mapper] Large loop correction for KF " << kfid << std::endl;
+-                        
+-                        // Calculate transformation matrix M: P_new = M * P_old
+-                        // Logic derived from: T_new_inv * P_new = T_old_inv * P_old (relative pose const)
+-                        diff_pose.translation() -= inv_pose.translation();
+-                        diff_pose.translation() *= loop_kf_scale;
+-                        diff_pose.translation() += inv_pose.translation();
+-
+-                        sumTrans += diff_pose.translation().norm();
+-                        sumRot += Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>()).angle();
+-                        sumScale += loop_kf_scale;
+-                        nLargeCorr++;
+-                        
+-                        torch::Tensor diff_pose_tensor = tensor_utils::EigenMatrix2TorchTensor(
+-                                    diff_pose.matrix(), device_type_).transpose(0, 1);
+-                        {
+-                            std::unique_lock<std::mutex> lock_render(mutex_render_);
+-                            // Apply correction to Gaussian centroids
+-                            // Note: For Line Gaussians, rotation should also be updated ideally, 
+-                            // but since they are attached to xyz, simple rigid transform of xyz is a good approx.
+-                            // Ideally we should rotate the quaternion too.
+-                            gaussians_->scaledTransformVisiblePointsOfKeyframe(
+-                                point_not_transformed_flags,
+-                                diff_pose_tensor,
+-                                pkf->world_view_transform_,
+-                                pkf->full_proj_transform_,
+-                                pkf->creation_iter_,
+-                                stableNumIterExistence(),
+-                                num_transformed,
+-                                loop_kf_scale);
+-                        }
+-                        increaseKeyframeTimesOfUse(pkf, loop_closure_increased_times_of_use_);
+-                    }
+-                    else {
+-                        nKFsSkippedByGate++;
+-                    }
+-                    
+-                    // Update KF pose
+-                    pkf->setPose(
+-                        pose.unit_quaternion().cast<double>(),
+-                        pose.translation().cast<double>());
+-                    pkf->computeTransformTensors();
++                ++nKFsWithPkf;
++                const Sophus::SE3f original_pose = pkf->getPosef();
++                // G maps OLD world coordinates to NEW world coordinates:
++                //   G = Tcw_after^-1 * Tcw_before
++                const Sophus::SE3f diff_pose = pose.inverse() * original_pose;
++                const float transNorm = diff_pose.translation().norm();
++                const float rotRad = static_cast<float>(
++                    Eigen::AngleAxisd(diff_pose.rotationMatrix().cast<double>())
++                        .angle());
++                const float rotDeg = rotRad * static_cast<float>(180.0 / M_PI);
++                maxTrans = std::max(maxTrans, transNorm);
++                maxRotDeg = std::max(maxRotDeg, rotDeg);
++                sumTrans += transNorm;
++                sumRotDeg += rotDeg;
++                if (transNorm > 1e-6f || rotRad > 1e-6f)
++                    ++nKFsPoseChanged;
++
++                if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG") && !loop_scope_available_)
++                {
++                    LoopScopeKf e;
++                    e.kf_id = kfid;
++                    e.rot_deg = rotRad * 180.0 / M_PI;
++                    e.trans = transNorm;
++                    e.scene_present = true;
++                    e.delta = diff_pose;
++                    loop_scope_kfs_.push_back(e);
+                 }
+-                else {
++                world_deltas.emplace_back(kfid, diff_pose);
++            }
++
++            if (initial_mapped_ && nKFsWithPkf == 0)
++            {
++                std::cerr << "[LoopSync] evt=" << coord_evt
++                          << " REJECTED reason=no_scene_keyframe payload_kfs="
++                          << nKFsTotal << std::endl;
++                break;
++            }
++
++            const long long count_before =
++                gaussians_ ? gaussians_->xyz_.size(0) : 0;
++
++            GaussianModelLine::GbaCorrectionStats stats;
++            if (initial_mapped_ && gaussians_ && !world_deltas.empty())
++            {
++                std::unique_lock<std::mutex> lock_render(mutex_render_);
++                stats = gaussians_->applyGbaCorrections(
++                    world_deltas, coord_evt,
++                    GaussianModelLine::GbaCorrectionMode::Full,
++                    loop_kf_scale);
++            }
++
++            const long long count_after =
++                gaussians_ ? gaussians_->xyz_.size(0) : 0;
++            TORCH_CHECK(count_after == count_before,
++                        "[LoopSync] correction changed the Gaussian count: ",
++                        count_before, " -> ", count_after);
++
++            // Scene cameras adopt the event poses only after the owned map rows
++            // have been moved. This is the coordinate-consistency contract:
++            // camera and Gaussians enter the post-event frame together.
++            for (auto& kf : associated_kfs)
++            {
++                const auto kfid = std::get<0>(kf);
++                auto& pose = std::get<2>(kf);
++                std::shared_ptr<GaussianKeyframeLine> pkf = scene_->getKeyframe(kfid);
++                if (!pkf)
++                {
+                     handleNewKeyframe_WithLine(kf);
++                    continue;
+                 }
++                const Sophus::SE3f current = pkf->getPosef();
++                const Sophus::SE3f d = pose.inverse() * current;
++                const bool changed =
++                    d.translation().norm() > 1e-6f ||
++                    Eigen::AngleAxisd(d.rotationMatrix().cast<double>())
++                            .angle() > 1e-6;
++                pkf->setPose(
++                    pose.unit_quaternion().cast<double>(),
++                    pose.translation().cast<double>());
++                pkf->computeTransformTensors();
++                if (changed)
++                    increaseKeyframeTimesOfUse(
++                        pkf, loop_closure_increased_times_of_use_);
+             }
+ 
+-            if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG")) {
++            if (std::getenv("PHOTO_SLAM_GBA_RECOVERY_DIAG"))
++            {
+                 loop_scope_available_ = !loop_scope_kfs_.empty();
+                 std::cerr << "[GbaDiag] LOOP scope captured kfs="
+                           << loop_scope_kfs_.size() << std::endl;
+@@ -7131,39 +7184,56 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+             if (record_loop_ply_)
+                 savePly(result_dir_ / (std::to_string(getIteration()) + "_1_after_loop_correction"));
+ 
+-            // Line-Gaussian loop-sync statistics.
++            // Line-Gaussian loop-sync statistics. Keep the old field names for
++            // log parsers; kfsSkippedByGate is now provably zero because the
++            // cost gate no longer decides whether the map is corrected.
+             {
+                 int lineGaussians = 0;
+                 int nonFinite = 0;
+-                int correctedLineGaussians = 0;
+-                if (gaussians_->xyz_.size(0) > 0) {
++                if (gaussians_ && gaussians_->xyz_.size(0) > 0)
++                {
+                     lineGaussians = gaussians_->is_line_.sum().item<int>();
+                     nonFinite = gaussians_->xyz_.size(0)
+                         - torch::isfinite(gaussians_->xyz_).all(1).sum().item<int>();
+-                    // Line Gaussians transformed by this loop (were in the
+-                    // not-transformed set before, now marked transformed).
+-                    if (lineGaussians > 0 && point_not_transformed_flags.size(0) == gaussians_->is_line_.size(0))
+-                        correctedLineGaussians = torch::logical_and(
+-                            gaussians_->is_line_, torch::logical_not(point_not_transformed_flags)).sum().item<int>();
+                 }
+-                const float meanT = (nLargeCorr > 0) ? (sumTrans / nLargeCorr) : 0.0f;
+-                const float meanR = (nLargeCorr > 0) ? (sumRot / nLargeCorr * 180.0 / M_PI) : 0.0f;
+-                const float meanS = (nLargeCorr > 0) ? (sumScale / nLargeCorr) : 1.0f;
++                const float meanT =
++                    (stats.moved_rows > 0)
++                        ? static_cast<float>(stats.translation_sum /
++                                             static_cast<double>(stats.moved_rows))
++                        : 0.0f;
++                const float meanR =
++                    (nKFsWithPkf > 0) ? (sumRotDeg / nKFsWithPkf) : 0.0f;
+                 std::cerr << "[LineLoop-Gaussian] candidates=" << lineGaussians
+-                          << " correctedLineGaussians=" << correctedLineGaussians
++                          << " correctedLineGaussians=" << stats.line_rows_moved
+                           << " kfsTotal=" << nKFsTotal
+                           << " kfsWithPkf=" << nKFsWithPkf
+-                          << " kfsCorrected=" << nKFsCorrected
+-                          << " kfsSkippedByGate=" << nKFsSkippedByGate
+-                          << " corrected=" << num_transformed
+-                          << " skippedBad=0 skippedNull=0 duplicateSkipped=0"
++                          << " kfsCorrected=" << stats.groups_applied
++                          << " kfsSkippedByGate=0"
++                          << " corrected=" << stats.moved_rows
++                          << " skippedBad=0"
++                          << " skippedNull=" << nKFsNoScene
++                          << " duplicateSkipped=" << stats.stale_rows
+                           << " nonFinite=" << nonFinite
+                           << " maxTranslation=" << maxTrans
+                           << " maxRotationDeg=" << maxRotDeg
+                           << " meanTranslation=" << meanT
+                           << " meanRotationDeg=" << meanR
+-                          << " meanScaleRatio=" << meanS << std::endl;
++                          << " meanScaleRatio=" << loop_kf_scale << std::endl;
++                std::cerr << "[LoopSync] evt=" << coord_evt
++                          << " kfs=" << world_deltas.size()
++                          << " kfsPoseChanged=" << nKFsPoseChanged
++                          << " noScene=" << nKFsNoScene
++                          << " movedRows=" << stats.moved_rows
++                          << " nonzeroMovedRows=" << stats.nonzero_moved_rows
++                          << " lineRowsMoved=" << stats.line_rows_moved
++                          << " unassignedRows=" << stats.unassigned_rows
++                          << " missingEventRows=" << stats.missing_event_rows
++                          << " staleRows=" << stats.stale_rows
++                          << " scale=" << loop_kf_scale
++                          << " count=" << count_before << "->" << count_after
++                          << std::endl;
+             }
++            last_applied_gba_event_ = coord_evt;
+ 
+             // Add new map points after loop closure
+             auto& associated_points = opr.associatedMapPoints();
+@@ -7191,8 +7261,11 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+             // The callback is a pure correction: it must never seed, densify,
+             // clone, split or prune. The row count is asserted below.
+             const unsigned long evt = opr.eventId();
+-            const unsigned long prev_evt = gaussians_
+-                ? gaussians_->lastAppliedGbaEvent() : last_applied_gba_event_;
++            // Payload duplicate/stale rejection is separate from the model's
++            // model-local coordinate sequence: LOOP events also consume a
++            // coordinate version, so lastAppliedGbaEvent() is no longer the
++            // ORB-SLAM3 payload id.
++            const unsigned long prev_evt = last_gba_payload_event_;
+             const long long count_before =
+                 gaussians_ ? gaussians_->xyz_.size(0) : 0;
+ 
+@@ -7237,6 +7310,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+                 break;
+             }
+ 
++            const unsigned long coord_evt =
++                gaussians_->allocateCoordEventId();
+             int n_in_scene = 0, n_scene_missing = 0;
+             double max_pose_mismatch = 0.0;
+             std::vector<std::pair<unsigned long, Sophus::SE3f>> deltas;
+@@ -7301,7 +7376,10 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+                              "(PHOTO_SLAM_GBA_APPLY_CORRECTION=1)"
+                           << std::endl;
+                 std::unique_lock<std::mutex> lock_render(mutex_render_);
+-                stats = gaussians_->applyGbaCorrections(deltas, evt);
++                stats = gaussians_->applyGbaCorrections(
++                    deltas, coord_evt,
++                    GaussianModelLine::GbaCorrectionMode::Full,
++                    1.0f);
+             }
+ 
+             // Scene keyframes adopt the final GBA poses (training views).
+@@ -7321,7 +7399,8 @@ void GaussianMapperLine::combineMappingOperations_withLine()
+             TORCH_CHECK(count_after == count_before,
+                         "[GBA-Apply] correction changed the Gaussian count: ",
+                         count_before, " -> ", count_after);
+-            last_applied_gba_event_ = evt;
++            last_gba_payload_event_ = evt;
++            last_applied_gba_event_ = coord_evt;
+ 
+             // Explain unassigned/missing counts instead of guessing anchors.
+             long long ref_in_event = 0, ref_scene_not_event = 0;
+diff --git a/src/gaussian_model_line.cpp b/src/gaussian_model_line.cpp
+index df0949e..f91e386 100644
+--- a/src/gaussian_model_line.cpp
++++ b/src/gaussian_model_line.cpp
+@@ -602,6 +602,7 @@ void GaussianModelLine::createFromPcd(
+     this->coord_event_id_ = torch::zeros(
+         {num_points}, torch::TensorOptions().dtype(torch::kLong).device(device_type_));
+     this->last_applied_gba_event_ = 0;
++    this->coord_event_seq_ = 0;
+     long long n_missing_ref = 0;
+     for (long long v : initial_ref_kf_ids) if (v < 0) ++n_missing_ref;
+     if (n_missing_ref > 0)
+@@ -1477,6 +1478,14 @@ void GaussianModelLine::ensureGbaMetadata()
+         coord_event_id_ = coord_event_id_.to(device_type_).to(torch::kLong).contiguous();
+ }
+ 
++unsigned long GaussianModelLine::allocateCoordEventId()
++{
++    ensureGbaMetadata();
++    if (coord_event_seq_ < last_applied_gba_event_)
++        coord_event_seq_ = last_applied_gba_event_;
++    return ++coord_event_seq_;
++}
++
+ namespace { void fgmHashTensor(const torch::Tensor& t, std::uint64_t& h); }
+ 
+ std::string GaussianModelLine::adamFingerprint()
+@@ -1511,12 +1520,16 @@ std::string GaussianModelLine::adamFingerprint()
+ 
+ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+     const std::vector<std::pair<unsigned long, Sophus::SE3f>>& world_deltas,
+-    unsigned long event_id, GbaCorrectionMode mode)
++    unsigned long event_id, GbaCorrectionMode mode, float world_scale)
+ {
+     GbaCorrectionStats st;
+     if (!xyz_.defined() || xyz_.size(0) == 0)
+         return st;
+ 
++    const float ws =
++        (std::isfinite(world_scale) && world_scale > 1e-6f) ? world_scale : 1.0f;
++    const bool do_scale = std::abs(ws - 1.0f) > 1e-6f;
++
+     torch::NoGradGuard no_grad;
+     ensureGbaMetadata();
+     const int64_t N = xyz_.size(0);
+@@ -1563,9 +1576,10 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             .clone().to(device_type_);
+         torch::Tensor sel = torch::nonzero(active).flatten();
+ 
+-        // Centres and world anchors: p' = R p + t.
++        // Centres and world anchors: p' = ws * (R p) + t.
+         auto rigid_move = [&](torch::Tensor& dst) {
+-            torch::Tensor moved = torch::matmul(dst, R.transpose(0, 1)) + t;
++            torch::Tensor moved =
++                torch::matmul(dst, R.transpose(0, 1)) * ws + t;
+             dst.index_copy_(0, sel, moved.index_select(0, sel));
+         };
+         {
+@@ -1573,7 +1587,7 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             // "processed" and "non-zero displacement" are separate numbers.
+             torch::Tensor before = xyz_.index_select(0, sel);
+             torch::Tensor after =
+-                torch::matmul(before, R.transpose(0, 1)) + t;
++                torch::matmul(before, R.transpose(0, 1)) * ws + t;
+             torch::Tensor disp = (after - before).norm(2, 1);
+             st.nonzero_moved_rows += static_cast<long long>(
+                 disp.gt(1e-6f).sum().item<std::int64_t>());
+@@ -1610,7 +1624,8 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             rotation_.index_copy_(0, sel, qn.index_select(0, sel));
+         }
+ 
+-        // World line direction: d' = R d (rotation only, no translation).
++        // World line direction: d' = R d (rotation only, no translation and
++        // no uniform scale: a direction is scale-invariant).
+         if (have_line)
+         {
+             torch::Tensor line_active = torch::logical_and(active, is_line_);
+@@ -1627,10 +1642,30 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+             }
+         }
+ 
++        // Covariance under a uniform scale: scaling_ stores log-standard
++        // deviations, so s * Sigma -> scaling_ + log(s) on the selected rows.
++        // The quaternion is scale-invariant and was already rotated above.
++        if (do_scale && scaling_.defined() && scaling_.size(0) == N)
++        {
++            torch::Tensor scaled = scaling_.index_select(0, sel) +
++                                  std::log(ws);
++            if (optimizer_)
++            {
++                torch::Tensor next = scaling_.clone();
++                next.index_copy_(0, sel, scaled);
++                scaling_ = replaceTensorToOptimizer(next, 4);
++                Tensor_vec_scaling_ = {scaling_};
++            }
++            else
++            {
++                scaling_.index_copy_(0, sel, scaled);
++            }
++        }
++
+         // Adam policy: the xyz first moment is a world-space vector and is
+-        // rotated with the geometry. The second moment is an axis-wise positive
+-        // quantity; it is left unchanged (documented approximation). Other
+-        // parameter groups are unaffected.
++        // transformed with the geometry. The second moment is an axis-wise
++        // positive quantity; it is left unchanged (documented approximation).
++        // Other parameter groups are unaffected.
+         if (optimizer_)
+         {
+             auto& xyz_param = optimizer_->param_groups()[0].params()[0];
+@@ -1643,7 +1678,8 @@ GaussianModelLine::GbaCorrectionStats GaussianModelLine::applyGbaCorrections(
+                 if (adam.exp_avg().defined() && adam.exp_avg().size(0) == N)
+                 {
+                     torch::Tensor ea = adam.exp_avg();
+-                    torch::Tensor rot = torch::matmul(ea, R.transpose(0, 1));
++                    torch::Tensor rot =
++                        torch::matmul(ea, R.transpose(0, 1)) * ws;
+                     ea.index_copy_(0, sel, rot.index_select(0, sel));
+                     adam.exp_avg(ea);
+                 }
+@@ -1834,15 +1870,72 @@ static bool runGbaApplyContractTest()
+                     (vec(m.xyz_, 0) - p0ee).norm() < 1e-5f &&
+                     m.lastAppliedGbaEvent() == 2;
+ 
++    // Event 3: uniform Sim(3) scale on the kf-11 row. It must scale both the
++    // centre and the world anchor, add log(s) to the log-scale, and leave the
++    // other keyframe's rows untouched.
++    const Sophus::SE3f G3(Eigen::Matrix3f::Identity(),
++                          Eigen::Vector3f(0.f, 0.f, 0.5f));
++    std::vector<std::pair<unsigned long, Sophus::SE3f>> d3{{11u, G3}};
++    const float world_scale = 2.0f;
++    auto st3 = m.applyGbaCorrections(
++        d3, 3, GaussianModelLine::GbaCorrectionMode::Full, world_scale);
++    Eigen::Vector3f p2(0.f, 1.f, 2.f);
++    Eigen::Vector3f p2e = world_scale * p2 + G3.translation();
++    Eigen::Vector3f a2e = world_scale * p2 + G3.translation();
++    Eigen::Vector3f s2a(get(m.scaling_, 2, 0), get(m.scaling_, 2, 1),
++                        get(m.scaling_, 2, 2));
++    bool scale_apply_ok =
++        st3.moved_rows == 1 &&
++        (vec(m.xyz_, 2) - p2e).norm() < 1e-5f &&
++        (vec(m.xyz_init_, 2) - a2e).norm() < 1e-5f &&
++        (s2a - (Eigen::Vector3f(0.2f, 0.2f, 0.2f).array().log() +
++                std::log(world_scale)).matrix()).norm() < 1e-5f &&
++        (vec(m.xyz_, 0) - p0ee).norm() < 1e-6f;
++
++    // New rows created after event 3 must inherit event version 3. Replaying
++    // event 1 must not move them; a genuinely newer event 4 must.
++    torch::Tensor nx = torch::tensor({{4.f, 5.f, 6.f}}, fo);
++    torch::Tensor nfdc = torch::zeros({1, 1, 3}, fo);
++    torch::Tensor nfrest = torch::zeros({1, 0, 3}, fo);
++    torch::Tensor nopa = torch::zeros({1, 1}, fo);
++    torch::Tensor nsca = torch::log(torch::tensor({{0.1f, 0.1f, 0.1f}}, fo));
++    torch::Tensor nrot = torch::tensor({{1.f, 0.f, 0.f, 0.f}}, fo);
++    torch::Tensor nexi = torch::zeros(
++        {1}, torch::TensorOptions().dtype(torch::kInt32));
++    torch::Tensor nline = torch::zeros(
++        {1}, torch::TensorOptions().dtype(torch::kBool));
++    torch::Tensor ndir = torch::tensor({{1.f, 0.f, 0.f}}, fo);
++    torch::Tensor ninit = nx.clone();
++    torch::Tensor nref = torch::tensor(
++        {10}, torch::TensorOptions().dtype(torch::kLong));
++    const int64_t new_idx = m.xyz_.size(0);
++    m.densificationPostfixWithLineAwareness(
++        nx, nfdc, nfrest, nopa, nsca, nrot, nexi, nline, ndir, ninit, nref);
++    const long long new_stamp =
++        m.coord_event_id_.index({new_idx}).item<std::int64_t>();
++    const bool stamp_ok = new_stamp == 3 &&
++                          m.lastAppliedGbaEvent() == 3;
++    const Eigen::Vector3f np_before = vec(m.xyz_, new_idx);
++    auto st_replay = m.applyGbaCorrections(d1, 1);
++    const bool new_replay_ok =
++        st_replay.moved_rows == 0 &&
++        (vec(m.xyz_, new_idx) - np_before).norm() < 1e-6f;
++    auto st_new = m.applyGbaCorrections(d1, 4);
++    Eigen::Vector3f np_after = Rz * np_before + tG;
++    const bool new_event4_ok =
++        st_new.moved_rows >= 1 &&
++        (vec(m.xyz_, new_idx) - np_after).norm() < 1e-5f;
++
+     const bool pass = centre_ok && dir_ok && anchor_ok && residual_ok &&
+                       rows_unchanged && scale_ok && cov_ok && cache_ok &&
+-                      counts_ok && dup_ok && order_ok;
++                      counts_ok && dup_ok && order_ok && scale_apply_ok &&
++                      stamp_ok && new_replay_ok && new_event4_ok;
+     printf("[GbaContract] centre=%d dir=%d anchor=%d residual=%d rows=%d "
+            "scale=%d covariance=%d cache=%d counts=%d duplicate=%d order=%d "
+-           ": %s\n",
++           "scale_apply=%d stamp=%d new_replay=%d new_event=%d : %s\n",
+            centre_ok, dir_ok, anchor_ok, residual_ok, rows_unchanged, scale_ok,
+-           cov_ok, cache_ok, counts_ok, dup_ok, order_ok,
+-           pass ? "PASS" : "FAIL");
++           cov_ok, cache_ok, counts_ok, dup_ok, order_ok, scale_apply_ok,
++           stamp_ok, new_replay_ok, new_event4_ok, pass ? "PASS" : "FAIL");
+     fflush(stdout);
+     return pass;
+ }
+@@ -2228,9 +2321,20 @@ torch::Tensor GaussianModelLine::replaceTensorToOptimizer(torch::Tensor& tensor,
+     auto& state = optimizer_->state();
+     //auto key = c10::guts::to_string(param.unsafeGetTensorImpl());
+     auto key = param.unsafeGetTensorImpl();
+-    auto& stored_state = static_cast<torch::optim::AdamParamState&>(*state[key]);
+     auto new_state = std::make_unique<torch::optim::AdamParamState>();
+-    new_state->step(stored_state.step());
++    auto state_it = state.find(key);
++    if (state_it != state.end())
++    {
++        auto& stored_state =
++            static_cast<torch::optim::AdamParamState&>(*state_it->second);
++        new_state->step(stored_state.step());
++    }
++    else
++    {
++        // A correction can run before this parameter group has ever produced
++        // an Adam state (e.g. a scale-changing LOOP before the first step).
++        new_state->step(0);
++    }
+     new_state->exp_avg(torch::zeros_like(tensor));
+     new_state->exp_avg_sq(torch::zeros_like(tensor));
+     // new_state->max_exp_avg_sq(stored_state.max_exp_avg_sq().clone()); // needed only when options.amsgrad(true), which is false by default
+diff --git a/tests/test_loop_coord_sync.cpp b/tests/test_loop_coord_sync.cpp
+index e69de29..ca186e1 100644
+--- a/tests/test_loop_coord_sync.cpp
++++ b/tests/test_loop_coord_sync.cpp
+@@ -0,0 +1,45 @@
++// Standalone runner for the CPU rigid/sim(3) correction and LOOP payload-key
++// contracts. No dataset, CUDA context, or SLAM startup needed.
++#include <cstdio>
++#include <utility>
++#include <vector>
++
++#include <Eigen/Core>
++
++#include "include/loop_event_key.h"
++
++bool runRigidCorrectionContractTest();
++
++static bool runLoopKeyContractTest()
++{
++    Eigen::Matrix4f A = Eigen::Matrix4f::Identity();
++    A(0, 3) = 0.1f;
++    Eigen::Matrix4f B = Eigen::Matrix4f::Identity();
++    B(1, 3) = 0.2f;
++
++    std::vector<std::pair<unsigned long, Eigen::Matrix4f>> k1{
++        {10u, A}, {20u, B}, {30u, A}};
++    std::vector<std::pair<unsigned long, Eigen::Matrix4f>> k2{
++        {30u, A}, {10u, A}, {20u, B}};
++
++    const std::uint64_t a = loop_event_key::fingerprint(0u, 0u, 1.0f, k1);
++    const std::uint64_t b = loop_event_key::fingerprint(0u, 0u, 1.0f, k2);
++    const std::uint64_t c = loop_event_key::fingerprint(0u, 1u, 1.0f, k1);
++    const bool order_ok = (a == b);
++    const bool map_ok = (a != c);
++    const bool match_ok = loop_event_key::map_matches(0u, 7u) &&
++                          !loop_event_key::map_matches(1u, 7u) &&
++                          loop_event_key::map_matches(7u, 7u);
++    std::printf("[LoopKeyContract] order=%d map=%d match=%d : %s\n",
++                order_ok ? 1 : 0, map_ok ? 1 : 0, match_ok ? 1 : 0,
++                (order_ok && map_ok && match_ok) ? "PASS" : "FAIL");
++    return order_ok && map_ok && match_ok;
++}
++
++int main()
++{
++    const bool pass = runRigidCorrectionContractTest() &&
++                      runLoopKeyContractTest();
++    std::printf("[test_loop_coord_sync] %s\n", pass ? "PASS" : "FAIL");
++    return pass ? 0 : 1;
++}

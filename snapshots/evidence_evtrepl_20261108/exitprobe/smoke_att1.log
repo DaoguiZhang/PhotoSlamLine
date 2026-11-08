@@ -1,0 +1,4070 @@
+warning: Error disabling address space randomization: Operation not permitted
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+[New Thread 0x7c9a985ff000 (LWP 342030)]
+CUDA available! Training on GPU.
+
+ORB-SLAM3 Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+ORB-SLAM2 Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+This program comes with ABSOLUTELY NO WARRANTY;
+This is free software, and you are welcome to redistribute it
+under certain conditions. See LICENSE.txt.
+
+Input sensor was set to: Monocular
+Loading settings from /workspace/code/PSL-replay/cfg/ORB_SLAM3/Monocular/Replica/office0.yaml
+	-Loaded camera 1
+Camera.newHeight optional parameter does not exist...
+Camera.newWidth optional parameter does not exist...
+	-Loaded image info
+	-Loaded ORB settings
+Line.SampleStep optional parameter does not exist...
+Line.ViewWeight optional parameter does not exist...
+Line.Sigma optional parameter does not exist...
+Line.TopK optional parameter does not exist...
+	-Loaded LSD sampling settings
+Viewer.imageViewScale optional parameter does not exist...
+	-Loaded viewer settings
+System.LoadAtlasFromFile optional parameter does not exist...
+System.SaveAtlasToFile optional parameter does not exist...
+	-Loaded Atlas settings
+System.thFarPoints optional parameter does not exist...
+	-Loaded misc parameters
+----------------------------------
+SLAM settings: 
+	-Camera 1 parameters (Pinhole): [ 600 600 599.5 339.5 ]
+	-Camera 1 distortion parameters: [  0.000238406 -0.000314798 -7.39231e-05 -2.7716e-05 0 ]
+	-Original image size: [ 1200 , 680 ]
+	-Current image size: [ 1200 , 680 ]
+	-Sequence FPS: 30
+	-Features per image: 2000
+	-ORB scale factor: 1.2
+	-ORB number of scales: 8
+	-Initial FAST threshold: 20
+	-Min FAST threshold: 7
+	-Line sampling step: 0.1
+	-Line view weight: 2
+	-Line sigma: 3
+	-Line Top-K: 2
+
+
+Loading ORB Vocabulary. This could take a while...
+Vocabulary loaded!
+
+Initialization of Atlas from scratch 
+Creation of new map with id: 0
+Creation of new map with last KF id: 0
+Seq. Name: 
+-------------------newParameterLoader--------------------------
+------------------------- mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR-----------------------  
+
+LSD Extractor Parameters(to do next): 
+	-Sampling step: 0.1
+	-View weight: 2
+	-Sigma: 3
+	-Top-K: 2
+There are 1 cameras in the atlas
+Camera 0 is pinhole
+[LineMode] PHOTO_SLAM_LINE_MODE=2 (0=point-only, 1=line-frontend-only, 2=full point-line) | PO_LINE=1 LBA_LINE=1 | LBA_W=1 LBA_TAU=9 LBA_DELTA=2.44765 LBA_SIGMA_PX=1 | DIAG_LINE_EDGES=0 DIAG_MONO_INIT=0
+[New Thread 0x7c9a9530b000 (LWP 342059)]
+[New Thread 0x7c9a94b0a000 (LWP 342060)]
+[Gaussian Mapper]CUDA available! Training on GPU.
+[Gaussian Mapper]Reading parameters from "/workspace/code/PSL-replay/cfg/gaussian_mapper/Monocular/Replica/replica_mono.yaml"
+[New Thread 0x7c987d2a2000 (LWP 342061)]
+[New Thread 0x7c987caa1000 (LWP 342062)]
+[New Thread 0x7c9853fff000 (LWP 342063)]
+[New Thread 0x7c98534e1000 (LWP 342064)]
+[New Thread 0x7c9852ce0000 (LWP 342065)]
+[New Thread 0x7c98524df000 (LWP 342066)]
+[New Thread 0x7c9851cde000 (LWP 342067)]
+[New Thread 0x7c98514dd000 (LWP 342068)]
+[New Thread 0x7c9850cdc000 (LWP 342069)]
+[New Thread 0x7c983bfff000 (LWP 342070)]
+[New Thread 0x7c983b7fe000 (LWP 342071)]
+[New Thread 0x7c983affd000 (LWP 342072)]
+[New Thread 0x7c983a7fc000 (LWP 342073)]
+[New Thread 0x7c9839ffb000 (LWP 342074)]
+[New Thread 0x7c98397fa000 (LWP 342075)]
+[New Thread 0x7c9838ff9000 (LWP 342076)]
+[New Thread 0x7c9817fff000 (LWP 342077)]
+[New Thread 0x7c98177fe000 (LWP 342078)]
+[New Thread 0x7c9816ffd000 (LWP 342079)]
+[New Thread 0x7c98167fc000 (LWP 342080)]
+[New Thread 0x7c9815ffb000 (LWP 342081)]
+[New Thread 0x7c98157fa000 (LWP 342082)]
+[New Thread 0x7c9814ff9000 (LWP 342083)]
+[New Thread 0x7c97f7fff000 (LWP 342084)]
+[New Thread 0x7c97f77fe000 (LWP 342085)]
+[New Thread 0x7c97f6ffd000 (LWP 342086)]
+[New Thread 0x7c97f67fc000 (LWP 342087)]
+[New Thread 0x7c97f554e000 (LWP 342088)]
+[New Thread 0x7c97f4d4d000 (LWP 342089)]
+[New Thread 0x7c97e7fff000 (LWP 342090)]
+[New Thread 0x7c97e77fe000 (LWP 342091)]
+[New Thread 0x7c97e6ffd000 (LWP 342092)]
+[New Thread 0x7c97e67fc000 (LWP 342093)]
+[New Thread 0x7c97e5ffb000 (LWP 342094)]
+[New Thread 0x7c97e57fa000 (LWP 342095)]
+[New Thread 0x7c97e4ff9000 (LWP 342096)]
+[New Thread 0x7c97bffff000 (LWP 342097)]
+[New Thread 0x7c97bf7fe000 (LWP 342098)]
+[New Thread 0x7c97beffd000 (LWP 342099)]
+[New Thread 0x7c97be7fc000 (LWP 342100)]
+[New Thread 0x7c97bdffb000 (LWP 342101)]
+[New Thread 0x7c97bd7fa000 (LWP 342102)]
+[New Thread 0x7c97bcff9000 (LWP 342103)]
+[New Thread 0x7c97bc7f8000 (LWP 342104)]
+[New Thread 0x7c97bbff7000 (LWP 342105)]
+[New Thread 0x7c97bb7f6000 (LWP 342106)]
+[New Thread 0x7c97baff5000 (LWP 342107)]
+[New Thread 0x7c97ba7f4000 (LWP 342108)]
+[New Thread 0x7c97b9ff3000 (LWP 342109)]
+[New Thread 0x7c97b97f2000 (LWP 342110)]
+
+-------
+Start processing sequence ...
+Images in the sequence: 2000
+
+Frame id: 0
+----------MonocularInitializationWithLine ---------- 
+Frame id: 1
+----------MonocularInitializationWithLine ---------- 
+[New Thread 0x7c97b8ff1000 (LWP 342111)]
+[New Thread 0x7c97b87f0000 (LWP 342112)]
+[Thread 0x7c97b8ff1000 (LWP 342111) exited]
+[Thread 0x7c97b87f0000 (LWP 342112) exited]
+Frame id: 2
+----------MonocularInitializationWithLine ---------- 
+[New Thread 0x7c97b87f0000 (LWP 342114)]
+[New Thread 0x7c97b8ff1000 (LWP 342115)]
+[Thread 0x7c97b8ff1000 (LWP 342115) exited]
+[Thread 0x7c97b87f0000 (LWP 342114) exited]
+Frame id: 3
+----------MonocularInitializationWithLine ---------- 
+[New Thread 0x7c97b8ff1000 (LWP 342118)]
+[New Thread 0x7c97b87f0000 (LWP 342119)]
+[Thread 0x7c97b87f0000 (LWP 342119) exited]
+[Thread 0x7c97b8ff1000 (LWP 342118) exited]
+Frame id: 4
+----------MonocularInitializationWithLine ---------- 
+[New Thread 0x7c97b87f0000 (LWP 342123)]
+[New Thread 0x7c97b8ff1000 (LWP 342124)]
+[Thread 0x7c97b8ff1000 (LWP 342124) exited]
+[Thread 0x7c97b87f0000 (LWP 342123) exited]
+First KF:0; Map init KF:0
+New Map created with 473 points and 29 lines.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 75 -> 75
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 1
+ created_map_line_num: 58
+[LocalMapping Fuse] Candidates: 29 | Fused: 11 | KF Lines: 78 -> 78
+Frame id: 5
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 2
+============= [LIVE SNAKE RADAR] =============
+  - Frame ID: 2
+  - Matches Vector Size: 77
+  - Non-Null Pointers: 0
+  - Bad Lines Flagged: 0
+===============================================
+[ExportMapPointsWithCameraAxesOBJKeyFrame] Exported 3796 map points and camera axes to 2_Keyframe_MapPoints_before.obj
+[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported 0 map lines and camera axes to 2_Keyframe_Maplines_before.obj
+[ExportMapKeyFrameCameraPose] Export successful to 2_Keyframe_Camera_before.txt
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 6
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 838, 28, 2399
+[ExportMapPointsWithCameraAxesOBJKeyFrame] Exported 3796 map points and camera axes to 2_Keyframe_MapPoints_after.obj
+[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported 0 map lines and camera axes to 2_Keyframe_Maplines_after.obj
+[ExportMapKeyFrameCameraPose] Export successful to 2_Keyframe_Camera_after.txt
+[MapLineCulling] KF2 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 56
+[LocalMapping Fuse] Candidates: 28 | Fused: 11 | KF Lines: 77 -> 77
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 7
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 3
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 8
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1031, 28, 3736
+[MapLineCulling] KF3 | Bad:17 | LowRatio:0 | LowObs:17 | Graduated(Saved):0
+ created_map_line_num: 22
+[LocalMapping Fuse] Candidates: 11 | Fused: 10 | KF Lines: 77 -> 77
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 9
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 4
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 10
+Frame id: 11
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1142, 10, 4913
+[MapLineCulling] KF4 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):20
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 10 | Fused: 8 | KF Lines: 74 -> 74
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 12
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 5
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 13
+Frame id: 14
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1313, 10, 6526
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 11 | Fused: 7 | KF Lines: 71 -> 71
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 15
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 6
+Frame id: 16
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 17
+Frame id: 18
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1492, 11, 8384
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 11 | Fused: 8 | KF Lines: 76 -> 76
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 19
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 7
+Frame id: 20
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 21
+Frame id: 22
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1649, 11, 10356
+[MapLineCulling] KF7 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 10 | Fused: 8 | KF Lines: 72 -> 72
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 23
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 8
+Frame id: 24
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 25
+Frame id: 26
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1881, 10, 11526
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 12 | Fused: 7 | KF Lines: 74 -> 74
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 27
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 9
+Frame id: 28
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 29
+Frame id: 30
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2355, 12, 13890
+[MapLineCulling] KF9 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 13 | Fused: 7 | KF Lines: 77 -> 77
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 31
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 10
+Frame id: 32
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 33
+Frame id: 34
+Frame id: 35
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2684, 13, 16994
+[MapLineCulling] KF10 | Bad:0 | LowRatio:1 | LowObs:1 | Graduated(Saved):0
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 14 | Fused: 8 | KF Lines: 76 -> 76
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 36
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 11
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 37
+Frame id: 38
+Frame id: 39
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2564, 14, 15777
+[MapLineCulling] KF11 | Bad:0 | LowRatio:3 | LowObs:1 | Graduated(Saved):0
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 15 | Fused: 9 | KF Lines: 79 -> 79
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 40
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 12
+Frame id: 41
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 42
+Frame id: 43
+Frame id: 44
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2541, 15, 16662
+[MapLineCulling] KF12 | Bad:0 | LowRatio:2 | LowObs:1 | Graduated(Saved):0
+ created_map_line_num: 23
+[LocalMapping Fuse] Candidates: 30 | Fused: 10 | KF Lines: 81 -> 81
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 45
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 13
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 46
+Frame id: 47
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2465, 28, 15736
+Frame id: 48
+[MapLineCulling] KF13 | Bad:2 | LowRatio:0 | LowObs:3 | Graduated(Saved):0
+ created_map_line_num: 27
+[LocalMapping Fuse] Candidates: 32 | Fused: 8 | KF Lines: 76 -> 76
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 49
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 14
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 50
+Frame id: 51
+Frame id: 52
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2452, 31, 16579
+[MapLineCulling] KF14 | Bad:2 | LowRatio:7 | LowObs:11 | Graduated(Saved):0
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 15 | Fused: 6 | KF Lines: 82 -> 82
+Frame id: 53
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 15
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 54
+Frame id: 55
+Frame id: 56
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2416, 14, 15725
+[MapLineCulling] KF15 | Bad:1 | LowRatio:0 | LowObs:6 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 11 | Fused: 7 | KF Lines: 75 -> 75
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 57
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 16
+Frame id: 58
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 59
+Frame id: 60
+Frame id: 61
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2460, 10, 16710
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 17 | Fused: 8 | KF Lines: 82 -> 82
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 62
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 17
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 63
+Frame id: 64
+Frame id: 65
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2486, 17, 17484
+[MapLineCulling] KF17 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 16 | Fused: 7 | KF Lines: 83 -> 83
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 66
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 18
+Frame id: 67
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 68
+Frame id: 69
+Frame id: 70
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2486, 16, 18206
+[MapLineCulling] KF18 | Bad:0 | LowRatio:0 | LowObs:4 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 12 | Fused: 5 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 71
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 19
+Frame id: 72
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 73
+Frame id: 74
+Frame id: 75
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2487, 12, 17802
+[MapLineCulling] KF19 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 5 | KF Lines: 87 -> 87
+Frame id: 76
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 20
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 77
+Frame id: 78
+Frame id: 79
+Frame id: 80
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2557, 12, 18596
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 4 | KF Lines: 101 -> 101
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 81
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 21
+Frame id: 82
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 83
+Frame id: 84
+Frame id: 85
+Frame id: 86
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2608, 12, 19292
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 3 | KF Lines: 112 -> 112
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 87
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 22
+Frame id: 88
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 89
+Frame id: 90
+Frame id: 91
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2623, 12, 19858
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 2 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 92
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 23
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 93
+Frame id: 94
+Frame id: 95
+Frame id: 96
+Frame id: 97
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2585, 12, 19122
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 87 -> 87
+Frame id: 98
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 24
+Frame id: 99
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 100
+Frame id: 101
+Frame id: 102
+Frame id: 103
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2962, 12, 20710
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 91 -> 91
+Frame id: 104
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 25
+Frame id: 105
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 106
+Frame id: 107
+Frame id: 108
+Frame id: 109
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3190, 12, 22022
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 88 -> 88
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 110
+Frame id: 111
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 26
+Frame id: 112
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 113
+Frame id: 114
+Frame id: 115
+Frame id: 116
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3354, 12, 23187
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 2 | KF Lines: 91 -> 91
+Frame id: 117
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 27
+Frame id: 118
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 119
+Frame id: 120
+Frame id: 121
+Frame id: 122
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3419, 12, 23199
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 95 -> 95
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 123
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 28
+Frame id: 124
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 125
+Frame id: 126
+Frame id: 127
+Frame id: 128
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3462, 12, 24110
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 90 -> 90
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 129
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 29
+Frame id: 130
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 131
+Frame id: 132
+Frame id: 133
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3427, 12, 23853
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 87 -> 87
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 134
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 30
+Frame id: 135
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 136
+Frame id: 137
+Frame id: 138
+Frame id: 139
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3467, 12, 24734
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 77 -> 77
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 140
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 31
+Frame id: 141
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 142
+Frame id: 143
+Frame id: 144
+Frame id: 145
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3539, 12, 25640
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 85 -> 85
+Frame id: 146
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 32
+Frame id: 147
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 148
+Frame id: 149
+Frame id: 150
+Frame id: 151
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3570, 12, 25524
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 83 -> 83
+Frame id: 152
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 33
+Frame id: 153
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 154
+Frame id: 155
+Frame id: 156
+Frame id: 157
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3636, 12, 26446
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 84 -> 84
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 158
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 34
+Frame id: 159
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 160
+Frame id: 161
+Frame id: 162
+Frame id: 163
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3712, 12, 27455
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 92 -> 92
+Frame id: 164
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 35
+Frame id: 165
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 166
+Frame id: 167
+Frame id: 168
+Frame id: 169
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3798, 12, 28495
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 1 | KF Lines: 78 -> 78
+Frame id: 170
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 36
+Frame id: 171
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 172
+Frame id: 173
+Frame id: 174
+Frame id: 175
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3843, 12, 28570
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 88 -> 88
+Frame id: 176
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 37
+Frame id: 177
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 178
+Frame id: 179
+Frame id: 180
+Frame id: 181
+Frame id: 182
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3902, 12, 29577
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 87 -> 87
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 183
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 38
+Frame id: 184
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 185
+Frame id: 186
+Frame id: 187
+Frame id: 188
+Frame id: 189
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4040, 12, 30787
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 2 | KF Lines: 106 -> 106
+Frame id: 190
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 39
+Frame id: 191
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 192
+Frame id: 193
+Frame id: 194
+Frame id: 195
+Frame id: 196
+Frame id: 197
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4015, 12, 30428
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 97 -> 97
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 198
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 40
+Frame id: 199
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 200
+Frame id: 201
+Frame id: 202
+Frame id: 203
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3257, 6, 26990
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 204
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 41
+Frame id: 205
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 206
+Frame id: 207
+Frame id: 208
+Frame id: 209
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3115, 6, 26423
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 9 | Fused: 0 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 210
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 42
+Frame id: 211
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 212
+Frame id: 213
+Frame id: 214
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2900, 5, 23987
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 9 | Fused: 0 | KF Lines: 77 -> 77
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 215
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 43
+Frame id: 216
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 217
+Frame id: 218
+Frame id: 219
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2968, 5, 24892
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 6 | Fused: 0 | KF Lines: 61 -> 61
+Frame id: 220
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 44
+Frame id: 221
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 222
+Frame id: 223
+Frame id: 224
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3015, 5, 24699
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 5 | Fused: 0 | KF Lines: 56 -> 56
+Frame id: 225
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 45
+Frame id: 226
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 227
+Frame id: 228
+Frame id: 229
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3113, 5, 25684
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 5 | Fused: 0 | KF Lines: 52 -> 52
+Frame id: 230
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 46
+Frame id: 231
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 232
+Frame id: 233
+Frame id: 234
+Frame id: 235
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3187, 5, 26581
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 5 | Fused: 0 | KF Lines: 46 -> 46
+Frame id: 236
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 47
+Frame id: 237
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 238
+Frame id: 239
+Frame id: 240
+Frame id: 241
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3280, 5, 27557
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 5 | Fused: 0 | KF Lines: 52 -> 52
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 242
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 48
+Frame id: 243
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 244
+Frame id: 245
+Frame id: 246
+Frame id: 247
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3342, 4, 28161
+Frame id: 248
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 5 | Fused: 0 | KF Lines: 43 -> 43
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 249
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 49
+Frame id: 250
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 251
+Frame id: 252
+Frame id: 253
+Frame id: 254
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3384, 4, 27417
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 4 | Fused: 0 | KF Lines: 37 -> 37
+Frame id: 255
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 50
+Frame id: 256
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 257
+Frame id: 258
+Frame id: 259
+Frame id: 260
+Frame id: 261
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3507, 4, 28422
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 4 | Fused: 0 | KF Lines: 37 -> 37
+Frame id: 262
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 51
+Frame id: 263
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 264
+Frame id: 265
+Frame id: 266
+Frame id: 267
+Frame id: 268
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3567, 3, 28820
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 4 | Fused: 0 | KF Lines: 27 -> 27
+Frame id: 269
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 52
+Frame id: 270
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 271
+Frame id: 272
+Frame id: 273
+Frame id: 274
+Frame id: 275
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3474, 3, 28686
+Frame id: 276
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 4 | Fused: 0 | KF Lines: 26 -> 26
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 277
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 53
+Frame id: 278
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 279
+Frame id: 280
+Frame id: 281
+Frame id: 282
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3259, 2, 26947
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 3 | Fused: 0 | KF Lines: 28 -> 28
+Frame id: 283
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 54
+Frame id: 284
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 285
+Frame id: 286
+Frame id: 287
+Frame id: 288
+Frame id: 289
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3329, 2, 27749
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 3 | Fused: 0 | KF Lines: 30 -> 30
+Frame id: 290
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 55
+Frame id: 291
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 292
+Frame id: 293
+Frame id: 294
+Frame id: 295
+Frame id: 296
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3431, 2, 28615
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 28 -> 28
+Frame id: 297
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 56
+Frame id: 298
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 299
+Frame id: 300
+Frame id: 301
+Frame id: 302
+Frame id: 303
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3516, 2, 29243
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 31 -> 31
+Frame id: 304
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 57
+Frame id: 305
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 306
+Frame id: 307
+Frame id: 308
+Frame id: 309
+Frame id: 310
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3637, 2, 30038
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 36 -> 36
+Frame id: 311
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 58
+Frame id: 312
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 313
+Frame id: 314
+Frame id: 315
+Frame id: 316
+Frame id: 317
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3756, 2, 30883
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 35 -> 35
+Frame id: 318
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 59
+Frame id: 319
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 320
+Frame id: 321
+Frame id: 322
+Frame id: 323
+Frame id: 324
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3886, 2, 31792
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 34 -> 34
+Frame id: 325
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 60
+Frame id: 326
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 327
+Frame id: 328
+Frame id: 329
+Frame id: 330
+Frame id: 331
+Frame id: 332
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4092, 2, 32814
+Frame id: 333
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 41 -> 41
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 334
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 61
+Frame id: 335
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 336
+Frame id: 337
+Frame id: 338
+Frame id: 339
+Frame id: 340
+Frame id: 341
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4290, 2, 33873
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 38 -> 38
+Frame id: 342
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 62
+Frame id: 343
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 344
+Frame id: 345
+Frame id: 346
+Frame id: 347
+Frame id: 348
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4480, 2, 35004
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 32 -> 32
+Frame id: 349
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 63
+Frame id: 350
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 351
+Frame id: 352
+Frame id: 353
+Frame id: 354
+Frame id: 355
+Frame id: 356
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4558, 2, 35922
+Frame id: 357
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 31 -> 31
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 358
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 64
+Frame id: 359
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 360
+Frame id: 361
+Frame id: 362
+Frame id: 363
+Frame id: 364
+Frame id: 365
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4666, 2, 36861
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 46 -> 46
+Frame id: 366
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 65
+Frame id: 367
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 368
+Frame id: 369
+Frame id: 370
+Frame id: 371
+Frame id: 372
+Frame id: 373
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4751, 2, 37706
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 56 -> 56
+Frame id: 374
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 66
+Frame id: 375
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 376
+Frame id: 377
+Frame id: 378
+Frame id: 379
+Frame id: 380
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4767, 2, 37593
+Frame id: 381
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 69 -> 69
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 382
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 67
+Frame id: 383
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 384
+Frame id: 385
+Frame id: 386
+Frame id: 387
+Frame id: 388
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4775, 1, 37834
+Frame id: 389
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 72 -> 72
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 390
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 68
+Frame id: 391
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 392
+Frame id: 393
+Frame id: 394
+Frame id: 395
+Frame id: 396
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4673, 1, 36769
+Frame id: 397
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 70 -> 70
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 398
+Frame id: 399
+Frame id: 400
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 69
+Frame id: 401
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 402
+Frame id: 403
+Frame id: 404
+Frame id: 405
+Frame id: 406
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4703, 0, 36673
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 70 -> 70
+Frame id: 407
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 70
+Frame id: 408
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 409
+Frame id: 410
+Frame id: 411
+Frame id: 412
+Frame id: 413
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4807, 0, 37794
+Frame id: 414
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 68 -> 68
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 415
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 71
+Frame id: 416
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 417
+Frame id: 418
+Frame id: 419
+Frame id: 420
+Frame id: 421
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4778, 0, 37894
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 2 | Fused: 0 | KF Lines: 77 -> 77
+Frame id: 422
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 72
+Frame id: 423
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 424
+Frame id: 425
+Frame id: 426
+Frame id: 427
+Frame id: 428
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4792, 0, 38770
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 1 | Fused: 0 | KF Lines: 72 -> 72
+Frame id: 429
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 73
+Frame id: 430
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 431
+Frame id: 432
+Frame id: 433
+Frame id: 434
+Frame id: 435
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4779, 0, 38942
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 67 -> 67
+Frame id: 436
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 74
+Frame id: 437
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 438
+Frame id: 439
+Frame id: 440
+Frame id: 441
+Frame id: 442
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4644, 0, 37777
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 63 -> 63
+Frame id: 443
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 75
+Frame id: 444
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 445
+Frame id: 446
+Frame id: 447
+Frame id: 448
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4456, 0, 36824
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 55 -> 55
+Frame id: 449
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 76
+Frame id: 450
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 451
+Frame id: 452
+Frame id: 453
+Frame id: 454
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4194, 0, 35321
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 54 -> 54
+Frame id: 455
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 77
+Frame id: 456
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 457
+Frame id: 458
+Frame id: 459
+Frame id: 460
+Frame id: 461
+Frame id: 462
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4493, 0, 37379
+Frame id: 463
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 39 -> 39
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 464
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 78
+Frame id: 465
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 466
+Frame id: 467
+Frame id: 468
+Frame id: 469
+Frame id: 470
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4579, 0, 38206
+Frame id: 471
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 472
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 79
+Frame id: 473
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 474
+Frame id: 475
+Frame id: 476
+Frame id: 477
+Frame id: 478
+Frame id: 479
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4627, 0, 37964
+Frame id: 480
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 34 -> 34
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 481
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 80
+Frame id: 482
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 483
+Frame id: 484
+Frame id: 485
+Frame id: 486
+Frame id: 487
+Frame id: 488
+Frame id: 489
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4708, 0, 38759
+Frame id: 490
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 27 -> 27
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 491
+Frame id: 492
+Frame id: 493
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 81
+Frame id: 494
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 495
+Frame id: 496
+Frame id: 497
+Frame id: 498
+Frame id: 499
+Frame id: 500
+Frame id: 501
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4801, 0, 39613
+Frame id: 502
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 30 -> 30
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 503
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 82
+Frame id: 504
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 505
+Frame id: 506
+Frame id: 507
+Frame id: 508
+Frame id: 509
+Frame id: 510
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4421, 0, 36455
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 31 -> 31
+Frame id: 511
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 83
+Frame id: 512
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 513
+Frame id: 514
+Frame id: 515
+Frame id: 516
+Frame id: 517
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3857, 0, 32027
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 37 -> 37
+Frame id: 518
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 519
+Frame id: 520
+Frame id: 521
+Frame id: 522
+Frame id: 523
+Frame id: 524
+Frame id: 525
+Frame id: 526
+Frame id: 527
+Frame id: 528
+Frame id: 529
+Frame id: 530
+Frame id: 531
+Frame id: 532
+Frame id: 533
+Frame id: 534
+Frame id: 535
+Frame id: 536
+Frame id: 537
+Frame id: 538
+Frame id: 539
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 84
+Frame id: 540
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 541
+Frame id: 542
+Frame id: 543
+Frame id: 544
+Frame id: 545
+Frame id: 546
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3907, 0, 32996
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 37 -> 37
+Frame id: 547
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 85
+Frame id: 548
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 549
+Frame id: 550
+Frame id: 551
+Frame id: 552
+Frame id: 553
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4016, 0, 33981
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 29 -> 29
+Frame id: 554
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 86
+Frame id: 555
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 556
+Frame id: 557
+Frame id: 558
+Frame id: 559
+Frame id: 560
+Frame id: 561
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4087, 0, 34998
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 31 -> 31
+Frame id: 562
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 87
+Frame id: 563
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 564
+Frame id: 565
+Frame id: 566
+Frame id: 567
+Frame id: 568
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4068, 0, 35691
+Frame id: 569
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 31 -> 31
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 570
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 88
+Frame id: 571
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 572
+Frame id: 573
+Frame id: 574
+Frame id: 575
+Frame id: 576
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4073, 0, 36403
+Frame id: 577
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 30 -> 30
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 578
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 89
+Frame id: 579
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 580
+Frame id: 581
+Frame id: 582
+Frame id: 583
+Frame id: 584
+Frame id: 585
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4059, 0, 36329
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 31 -> 31
+Frame id: 586
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 90
+Frame id: 587
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 588
+Frame id: 589
+Frame id: 590
+Frame id: 591
+Frame id: 592
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4081, 0, 37053
+Frame id: 593
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 29 -> 29
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 594
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 91
+Frame id: 595
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 596
+Frame id: 597
+Frame id: 598
+Frame id: 599
+Frame id: 600
+Frame id: 601
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4076, 0, 36836
+Frame id: 602
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 27 -> 27
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 603
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 92
+Frame id: 604
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 605
+Frame id: 606
+Frame id: 607
+Frame id: 608
+Frame id: 609
+Frame id: 610
+Frame id: 611
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4060, 0, 36634
+Frame id: 612
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 23 -> 23
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 613
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 93
+Frame id: 614
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 615
+Frame id: 616
+Frame id: 617
+Frame id: 618
+Frame id: 619
+Frame id: 620
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4076, 0, 36543
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 32 -> 32
+Frame id: 621
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 94
+Frame id: 622
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 623
+Frame id: 624
+Frame id: 625
+Frame id: 626
+Frame id: 627
+Frame id: 628
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4126, 0, 37290
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 26 -> 26
+Frame id: 629
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 95
+Frame id: 630
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 631
+Frame id: 632
+Frame id: 633
+Frame id: 634
+Frame id: 635
+Frame id: 636
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4103, 0, 37008
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 25 -> 25
+Frame id: 637
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 96
+Frame id: 638
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 639
+Frame id: 640
+Frame id: 641
+Frame id: 642
+Frame id: 643
+Frame id: 644
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4167, 0, 37006
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 23 -> 23
+Frame id: 645
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 97
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 646
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 647
+Frame id: 648
+Frame id: 649
+Frame id: 650
+Frame id: 651
+Frame id: 652
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4195, 0, 36822
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 18 -> 18
+Frame id: 653
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 98
+Frame id: 654
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 655
+Frame id: 656
+Frame id: 657
+Frame id: 658
+Frame id: 659
+Frame id: 660
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4084, 0, 36256
+Frame id: 661
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 27 -> 27
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 662
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 99
+Frame id: 663
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 664
+Frame id: 665
+Frame id: 666
+Frame id: 667
+Frame id: 668
+Frame id: 669
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4145, 0, 36365
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 36 -> 36
+Frame id: 670
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 671
+Frame id: 672
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 100
+Frame id: 673
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 674
+Frame id: 675
+Frame id: 676
+Frame id: 677
+Frame id: 678
+Frame id: 679
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4222, 0, 36489
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 42 -> 42
+Frame id: 680
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 101
+Frame id: 681
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 682
+Frame id: 683
+Frame id: 684
+Frame id: 685
+Frame id: 686
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4403, 0, 37551
+Frame id: 687
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 34 -> 34
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 688
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 102
+Frame id: 689
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 690
+Frame id: 691
+Frame id: 692
+Frame id: 693
+Frame id: 694
+Frame id: 695
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4454, 0, 37110
+Frame id: 696
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 38 -> 38
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 697
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 103
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 698
+Frame id: 699
+Frame id: 700
+Frame id: 701
+Frame id: 702
+Frame id: 703
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4194, 0, 35111
+Frame id: 704
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 34 -> 34
+Frame id: 705
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 104
+Frame id: 706
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 707
+Frame id: 708
+Frame id: 709
+Frame id: 710
+Frame id: 711
+Frame id: 712
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4130, 0, 34582
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 25 -> 25
+Frame id: 713
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 105
+Frame id: 714
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 715
+Frame id: 716
+Frame id: 717
+Frame id: 718
+Frame id: 719
+Frame id: 720
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4075, 0, 34042
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 18 -> 18
+Frame id: 721
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 722
+Frame id: 723
+Frame id: 724
+Frame id: 725
+Frame id: 726
+Frame id: 727
+Frame id: 728
+Frame id: 729
+Frame id: 730
+Frame id: 731
+Frame id: 732
+Frame id: 733
+Frame id: 734
+Frame id: 735
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 106
+Frame id: 736
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 737
+Frame id: 738
+Frame id: 739
+Frame id: 740
+Frame id: 741
+Frame id: 742
+Frame id: 743
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4126, 0, 34481
+Frame id: 744
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 16 -> 16
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 745
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 107
+Frame id: 746
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 747
+Frame id: 748
+Frame id: 749
+Frame id: 750
+Frame id: 751
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4284, 0, 35161
+Frame id: 752
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 28 -> 28
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 753
+Frame id: 754
+Frame id: 755
+Frame id: 756
+Frame id: 757
+Frame id: 758
+Frame id: 759
+Frame id: 760
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 108
+Frame id: 761
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 762
+Frame id: 763
+Frame id: 764
+Frame id: 765
+Frame id: 766
+Frame id: 767
+Frame id: 768
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4267, 0, 35131
+Frame id: 769
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 54 -> 54
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 770
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 109
+Frame id: 771
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 772
+Frame id: 773
+Frame id: 774
+Frame id: 775
+Frame id: 776
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4243, 0, 34970
+Frame id: 777
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 83 -> 83
+---------------------- bFindedRegion true-------------------- 
+*Loop detected
+Local Mapping STOP
+Loop: mpCurrentKF -> 109
+Loop: number of connected KFs -> 27
+Frame id: 778
+Frame id: 779
+Frame id: 780
+Frame id: 781
+Frame id: 782
+Frame id: 783
+Frame id: 784
+Local Mapping RELEASE
+[New Thread 0x7c97b8ff1000 (LWP 342414)]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 110
+Frame id: 785
+Frame id: 786
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 787
+Frame id: 788
+Frame id: 789
+Frame id: 790
+Frame id: 791
+Frame id: 792
+Frame id: 793
+Frame id: 794
+Frame id: 795
+Frame id: 796
+Frame id: 797
+Frame id: 798
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7807, 12, 65212
+ created_map_line_num: 0
+Frame id: 799
+Local Mapping STOP
+GBA: Correct MapPoints
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 800
+Local Mapping RELEASE
+[Thread 0x7c97b8ff1000 (LWP 342414) exited]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 111
+Frame id: 801
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 802
+Frame id: 803
+Frame id: 804
+Frame id: 805
+Frame id: 806
+Frame id: 807
+Frame id: 808
+Frame id: 809
+Frame id: 810
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7389, 11, 52340
+Frame id: 811
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 115 -> 115
+Frame id: 812
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 112
+Frame id: 813
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 814
+Frame id: 815
+Frame id: 816
+Frame id: 817
+Frame id: 818
+Frame id: 819
+Frame id: 820
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7605, 11, 54625
+Frame id: 821
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 5 | KF Lines: 104 -> 104
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 822
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 113
+Frame id: 823
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 824
+Frame id: 825
+Frame id: 826
+Frame id: 827
+Frame id: 828
+Frame id: 829
+Frame id: 830
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7759, 11, 55759
+Frame id: 831
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 832
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 114
+Frame id: 833
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 834
+Frame id: 835
+Frame id: 836
+Frame id: 837
+Frame id: 838
+Frame id: 839
+Frame id: 840
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7906, 11, 56649
+Frame id: 841
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 81 -> 81
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 842
+Frame id: 843
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 115
+Frame id: 844
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 845
+Frame id: 846
+Frame id: 847
+Frame id: 848
+Frame id: 849
+Frame id: 850
+Frame id: 851
+Frame id: 852
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7962, 11, 57390
+Frame id: 853
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 78 -> 78
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 854
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 116
+Frame id: 855
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 856
+Frame id: 857
+Frame id: 858
+Frame id: 859
+Frame id: 860
+Frame id: 861
+Frame id: 862
+Frame id: 863
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8188, 11, 59047
+Frame id: 864
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 62 -> 62
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 865
+Frame id: 866
+Frame id: 867
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 117
+Frame id: 868
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 869
+Frame id: 870
+Frame id: 871
+Frame id: 872
+Frame id: 873
+Frame id: 874
+Frame id: 875
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8581, 11, 62524
+Frame id: 876
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 72 -> 72
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 877
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 118
+Frame id: 878
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 879
+Frame id: 880
+Frame id: 881
+Frame id: 882
+Frame id: 883
+Frame id: 884
+Frame id: 885
+Frame id: 886
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8939, 11, 65195
+Frame id: 887
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 74 -> 74
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 888
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 119
+Frame id: 889
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 890
+Frame id: 891
+Frame id: 892
+Frame id: 893
+Frame id: 894
+Frame id: 895
+Frame id: 896
+Frame id: 897
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9097, 11, 66628
+Frame id: 898
+ created_map_line_num: 0
+---------------LoopClosing bFindedRegion false-------------------------- 
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 86 -> 86
+Frame id: 899
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 120
+Frame id: 900
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 901
+Frame id: 902
+Frame id: 903
+Frame id: 904
+Frame id: 905
+Frame id: 906
+Frame id: 907
+Frame id: 908
+Frame id: 909
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8783, 11, 65591
+Frame id: 910
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 93 -> 93
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 911
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 121
+Frame id: 912
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 913
+Frame id: 914
+Frame id: 915
+Frame id: 916
+Frame id: 917
+Frame id: 918
+Frame id: 919
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8722, 11, 66083
+Frame id: 920
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 91 -> 91
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 921
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 122
+Frame id: 922
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 923
+Frame id: 924
+Frame id: 925
+Frame id: 926
+Frame id: 927
+Frame id: 928
+Frame id: 929
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8765, 11, 66997
+Frame id: 930
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 98 -> 98
+Frame id: 931
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 123
+Frame id: 932
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 933
+Frame id: 934
+Frame id: 935
+Frame id: 936
+Frame id: 937
+Frame id: 938
+Frame id: 939
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8788, 11, 67918
+Frame id: 940
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 941
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 124
+Frame id: 942
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 943
+Frame id: 944
+Frame id: 945
+Frame id: 946
+Frame id: 947
+Frame id: 948
+Frame id: 949
+Frame id: 950
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9275, 11, 71589
+Frame id: 951
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 69 -> 69
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 952
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 125
+Frame id: 953
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 954
+Frame id: 955
+Frame id: 956
+Frame id: 957
+Frame id: 958
+Frame id: 959
+Frame id: 960
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8048, 5, 66173
+Frame id: 961
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 61 -> 61
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 962
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 126
+Frame id: 963
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 964
+Frame id: 965
+Frame id: 966
+Frame id: 967
+Frame id: 968
+Frame id: 969
+Frame id: 970
+Frame id: 971
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8860, 10, 70778
+Frame id: 972
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 973
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 53 -> 53
+Frame id: 974
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 127
+Frame id: 975
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 976
+Frame id: 977
+Frame id: 978
+Frame id: 979
+Frame id: 980
+Frame id: 981
+Frame id: 982
+Frame id: 983
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9086, 11, 72524
+Frame id: 984
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 43 -> 43
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 985
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 128
+Frame id: 986
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 987
+Frame id: 988
+Frame id: 989
+Frame id: 990
+Frame id: 991
+Frame id: 992
+Frame id: 993
+Frame id: 994
+Frame id: 995
+Frame id: 996
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8882, 11, 71922
+Frame id: 997
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 44 -> 44
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 998
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 129
+Frame id: 999
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1000
+Frame id: 1001
+Frame id: 1002
+Frame id: 1003
+Frame id: 1004
+Frame id: 1005
+Frame id: 1006
+Frame id: 1007
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8841, 11, 72235
+Frame id: 1008
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 45 -> 45
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1009
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 130
+Frame id: 1010
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1011
+Frame id: 1012
+Frame id: 1013
+Frame id: 1014
+Frame id: 1015
+Frame id: 1016
+Frame id: 1017
+Frame id: 1018
+Frame id: 1019
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8953, 11, 73523
+Frame id: 1020
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 52 -> 52
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1021
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 131
+Frame id: 1022
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1023
+Frame id: 1024
+Frame id: 1025
+Frame id: 1026
+Frame id: 1027
+Frame id: 1028
+Frame id: 1029
+Frame id: 1030
+Frame id: 1031
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9013, 11, 74813
+Frame id: 1032
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 61 -> 61
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1033
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 132
+Frame id: 1034
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1035
+Frame id: 1036
+Frame id: 1037
+Frame id: 1038
+Frame id: 1039
+Frame id: 1040
+Frame id: 1041
+Frame id: 1042
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8877, 11, 74402
+Frame id: 1043
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 76 -> 76
+Frame id: 1044
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 133
+Frame id: 1045
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1046
+Frame id: 1047
+Frame id: 1048
+Frame id: 1049
+Frame id: 1050
+Frame id: 1051
+Frame id: 1052
+Frame id: 1053
+Frame id: 1054
+Frame id: 1055
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8682, 11, 73624
+Frame id: 1056
+Frame id: 1057
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1058
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 134
+Frame id: 1059
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1060
+Frame id: 1061
+Frame id: 1062
+Frame id: 1063
+Frame id: 1064
+Frame id: 1065
+Frame id: 1066
+Frame id: 1067
+Frame id: 1068
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8327, 11, 70999
+Frame id: 1069
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 86 -> 86
+Frame id: 1070
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 135
+Frame id: 1071
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1072
+Frame id: 1073
+Frame id: 1074
+Frame id: 1075
+Frame id: 1076
+Frame id: 1077
+Frame id: 1078
+Frame id: 1079
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7822, 11, 65201
+Frame id: 1080
+ created_map_line_num: 0
+---------------LoopClosing bFindedRegion false-------------------------- 
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 85 -> 85
+Frame id: 1081
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 136
+Frame id: 1082
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1083
+Frame id: 1084
+Frame id: 1085
+Frame id: 1086
+Frame id: 1087
+Frame id: 1088
+Frame id: 1089
+Frame id: 1090
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7842, 11, 65572
+Frame id: 1091
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 77 -> 77
+Frame id: 1092
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 137
+Frame id: 1093
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1094
+Frame id: 1095
+Frame id: 1096
+Frame id: 1097
+Frame id: 1098
+Frame id: 1099
+Frame id: 1100
+Frame id: 1101
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7814, 11, 66359
+Frame id: 1102
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 77 -> 77
+Frame id: 1103
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 138
+Frame id: 1104
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1105
+Frame id: 1106
+Frame id: 1107
+Frame id: 1108
+Frame id: 1109
+Frame id: 1110
+Frame id: 1111
+Frame id: 1112
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7859, 11, 67241
+Frame id: 1113
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 79 -> 79
+Frame id: 1114
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 139
+Frame id: 1115
+Frame id: 1116
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1117
+Frame id: 1118
+Frame id: 1119
+Frame id: 1120
+Frame id: 1121
+Frame id: 1122
+Frame id: 1123
+Frame id: 1124
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7895, 11, 67682
+Frame id: 1125
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 72 -> 72
+Frame id: 1126
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 140
+Frame id: 1127
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1128
+Frame id: 1129
+Frame id: 1130
+Frame id: 1131
+Frame id: 1132
+Frame id: 1133
+Frame id: 1134
+Frame id: 1135
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7730, 11, 66467
+Frame id: 1136
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 87 -> 87
+Frame id: 1137
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 141
+Frame id: 1138
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1139
+Frame id: 1140
+Frame id: 1141
+Frame id: 1142
+Frame id: 1143
+Frame id: 1144
+Frame id: 1145
+Frame id: 1146
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7938, 11, 68462
+Frame id: 1147
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 115 -> 115
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1148
+Frame id: 1149
+Frame id: 1150
+Frame id: 1151
+Frame id: 1152
+Frame id: 1153
+Frame id: 1154
+Frame id: 1155
+Frame id: 1156
+Frame id: 1157
+Frame id: 1158
+Frame id: 1159
+Frame id: 1160
+Frame id: 1161
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 142
+Frame id: 1162
+Frame id: 1163
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1164
+Frame id: 1165
+Frame id: 1166
+Frame id: 1167
+Frame id: 1168
+Frame id: 1169
+Frame id: 1170
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7880, 11, 68330
+Frame id: 1171
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 134 -> 134
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1172
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 143
+Frame id: 1173
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1174
+Frame id: 1175
+Frame id: 1176
+Frame id: 1177
+Frame id: 1178
+Frame id: 1179
+Frame id: 1180
+Frame id: 1181
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7964, 11, 69393
+Frame id: 1182
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 125 -> 125
+Frame id: 1183
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 144
+Frame id: 1184
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1185
+Frame id: 1186
+Frame id: 1187
+Frame id: 1188
+Frame id: 1189
+Frame id: 1190
+Frame id: 1191
+Frame id: 1192
+Frame id: 1193
+Frame id: 1194
+Frame id: 1195
+Frame id: 1196
+Frame id: 1197
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7985, 11, 69212
+Frame id: 1198
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 131 -> 131
+Frame id: 1199
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 145
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1200
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1201
+Frame id: 1202
+Frame id: 1203
+Frame id: 1204
+Frame id: 1205
+Frame id: 1206
+Frame id: 1207
+Frame id: 1208
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7942, 11, 69206
+Frame id: 1209
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 123 -> 123
+Frame id: 1210
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 146
+Frame id: 1211
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1212
+Frame id: 1213
+Frame id: 1214
+Frame id: 1215
+Frame id: 1216
+Frame id: 1217
+Frame id: 1218
+Frame id: 1219
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7970, 11, 68866
+Frame id: 1220
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 118 -> 118
+Frame id: 1221
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 147
+Frame id: 1222
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1223
+Frame id: 1224
+Frame id: 1225
+Frame id: 1226
+Frame id: 1227
+Frame id: 1228
+Frame id: 1229
+Frame id: 1230
+Frame id: 1231
+Frame id: 1232
+Frame id: 1233
+Frame id: 1234
+Frame id: 1235
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8005, 11, 69772
+Frame id: 1236
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 117 -> 117
+Frame id: 1237
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 148
+Frame id: 1238
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1239
+Frame id: 1240
+Frame id: 1241
+Frame id: 1242
+Frame id: 1243
+Frame id: 1244
+Frame id: 1245
+Frame id: 1246
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8033, 11, 70617
+Frame id: 1247
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 125 -> 125
+Frame id: 1248
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 149
+Frame id: 1249
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1250
+Frame id: 1251
+Frame id: 1252
+Frame id: 1253
+Frame id: 1254
+Frame id: 1255
+Frame id: 1256
+Frame id: 1257
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8083, 11, 70937
+Frame id: 1258
+Frame id: 1259
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 118 -> 118
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1260
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 150
+Frame id: 1261
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1262
+Frame id: 1263
+Frame id: 1264
+Frame id: 1265
+Frame id: 1266
+Frame id: 1267
+Frame id: 1268
+Frame id: 1269
+Frame id: 1270
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8104, 11, 71880
+Frame id: 1271
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1272
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 3 | KF Lines: 127 -> 127
+Frame id: 1273
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 151
+Frame id: 1274
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1275
+Frame id: 1276
+Frame id: 1277
+Frame id: 1278
+Frame id: 1279
+Frame id: 1280
+Frame id: 1281
+Frame id: 1282
+Frame id: 1283
+Frame id: 1284
+Frame id: 1285
+Frame id: 1286
+Frame id: 1287
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8066, 11, 71510
+Frame id: 1288
+Frame id: 1289
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 119 -> 119
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1290
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 152
+Frame id: 1291
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1292
+Frame id: 1293
+Frame id: 1294
+Frame id: 1295
+Frame id: 1296
+Frame id: 1297
+Frame id: 1298
+Frame id: 1299
+Frame id: 1300
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7908, 11, 71117
+Frame id: 1301
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 101 -> 101
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1302
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 153
+Frame id: 1303
+Frame id: 1304
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1305
+Frame id: 1306
+Frame id: 1307
+Frame id: 1308
+Frame id: 1309
+Frame id: 1310
+Frame id: 1311
+Frame id: 1312
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7854, 11, 69554
+Frame id: 1313
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1314
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 154
+Frame id: 1315
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1316
+Frame id: 1317
+Frame id: 1318
+Frame id: 1319
+Frame id: 1320
+Frame id: 1321
+Frame id: 1322
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7747, 11, 69773
+Frame id: 1323
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 83 -> 83
+Frame id: 1324
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 155
+Frame id: 1325
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1326
+Frame id: 1327
+Frame id: 1328
+Frame id: 1329
+Frame id: 1330
+Frame id: 1331
+Frame id: 1332
+Frame id: 1333
+Frame id: 1334
+Frame id: 1335
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7896, 11, 71414
+Frame id: 1336
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1337
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 156
+Frame id: 1338
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1339
+Frame id: 1340
+Frame id: 1341
+Frame id: 1342
+Frame id: 1343
+Frame id: 1344
+Frame id: 1345
+Frame id: 1346
+Frame id: 1347
+Frame id: 1348
+Frame id: 1349
+Frame id: 1350
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9703, 11, 85044
+Frame id: 1351
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 103 -> 103
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1352
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 157
+Frame id: 1353
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1354
+Frame id: 1355
+Frame id: 1356
+Frame id: 1357
+Frame id: 1358
+Frame id: 1359
+Frame id: 1360
+Frame id: 1361
+Frame id: 1362
+Frame id: 1363
+Frame id: 1364
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9834, 11, 85963
+Frame id: 1365
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 94 -> 94
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1366
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 158
+Frame id: 1367
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1368
+Frame id: 1369
+Frame id: 1370
+Frame id: 1371
+Frame id: 1372
+Frame id: 1373
+Frame id: 1374
+Frame id: 1375
+Frame id: 1376
+Frame id: 1377
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9860, 11, 86424
+Frame id: 1378
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 2 | KF Lines: 98 -> 98
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1379
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 159
+Frame id: 1380
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1381
+Frame id: 1382
+Frame id: 1383
+Frame id: 1384
+Frame id: 1385
+Frame id: 1386
+Frame id: 1387
+Frame id: 1388
+Frame id: 1389
+Frame id: 1390
+Frame id: 1391
+Frame id: 1392
+Frame id: 1393
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10095, 11, 88544
+Frame id: 1394
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 95 -> 95
+Frame id: 1395
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 160
+Frame id: 1396
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1397
+Frame id: 1398
+Frame id: 1399
+Frame id: 1400
+Frame id: 1401
+Frame id: 1402
+Frame id: 1403
+Frame id: 1404
+Frame id: 1405
+Frame id: 1406
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10027, 11, 88098
+Frame id: 1407
+Frame id: 1408
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 105 -> 105
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1409
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 161
+Frame id: 1410
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1411
+Frame id: 1412
+Frame id: 1413
+Frame id: 1414
+Frame id: 1415
+Frame id: 1416
+Frame id: 1417
+Frame id: 1418
+Frame id: 1419
+Frame id: 1420
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9927, 11, 87633
+Frame id: 1421
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 103 -> 103
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1422
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 162
+Frame id: 1423
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1424
+Frame id: 1425
+Frame id: 1426
+Frame id: 1427
+Frame id: 1428
+Frame id: 1429
+Frame id: 1430
+Frame id: 1431
+Frame id: 1432
+Frame id: 1433
+Frame id: 1434
+Frame id: 1435
+Frame id: 1436
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9866, 11, 87336
+Frame id: 1437
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 88 -> 88
+Frame id: 1438
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 163
+Frame id: 1439
+Frame id: 1440
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1441
+Frame id: 1442
+Frame id: 1443
+Frame id: 1444
+Frame id: 1445
+Frame id: 1446
+Frame id: 1447
+Frame id: 1448
+Frame id: 1449
+Frame id: 1450
+Frame id: 1451
+Frame id: 1452
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9889, 11, 87368
+Frame id: 1453
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 102 -> 102
+Frame id: 1454
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 164
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1455
+Frame id: 1456
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1457
+Frame id: 1458
+Frame id: 1459
+Frame id: 1460
+Frame id: 1461
+Frame id: 1462
+Frame id: 1463
+Frame id: 1464
+Frame id: 1465
+Frame id: 1466
+Frame id: 1467
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9805, 11, 87320
+Frame id: 1468
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 97 -> 97
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1469
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 165
+Frame id: 1470
+Frame id: 1471
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1472
+Frame id: 1473
+Frame id: 1474
+Frame id: 1475
+Frame id: 1476
+Frame id: 1477
+Frame id: 1478
+Frame id: 1479
+Frame id: 1480
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9631, 11, 86454
+Frame id: 1481
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 87 -> 87
+Frame id: 1482
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 166
+Frame id: 1483
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1484
+Frame id: 1485
+Frame id: 1486
+Frame id: 1487
+Frame id: 1488
+Frame id: 1489
+Frame id: 1490
+Frame id: 1491
+Frame id: 1492
+Frame id: 1493
+Frame id: 1494
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9586, 11, 86561
+Frame id: 1495
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 79 -> 79
+Frame id: 1496
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 167
+Frame id: 1497
+Frame id: 1498
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1499
+Frame id: 1500
+Frame id: 1501
+Frame id: 1502
+Frame id: 1503
+Frame id: 1504
+Frame id: 1505
+Frame id: 1506
+Frame id: 1507
+Frame id: 1508
+Frame id: 1509
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9590, 11, 86405
+Frame id: 1510
+Frame id: 1511
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 88 -> 88
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1512
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 168
+Frame id: 1513
+Frame id: 1514
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1515
+Frame id: 1516
+Frame id: 1517
+Frame id: 1518
+Frame id: 1519
+Frame id: 1520
+Frame id: 1521
+Frame id: 1522
+Frame id: 1523
+Frame id: 1524
+Frame id: 1525
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9045, 11, 81547
+Frame id: 1526
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 77 -> 77
+Frame id: 1527
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 169
+Frame id: 1528
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1529
+Frame id: 1530
+Frame id: 1531
+Frame id: 1532
+Frame id: 1533
+Frame id: 1534
+Frame id: 1535
+Frame id: 1536
+Frame id: 1537
+Frame id: 1538
+Frame id: 1539
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8882, 11, 79774
+Frame id: 1540
+Frame id: 1541
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 68 -> 68
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1542
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 170
+Frame id: 1543
+Frame id: 1544
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1545
+Frame id: 1546
+Frame id: 1547
+Frame id: 1548
+Frame id: 1549
+Frame id: 1550
+Frame id: 1551
+Frame id: 1552
+Frame id: 1553
+Frame id: 1554
+Frame id: 1555
+Frame id: 1556
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9368, 11, 84191
+Frame id: 1557
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 42 -> 42
+Frame id: 1558
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1559
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 171
+Frame id: 1560
+Frame id: 1561
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1562
+Frame id: 1563
+Frame id: 1564
+Frame id: 1565
+Frame id: 1566
+Frame id: 1567
+Frame id: 1568
+Frame id: 1569
+Frame id: 1570
+Frame id: 1571
+Frame id: 1572
+Frame id: 1573
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9219, 11, 83558
+Frame id: 1574
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 38 -> 38
+Frame id: 1575
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 172
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1576
+Frame id: 1577
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1578
+Frame id: 1579
+Frame id: 1580
+Frame id: 1581
+Frame id: 1582
+Frame id: 1583
+Frame id: 1584
+Frame id: 1585
+Frame id: 1586
+Frame id: 1587
+Frame id: 1588
+Frame id: 1589
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8994, 11, 82616
+Frame id: 1590
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 32 -> 32
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1591
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 173
+Frame id: 1592
+Frame id: 1593
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1594
+Frame id: 1595
+Frame id: 1596
+Frame id: 1597
+Frame id: 1598
+Frame id: 1599
+Frame id: 1600
+Frame id: 1601
+Frame id: 1602
+Frame id: 1603
+Frame id: 1604
+Frame id: 1605
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8965, 11, 82676
+Frame id: 1606
+Frame id: 1607
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 30 -> 30
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1608
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 174
+Frame id: 1609
+Frame id: 1610
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1611
+Frame id: 1612
+Frame id: 1613
+Frame id: 1614
+Frame id: 1615
+Frame id: 1616
+Frame id: 1617
+Frame id: 1618
+Frame id: 1619
+Frame id: 1620
+Frame id: 1621
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9026, 11, 83612
+Frame id: 1622
+Frame id: 1623
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 30 -> 30
+Frame id: 1624
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 175
+Frame id: 1625
+---------------LoopClosing bFindedRegion false-------------------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1626
+Frame id: 1627
+Frame id: 1628
+Frame id: 1629
+Frame id: 1630
+Frame id: 1631
+Frame id: 1632
+Frame id: 1633
+Frame id: 1634
+Frame id: 1635
+Frame id: 1636
+Frame id: 1637
+Frame id: 1638
+Frame id: 1639
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9098, 11, 84620
+Frame id: 1640
+Frame id: 1641
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 25 -> 25
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1642
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 176
+Frame id: 1643
+Frame id: 1644
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1645
+Frame id: 1646
+Frame id: 1647
+Frame id: 1648
+Frame id: 1649
+Frame id: 1650
+Frame id: 1651
+Frame id: 1652
+Frame id: 1653
+Frame id: 1654
+Frame id: 1655
+Frame id: 1656
+Frame id: 1657
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9151, 11, 85571
+Frame id: 1658
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 16 -> 16
+Frame id: 1659
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 177
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1660
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1661
+Frame id: 1662
+Frame id: 1663
+Frame id: 1664
+Frame id: 1665
+Frame id: 1666
+Frame id: 1667
+Frame id: 1668
+Frame id: 1669
+Frame id: 1670
+Frame id: 1671
+Frame id: 1672
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8969, 11, 84014
+Frame id: 1673
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 13 -> 13
+Frame id: 1674
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 178
+Frame id: 1675
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1676
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1677
+Frame id: 1678
+Frame id: 1679
+Frame id: 1680
+Frame id: 1681
+Frame id: 1682
+Frame id: 1683
+Frame id: 1684
+Frame id: 1685
+Frame id: 1686
+Frame id: 1687
+Frame id: 1688
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8607, 11, 80949
+Frame id: 1689
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 6 -> 6
+Frame id: 1690
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 179
+Frame id: 1691
+---------------LoopClosing bFindedRegion false-------------------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1692
+Frame id: 1693
+Frame id: 1694
+Frame id: 1695
+Frame id: 1696
+Frame id: 1697
+Frame id: 1698
+Frame id: 1699
+Frame id: 1700
+Frame id: 1701
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7790, 5, 77436
+Frame id: 1702
+Frame id: 1703
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 1 | KF Lines: 7 -> 7
+Frame id: 1704
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 180
+Frame id: 1705
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1706
+Frame id: 1707
+Frame id: 1708
+Frame id: 1709
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1710
+Frame id: 1711
+Frame id: 1712
+Frame id: 1713
+Frame id: 1714
+Frame id: 1715
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6234, 5, 66314
+Frame id: 1716
+Frame id: 1717
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 9 | Fused: 0 | KF Lines: 3 -> 3
+---------------LoopClosing bFindedRegion false-------------------------- 
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1718
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 181
+Frame id: 1719
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1720
+Frame id: 1721
+Frame id: 1722
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1723
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1724
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1725
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1726
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1727
+Edge drawing Error: lines not found
+Line Detection not finished
+Frame id: 1728
+Frame id: 1729
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5006, 5, 53508
+Frame id: 1730
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 9 | Fused: 0 | KF Lines: 0 -> 0
+Frame id: 1731
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 182
+---------------LoopClosing bFindedRegion false-------------------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1732
+Frame id: 1733
+Frame id: 1734
+Frame id: 1735
+Frame id: 1736
+Frame id: 1737
+Frame id: 1738
+Frame id: 1739
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5025, 5, 55040
+Frame id: 1740
+Frame id: 1741
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 5 | Fused: 0 | KF Lines: 4 -> 4
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1742
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 183
+Frame id: 1743
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1744
+Frame id: 1745
+Frame id: 1746
+Frame id: 1747
+Frame id: 1748
+Frame id: 1749
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4524, 4, 52905
+Frame id: 1750
+Frame id: 1751
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 9 | Fused: 0 | KF Lines: 22 -> 22
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1752
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 184
+Frame id: 1753
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1754
+Frame id: 1755
+Frame id: 1756
+Frame id: 1757
+Frame id: 1758
+Frame id: 1759
+Frame id: 1760
+Frame id: 1761
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8226, 11, 82182
+Frame id: 1762
+Frame id: 1763
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 59 -> 59
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1764
+Frame id: 1765
+Frame id: 1766
+Frame id: 1767
+Frame id: 1768
+Frame id: 1769
+Frame id: 1770
+Frame id: 1771
+Frame id: 1772
+Frame id: 1773
+Frame id: 1774
+Frame id: 1775
+Frame id: 1776
+Frame id: 1777
+Frame id: 1778
+Frame id: 1779
+Frame id: 1780
+Frame id: 1781
+Frame id: 1782
+Frame id: 1783
+Frame id: 1784
+Frame id: 1785
+Frame id: 1786
+Frame id: 1787
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 185
+Frame id: 1788
+Frame id: 1789
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1790
+Frame id: 1791
+Frame id: 1792
+Frame id: 1793
+Frame id: 1794
+Frame id: 1795
+Frame id: 1796
+Frame id: 1797
+Frame id: 1798
+Frame id: 1799
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8746, 11, 84881
+Frame id: 1800
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 65 -> 65
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1801
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 186
+Frame id: 1802
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1803
+Frame id: 1804
+Frame id: 1805
+Frame id: 1806
+Frame id: 1807
+Frame id: 1808
+Frame id: 1809
+Frame id: 1810
+Frame id: 1811
+Frame id: 1812
+Frame id: 1813
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8813, 11, 86012
+Frame id: 1814
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 65 -> 65
+Frame id: 1815
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 187
+Frame id: 1816
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1817
+Frame id: 1818
+Frame id: 1819
+Frame id: 1820
+Frame id: 1821
+Frame id: 1822
+Frame id: 1823
+Frame id: 1824
+Frame id: 1825
+Frame id: 1826
+Frame id: 1827
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8971, 11, 85639
+Frame id: 1828
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 61 -> 61
+Frame id: 1829
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 188
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1830
+Frame id: 1831
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1832
+Frame id: 1833
+Frame id: 1834
+Frame id: 1835
+Frame id: 1836
+Frame id: 1837
+Frame id: 1838
+Frame id: 1839
+Frame id: 1840
+Frame id: 1841
+Frame id: 1842
+Frame id: 1843
+Frame id: 1844
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9222, 11, 87020
+Frame id: 1845
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 66 -> 66
+Frame id: 1846
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 189
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1847
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1848
+Frame id: 1849
+Frame id: 1850
+Frame id: 1851
+Frame id: 1852
+Frame id: 1853
+Frame id: 1854
+Frame id: 1855
+Frame id: 1856
+Frame id: 1857
+Frame id: 1858
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9288, 11, 86926
+Frame id: 1859
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 70 -> 70
+Frame id: 1860
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 190
+Frame id: 1861
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1862
+Frame id: 1863
+Frame id: 1864
+Frame id: 1865
+Frame id: 1866
+Frame id: 1867
+Frame id: 1868
+Frame id: 1869
+Frame id: 1870
+Frame id: 1871
+Frame id: 1872
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9306, 11, 86867
+Frame id: 1873
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 81 -> 81
+Frame id: 1874
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 191
+Frame id: 1875
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1876
+Frame id: 1877
+Frame id: 1878
+Frame id: 1879
+Frame id: 1880
+Frame id: 1881
+Frame id: 1882
+Frame id: 1883
+Frame id: 1884
+Frame id: 1885
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9332, 11, 87004
+Frame id: 1886
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 88 -> 88
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1887
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 192
+Frame id: 1888
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1889
+Frame id: 1890
+Frame id: 1891
+Frame id: 1892
+Frame id: 1893
+Frame id: 1894
+Frame id: 1895
+Frame id: 1896
+Frame id: 1897
+Frame id: 1898
+Frame id: 1899
+Frame id: 1900
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9896, 11, 94458
+Frame id: 1901
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 90 -> 90
+Frame id: 1902
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 193
+Frame id: 1903
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1904
+Frame id: 1905
+Frame id: 1906
+Frame id: 1907
+Frame id: 1908
+Frame id: 1909
+Frame id: 1910
+Frame id: 1911
+Frame id: 1912
+Frame id: 1913
+Frame id: 1914
+Frame id: 1915
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10126, 11, 97109
+Frame id: 1916
+---------------LoopClosing bFindedRegion false-------------------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 91 -> 91
+Frame id: 1917
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 194
+Frame id: 1918
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1919
+Frame id: 1920
+Frame id: 1921
+Frame id: 1922
+Frame id: 1923
+Frame id: 1924
+Frame id: 1925
+Frame id: 1926
+Frame id: 1927
+Frame id: 1928
+Frame id: 1929
+Frame id: 1930
+Frame id: 1931
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10157, 11, 97970
+Frame id: 1932
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 101 -> 101
+Frame id: 1933
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 195
+Frame id: 1934
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1935
+Frame id: 1936
+Frame id: 1937
+Frame id: 1938
+Frame id: 1939
+Frame id: 1940
+Frame id: 1941
+Frame id: 1942
+Frame id: 1943
+Frame id: 1944
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9584, 4, 93997
+Frame id: 1945
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 11 | Fused: 0 | KF Lines: 95 -> 95
+Frame id: 1946
+---------------LoopClosing bFindedRegion false-------------------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 196
+Frame id: 1947
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1948
+Frame id: 1949
+Frame id: 1950
+Frame id: 1951
+Frame id: 1952
+Frame id: 1953
+Frame id: 1954
+Frame id: 1955
+Frame id: 1956
+Frame id: 1957
+Frame id: 1958
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9410, 4, 92169
+Frame id: 1959
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 10 | Fused: 0 | KF Lines: 94 -> 94
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1960
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 197
+Frame id: 1961
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1962
+Frame id: 1963
+Frame id: 1964
+Frame id: 1965
+Frame id: 1966
+Frame id: 1967
+Frame id: 1968
+Frame id: 1969
+Frame id: 1970
+Frame id: 1971
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9353, 4, 91608
+Frame id: 1972
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 7 | Fused: 0 | KF Lines: 86 -> 86
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1973
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 198
+Frame id: 1974
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1975
+Frame id: 1976
+Frame id: 1977
+Frame id: 1978
+Frame id: 1979
+Frame id: 1980
+Frame id: 1981
+Frame id: 1982
+Frame id: 1983
+Frame id: 1984
+Frame id: 1985
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9684, 4, 93474
+Frame id: 1986
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 4 | Fused: 0 | KF Lines: 92 -> 92
+---------------LoopClosing bFindedRegion false-------------------------- 
+Frame id: 1987
+Frame id: 1988
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 199
+Frame id: 1989
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1990
+Frame id: 1991
+Frame id: 1992
+Frame id: 1993
+Frame id: 1994
+Frame id: 1995
+Frame id: 1996
+Frame id: 1997
+Frame id: 1998
+Frame id: 1999
+Shutdown
+[Replay] SLAM finished; starting replay from /workspace/code/PSL-evtrepl/export/office0_mono
+[Replay] FATAL: cannot read/verify "/workspace/code/PSL-evtrepl/export/office0_mono/snapshot.txt"
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  replay: bad snapshot
+
+Thread 54 "replica_mono" received signal SIGABRT, Aborted.
+[Switching to Thread 0x7c97b97f2000 (LWP 342110)]
+__pthread_kill_implementation (no_tid=0, signo=6, threadid=136991094022144) at ./nptl/pthread_kill.c:44
+44	./nptl/pthread_kill.c: No such file or directory.
+
+Thread 54 (Thread 0x7c97b97f2000 (LWP 342110) "replica_mono"):
+#0  __pthread_kill_implementation (no_tid=0, signo=6, threadid=136991094022144) at ./nptl/pthread_kill.c:44
+#1  __pthread_kill_internal (signo=6, threadid=136991094022144) at ./nptl/pthread_kill.c:78
+#2  __GI___pthread_kill (threadid=136991094022144, signo=signo@entry=6) at ./nptl/pthread_kill.c:89
+#3  0x00007c9b690e5476 in __GI_raise (sig=sig@entry=6) at ../sysdeps/posix/raise.c:26
+#4  0x00007c9b690cb7f3 in __GI_abort () at ./stdlib/abort.c:79
+#5  0x00007c9b6936eb9e in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00007c9b6937a20c in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#7  0x00007c9b6937a277 in std::terminate() () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x00007c9b6937a4d8 in __cxa_throw () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#9  0x00007c9bb920a749 in GaussianMapperLine::runReplay() [clone .cold] () from /workspace/code/PSL-replay/lib/libgaussian_mapper.so
+#10 0x00007c9bb9293bff in GaussianMapperLine::run() () from /workspace/code/PSL-replay/lib/libgaussian_mapper.so
+#11 0x00007c9b693a8253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#12 0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#13 0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 53 (Thread 0x7c97b9ff3000 (LWP 342109) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 52 (Thread 0x7c97ba7f4000 (LWP 342108) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 51 (Thread 0x7c97baff5000 (LWP 342107) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 50 (Thread 0x7c97bb7f6000 (LWP 342106) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 49 (Thread 0x7c97bbff7000 (LWP 342105) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 48 (Thread 0x7c97bc7f8000 (LWP 342104) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 47 (Thread 0x7c97bcff9000 (LWP 342103) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 46 (Thread 0x7c97bd7fa000 (LWP 342102) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 45 (Thread 0x7c97bdffb000 (LWP 342101) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 44 (Thread 0x7c97be7fc000 (LWP 342100) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 43 (Thread 0x7c97beffd000 (LWP 342099) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 42 (Thread 0x7c97bf7fe000 (LWP 342098) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 41 (Thread 0x7c97bffff000 (LWP 342097) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 40 (Thread 0x7c97e4ff9000 (LWP 342096) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 39 (Thread 0x7c97e57fa000 (LWP 342095) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 38 (Thread 0x7c97e5ffb000 (LWP 342094) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 37 (Thread 0x7c97e67fc000 (LWP 342093) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 36 (Thread 0x7c97e6ffd000 (LWP 342092) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 35 (Thread 0x7c97e77fe000 (LWP 342091) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 34 (Thread 0x7c97e7fff000 (LWP 342090) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 33 (Thread 0x7c97f4d4d000 (LWP 342089) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 32 (Thread 0x7c97f554e000 (LWP 342088) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 31 (Thread 0x7c97f67fc000 (LWP 342087) "replica_mono"):
+#0  0x00007c9b65c1de8e in gomp_barrier_wait_end () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#1  0x00007c9b65c1b498 in gomp_thread_start () from /usr/local/lib/python3.10/dist-packages/torch/lib/libgomp.so.1
+#2  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#3  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 30 (Thread 0x7c97f6ffd000 (LWP 342086) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb595a0cfc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb595a0cfc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb595a0cfc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb595a0ca0, cond=0x5fdb595a0cd0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb595a0cd0, mutex=0x5fdb595a0ca0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 29 (Thread 0x7c97f77fe000 (LWP 342085) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb595a08e8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb595a08e8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb595a08e8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb595a0890, cond=0x5fdb595a08c0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb595a08c0, mutex=0x5fdb595a0890) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 28 (Thread 0x7c97f7fff000 (LWP 342084) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb595a04dc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb595a04dc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb595a04dc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb595a0480, cond=0x5fdb595a04b0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb595a04b0, mutex=0x5fdb595a0480) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 27 (Thread 0x7c9814ff9000 (LWP 342083) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb590008b8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb590008b8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb590008b8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000860, cond=0x5fdb59000890) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000890, mutex=0x5fdb59000860) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 26 (Thread 0x7c98157fa000 (LWP 342082) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb59000818) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb59000818) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb59000818, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb590007c0, cond=0x5fdb590007f0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb590007f0, mutex=0x5fdb590007c0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 25 (Thread 0x7c9815ffb000 (LWP 342081) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb5900077c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb5900077c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb5900077c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000720, cond=0x5fdb59000750) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000750, mutex=0x5fdb59000720) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 24 (Thread 0x7c98167fc000 (LWP 342080) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb590006dc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb590006dc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb590006dc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000680, cond=0x5fdb590006b0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb590006b0, mutex=0x5fdb59000680) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 23 (Thread 0x7c9816ffd000 (LWP 342079) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb5900063c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb5900063c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb5900063c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb590005e0, cond=0x5fdb59000610) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000610, mutex=0x5fdb590005e0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 22 (Thread 0x7c98177fe000 (LWP 342078) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb59000f9c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb59000f9c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb59000f9c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000f40, cond=0x5fdb59000f70) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000f70, mutex=0x5fdb59000f40) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 21 (Thread 0x7c9817fff000 (LWP 342077) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb59000efc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb59000efc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb59000efc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000ea0, cond=0x5fdb59000ed0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000ed0, mutex=0x5fdb59000ea0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 20 (Thread 0x7c9838ff9000 (LWP 342076) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb59000e58) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb59000e58) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb59000e58, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000e00, cond=0x5fdb59000e30) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000e30, mutex=0x5fdb59000e00) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 19 (Thread 0x7c98397fa000 (LWP 342075) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58ffeef8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58ffeef8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58ffeef8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58ffeea0, cond=0x5fdb58ffeed0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58ffeed0, mutex=0x5fdb58ffeea0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 18 (Thread 0x7c9839ffb000 (LWP 342074) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58ffee58) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58ffee58) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58ffee58, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58ffee00, cond=0x5fdb58ffee30) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58ffee30, mutex=0x5fdb58ffee00) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 17 (Thread 0x7c983a7fc000 (LWP 342073) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58ffedbc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58ffedbc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58ffedbc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58ffed60, cond=0x5fdb58ffed90) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58ffed90, mutex=0x5fdb58ffed60) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 16 (Thread 0x7c983affd000 (LWP 342072) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb59000598) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb59000598) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb59000598, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000540, cond=0x5fdb59000570) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000570, mutex=0x5fdb59000540) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 15 (Thread 0x7c983b7fe000 (LWP 342071) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb5900018c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb5900018c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb5900018c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb59000130, cond=0x5fdb59000160) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb59000160, mutex=0x5fdb59000130) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 14 (Thread 0x7c983bfff000 (LWP 342070) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58fffd78) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58fffd78) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58fffd78, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58fffd20, cond=0x5fdb58fffd50) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58fffd50, mutex=0x5fdb58fffd20) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 13 (Thread 0x7c9850cdc000 (LWP 342069) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58ffed1c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58ffed1c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58ffed1c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58ffecc0, cond=0x5fdb58ffecf0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58ffecf0, mutex=0x5fdb58ffecc0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 12 (Thread 0x7c98514dd000 (LWP 342068) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58ffe90c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58ffe90c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58ffe90c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58ffe8b0, cond=0x5fdb58ffe8e0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58ffe8e0, mutex=0x5fdb58ffe8b0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 11 (Thread 0x7c9851cde000 (LWP 342067) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58ffe4f8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58ffe4f8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58ffe4f8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58ffe4a0, cond=0x5fdb58ffe4d0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58ffe4d0, mutex=0x5fdb58ffe4a0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 10 (Thread 0x7c98524df000 (LWP 342066) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58fff778) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58fff778) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58fff778, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58fff720, cond=0x5fdb58fff750) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58fff750, mutex=0x5fdb58fff720) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 9 (Thread 0x7c9852ce0000 (LWP 342065) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb58fff36c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb58fff36c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb58fff36c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb58fff310, cond=0x5fdb58fff340) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb58fff340, mutex=0x5fdb58fff310) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 8 (Thread 0x7c98534e1000 (LWP 342064) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb5942b118) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb5942b118) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb5942b118, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb5942b0c0, cond=0x5fdb5942b0f0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb5942b0f0, mutex=0x5fdb5942b0c0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9bb609012f in cv::WorkerThread::thread_body() () from /usr/local/lib/libopencv_core.so.410
+#6  0x00007c9bb6090523 in cv::WorkerThread::thread_loop_wrapper(void*) () from /usr/local/lib/libopencv_core.so.410
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 7 (Thread 0x7c9853fff000 (LWP 342063) "replica_mono"):
+#0  0x00007c9b691bbc4f in __GI___poll (fds=0x5fdb58f7c500, nfds=2, timeout=100) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x00007c9a98903957 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#2  0x00007c9a989df265 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#3  0x00007c9a988ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#4  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#5  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 6 (Thread 0x7c987caa1000 (LWP 342062) "cuda-EvtHandlr"):
+#0  0x00007c9b691bbc4f in __GI___poll (fds=0x7c9878000c20, nfds=10, timeout=100) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x00007c9a98903957 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#2  0x00007c9a989df265 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#3  0x00007c9a988ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#4  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#5  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 5 (Thread 0x7c987d2a2000 (LWP 342061) "replica_mono"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5fdb4935a0c8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x5fdb4935a0c8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5fdb4935a0c8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007c9b69136a41 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5fdb49354590, cond=0x5fdb4935a0a0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5fdb4935a0a0, mutex=0x5fdb49354590) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007c9a988493d8 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#6  0x00007c9a988ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 4 (Thread 0x7c9a94b0a000 (LWP 342060) "replica_mono"):
+#0  0x00007c9b691c1afb in munmap () at ../sysdeps/unix/syscall-template.S:117
+#1  0x00007c9b69145c44 in heap_trim (pad=131072, heap=<optimized out>) at ./malloc/arena.c:673
+#2  _int_free (av=0x7c97b0000030, p=<optimized out>, have_lock=<optimized out>) at ./malloc/malloc.c:4688
+#3  0x00007c9b691486ad in __GI___libc_free (mem=<optimized out>) at ./malloc/malloc.c:3391
+#4  tcache_thread_shutdown () at ./malloc/malloc.c:3227
+#5  __malloc_arena_thread_freeres () at ./malloc/arena.c:1003
+#6  0x00007c9b6914b1ca in __libc_thread_freeres () at ./malloc/thread-freeres.c:44
+#7  0x00007c9b6913794f in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:456
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 3 (Thread 0x7c9a9530b000 (LWP 342059) "replica_mono"):
+#0  _int_free (av=0x7c97a8000030, p=<optimized out>, have_lock=<optimized out>) at ./malloc/malloc.c:4693
+#1  0x00007c9b69148453 in __GI___libc_free (mem=<optimized out>) at ./malloc/malloc.c:3391
+#2  0x00007c9b66994b5d in g2o::HyperGraph::clear() () from /workspace/code/PSL-replay/ORB-SLAM3/Thirdparty/g2o/lib/libg2o.so
+#3  0x00007c9b669a1f64 in g2o::OptimizableGraph::~OptimizableGraph() () from /workspace/code/PSL-replay/ORB-SLAM3/Thirdparty/g2o/lib/libg2o.so
+#4  0x00007c9bb8f45be2 in ORB_SLAM3::Optimizer::LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg(ORB_SLAM3::KeyFrame*, bool*, ORB_SLAM3::Map*, int&, int&, int&, int&, int&, ORB_SLAM3::MappingOperation&) () from /workspace/code/PSL-replay/ORB-SLAM3/lib/libORB_SLAM3.so
+#5  0x00007c9bb8e44521 in ORB_SLAM3::LocalMapping::RunWithLine() () from /workspace/code/PSL-replay/ORB-SLAM3/lib/libORB_SLAM3.so
+#6  0x00007c9b693a8253 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#7  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 2 (Thread 0x7c9a985ff000 (LWP 342030) "cuda00001400006"):
+#0  0x00007c9b691bbc4f in __GI___poll (fds=0x5fdb492d76b0, nfds=3, timeout=-1) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x00007c9a98903957 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#2  0x00007c9a989df265 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#3  0x00007c9a988ee3f3 in ?? () from /lib/x86_64-linux-gnu/libcuda.so.1
+#4  0x00007c9b69137ac3 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#5  0x00007c9b691c8a84 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:100
+
+Thread 1 (Thread 0x7c9b4d6b4000 (LWP 341997) "replica_mono"):
+#0  0x00007c9b691887f8 in __GI___clock_nanosleep (clock_id=clock_id@entry=0, flags=flags@entry=0, req=req@entry=0x7ffdb9936670, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:78
+#1  0x00007c9b6918d677 in __GI___nanosleep (req=req@entry=0x7ffdb9936670, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x00007c9b691befaf in usleep (useconds=<optimized out>) at ../sysdeps/posix/usleep.c:31
+#3  0x00007c9bb8da726a in ORB_SLAM3::System::Shutdown() () from /workspace/code/PSL-replay/ORB-SLAM3/lib/libORB_SLAM3.so
+#4  0x00005fdb15e377ba in main ()

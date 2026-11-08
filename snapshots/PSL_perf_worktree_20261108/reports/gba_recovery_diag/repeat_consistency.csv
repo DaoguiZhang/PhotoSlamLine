@@ -1,0 +1,7 @@
+check,value
+step0_param_fp_equal,1
+step0_adam_fp_equal,1
+schedule_fp_equal,1
+view_sequence_equal,1
+lr_equal,1
+adam_step_equal,1

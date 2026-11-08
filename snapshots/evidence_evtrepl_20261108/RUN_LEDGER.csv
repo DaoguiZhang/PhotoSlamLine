@@ -1,0 +1,7 @@
+scene,seed,host_pid,start_utc,end_utc,wall_s,host_exit,masked_rc,conditions_complete,conditions_expected,missing_conditions,products_complete,step_checkpoint_rows,mapping_complete,note
+office0_mono,0,not-captured,2026-11-07T16:43:12+00:00,2026-11-07T16:48:32+00:00,320,EXIT_0,0,5,5,,yes,30,yes,
+office0_mono,1,not-captured,2026-11-07T16:48:32+00:00,2026-11-07T16:53:48+00:00,316,EXIT_0,0,5,5,,yes,30,yes,
+office0_mono,2,not-captured,2026-11-07T16:53:48+00:00,2026-11-07T16:59:08+00:00,320,EXIT_0,0,5,5,,yes,30,yes,
+desk3_rgbd,0,not-captured,2026-11-07T16:59:08+00:00,2026-11-07T17:03:07+00:00,239,EXIT_0,0,5,5,,yes,30,yes,
+desk3_rgbd,1,294640,2026-11-07T17:03:07+00:00,2026-11-07T17:26:39+00:00,1412,KILLED_SIGKILL,0,5,5,,yes,30,yes,replay finished and all products were flushed; process did not leave main()'s join and was killed after 18 min
+desk3_rgbd,2,not-captured,2026-11-07T17:26:39+00:00,2026-11-07T17:30:32+00:00,233,EXIT_0,0,5,5,,yes,30,yes,

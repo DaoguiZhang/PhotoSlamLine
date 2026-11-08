@@ -1,0 +1,5 @@
+optimizer_steps=10289
+gaussians=546704
+line_gaussians=2725
+kfs=183
+mapping_seconds=70.644

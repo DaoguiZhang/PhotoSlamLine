@@ -1,0 +1,5 @@
+Fixed before the counterfactual render:
+primary anomaly set = top 20 rows by max(exp(scaling_)) within each
+class (is_line true/false) and snapshot; ties by ascending row index.
+No PSNR or render outcome is used to select rows.  The same rule is used
+for A/C and frame_1000/frame_1500.

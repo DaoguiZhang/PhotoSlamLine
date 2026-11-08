@@ -1,0 +1,3456 @@
+CUDA available! Training on GPU.
+
+ORB-SLAM3 Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+ORB-SLAM2 Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+This program comes with ABSOLUTELY NO WARRANTY;
+This is free software, and you are welcome to redistribute it
+under certain conditions. See LICENSE.txt.
+
+Input sensor was set to: RGB-D
+Loading settings from cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml
+Camera1.k3 optional parameter does not exist...
+	-Loaded camera 1
+Camera.newHeight optional parameter does not exist...
+Camera.newWidth optional parameter does not exist...
+	-Loaded image info
+	-Loaded RGB-D calibration
+	-Loaded ORB settings
+	-Loaded LSD sampling settings
+Viewer.imageViewScale optional parameter does not exist...
+	-Loaded viewer settings
+System.LoadAtlasFromFile optional parameter does not exist...
+System.SaveAtlasToFile optional parameter does not exist...
+	-Loaded Atlas settings
+System.thFarPoints optional parameter does not exist...
+	-Loaded misc parameters
+----------------------------------
+SLAM settings: 
+	-Camera 1 parameters (Pinhole): [ 535.4 539.2 320.1 247.6 ]
+	-Camera 1 distortion parameters: [  0 0 0 0 ]
+	-Original image size: [ 640 , 480 ]
+	-Current image size: [ 640 , 480 ]
+	-Sequence FPS: 30
+	-RGB-D depth map factor: 5000
+	-Features per image: 2000
+	-ORB scale factor: 1.2
+	-ORB number of scales: 8
+	-Initial FAST threshold: 20
+	-Min FAST threshold: 7
+	-Line sampling step: 0.2
+	-Line view weight: 2
+	-Line sigma: 3
+	-Line Top-K: 3
+
+
+Loading ORB Vocabulary. This could take a while...
+Vocabulary loaded!
+
+Initialization of Atlas from scratch 
+Creation of new map with id: 0
+Creation of new map with last KF id: 0
+Seq. Name: 
+-------------------newParameterLoader--------------------------
+
+LSD Extractor Parameters(to do next): 
+	-Sampling step: 0.2
+	-View weight: 2
+	-Sigma: 3
+	-Top-K: 3
+There are 1 cameras in the atlas
+Camera 0 is pinhole
+[LineMode] PHOTO_SLAM_LINE_MODE=2 (0=point-only, 1=line-frontend-only, 2=full point-line) | PO_LINE=1 LBA_LINE=1 | LBA_W=1 LBA_TAU=9 LBA_DELTA=2.44765 LBA_SIGMA_PX=1 | DIAG_LINE_EDGES=0 DIAG_MONO_INIT=0
+============================ start Set GaussianMapperLine ====================================
+[Gaussian Mapper]CUDA available! Training on GPU.
+[Gaussian Mapper]Reading parameters from "cfg/gaussian_mapper/RGB-D/TUM/tum_freiburg3_long_office_household.yaml"
+
+-------
+Start processing sequence ...
+Images in the sequence: 2488
+
+[DEBUG] Thread: GaussianMapperLine thread started.
+Frame id: 0
+First KF:0; Map init KF:0
+------------- !mpCamera2: mCurrentFrame.N --------------- 2004
+New Map created with 1782 points
+New Map created with 120 lines...
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 0
+ created_map_line_num: 120
+[LocalMapping Fuse] Candidates: 0 | Fused: 0 | KF Lines: 136 -> 136
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 1
+[MapLineCulling] KF1 | Bad:0 | LowRatio:10 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 162
+[LocalMapping Fuse] Candidates: 112 | Fused: 26 | KF Lines: 108 -> 108
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 2
+============= [LIVE SNAKE RADAR] =============
+  - Frame ID: 2
+  - Matches Vector Size: 124
+  - Non-Null Pointers: 55
+  - Bad Lines Flagged: 0
+===============================================
+[ExportMapPointsWithCameraAxesOBJKeyFrame] Exported 2006 map points and camera axes to 2_Keyframe_MapPoints_before.obj
+[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported 55 map lines and camera axes to 2_Keyframe_Maplines_before.obj
+[ExportMapKeyFrameCameraPose] Export successful to 2_Keyframe_Camera_before.txt
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2130, 137, 4863
+[ExportMapPointsWithCameraAxesOBJKeyFrame] Exported 2006 map points and camera axes to 2_Keyframe_MapPoints_after.obj
+[ExportMapLinesWithCameraAxesOBJKeyFrame] Exported 54 map lines and camera axes to 2_Keyframe_Maplines_after.obj
+[ExportMapKeyFrameCameraPose] Export successful to 2_Keyframe_Camera_after.txt
+[MapLineCulling] KF2 | Bad:4 | LowRatio:1 | LowObs:56 | Graduated(Saved):0
+ created_map_line_num: 166
+---------------LoopClosing bFindedRegion false---------------- 
+[LocalMapping Fuse] Candidates: 124 | Fused: 26 | KF Lines: 124 -> 124
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 3
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 1963, 111, 5689
+[MapLineCulling] KF3 | Bad:20 | LowRatio:24 | LowObs:0 | Graduated(Saved):49
+ created_map_line_num: 187
+[LocalMapping Fuse] Candidates: 162 | Fused: 42 | KF Lines: 127 -> 127
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 4
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2129, 147, 6961
+[MapLineCulling] KF4 | Bad:22 | LowRatio:60 | LowObs:0 | Graduated(Saved):28
+ created_map_line_num: 233
+[LocalMapping Fuse] Candidates: 213 | Fused: 66 | KF Lines: 119 -> 119
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 5
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2213, 179, 8147
+[MapLineCulling] KF5 | Bad:41 | LowRatio:64 | LowObs:0 | Graduated(Saved):40
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 209
+[LocalMapping Fuse] Candidates: 196 | Fused: 58 | KF Lines: 115 -> 115
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 6
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2288, 169, 9134
+[MapLineCulling] KF6 | Bad:31 | LowRatio:60 | LowObs:0 | Graduated(Saved):34
+ created_map_line_num: 176
+[LocalMapping Fuse] Candidates: 182 | Fused: 41 | KF Lines: 109 -> 109
+---------------LoopClosing bFindedRegion false---------------- 
+Frame id: 100
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 7
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2354, 160, 10058
+[MapLineCulling] KF7 | Bad:24 | LowRatio:52 | LowObs:1 | Graduated(Saved):40
+ created_map_line_num: 73
+[LocalMapping Fuse] Candidates: 118 | Fused: 26 | KF Lines: 132 -> 132
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 8
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2508, 109, 10913
+[MapLineCulling] KF8 | Bad:8 | LowRatio:14 | LowObs:0 | Graduated(Saved):29
+ created_map_line_num: 48
+[LocalMapping Fuse] Candidates: 119 | Fused: 18 | KF Lines: 94 -> 94
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 9
+[Gaussian Mapper] Voxel Grid Initialized. Total occupied cells: 248
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2566, 112, 11962
+[MapLineCulling] KF9 | Bad:7 | LowRatio:13 | LowObs:0 | Graduated(Saved):19
+ created_map_line_num: 65
+[LocalMapping Fuse] Candidates: 152 | Fused: 35 | KF Lines: 120 -> 120
+---------------LoopClosing bFindedRegion false---------------- 
+
+[DEBUG createFromPcd] Checking Line Initialization:
+  Line 0: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.999954, 0...]
+  Line 1: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.999954, 0...]
+  Line 2: Scale=[0.14, 0.08, 0.08] Ratio=1.75 | Rot(w,x)=[0.999954, 0...]
+  > If Ratio > 1.0 and Rot != [1,0,0,0], initialization is GOOD.
+
+[DEBUG] Checkpoint 10: Setup done. Starting first training iteration...
+[RasterBackend] BACKWARD::render = C converged + 5-stage warp tree
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 10
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 144 (N=48)
+  > Dir Size: 144
+[Voxel Grid Report]: ID | Incoming: 48 | Accepted: 48 | Rejected (Redundant): 0 | Usage Rate: 100%
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2655, 137, 12987
+[MapLineCulling] KF10 | Bad:15 | LowRatio:31 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 74
+[LocalMapping Fuse] Candidates: 154 | Fused: 37 | KF Lines: 123 -> 123
+---------------LoopClosing bFindedRegion false---------------- 
+[Budget] keep_frac=1 seed=20260101 dir=
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 342 (N=114)
+  > Dir Size: 342
+[Voxel Grid Report]: ID | Incoming: 114 | Accepted: 96 | Rejected (Redundant): 18 | Usage Rate: 84.2105%
+[GaussianMapper] Added 18 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 11
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2776, 138, 14006
+[MapLineCulling] KF11 | Bad:17 | LowRatio:36 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 93
+[LocalMapping Fuse] Candidates: 176 | Fused: 45 | KF Lines: 126 -> 126
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 351 (N=117)
+  > Dir Size: 351
+[Voxel Grid Report]: ID | Incoming: 117 | Accepted: 112 | Rejected (Redundant): 5 | Usage Rate: 95.7265%
+[GaussianMapper] Added 5 line-sampled gaussians.
+  > new_rotation list size: 1
+  > first tensor in rot list: [660, 4]
+  > Final new_rotation shape: [660, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 12
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3023, 152, 14991
+[MapLineCulling] KF12 | Bad:25 | LowRatio:46 | LowObs:0 | Graduated(Saved):9
+ created_map_line_num: 16
+[LocalMapping Fuse] Candidates: 108 | Fused: 1 | KF Lines: 83 -> 83
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 486 (N=162)
+  > Dir Size: 486
+[Voxel Grid Report]: ID | Incoming: 162 | Accepted: 151 | Rejected (Redundant): 11 | Usage Rate: 93.2099%
+[GaussianMapper] Added 11 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 13
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [1008, 4]
+  > Final new_rotation shape: [1008, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3002, 109, 15690
+[MapLineCulling] KF13 | Bad:0 | LowRatio:4 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 14
+[LocalMapping Fuse] Candidates: 112 | Fused: 11 | KF Lines: 113 -> 113
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 24 (N=8)
+  > Dir Size: 24
+[Voxel Grid Report]: ID | Incoming: 8 | Accepted: 6 | Rejected (Redundant): 2 | Usage Rate: 75%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 14
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [1336, 4]
+  > Final new_rotation shape: [1336, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 2954, 107, 16384
+[MapLineCulling] KF14 | Bad:4 | LowRatio:5 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 18
+[LocalMapping Fuse] Candidates: 118 | Fused: 10 | KF Lines: 115 -> 115
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 51 (N=17)
+  > Dir Size: 51
+[Voxel Grid Report]: ID | Incoming: 17 | Accepted: 13 | Rejected (Redundant): 4 | Usage Rate: 76.4706%
+[GaussianMapper] Added 4 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 15
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [1610, 4]
+  > Final new_rotation shape: [1610, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3036, 114, 17322
+[MapLineCulling] KF15 | Bad:5 | LowRatio:8 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 16
+[LocalMapping Fuse] Candidates: 116 | Fused: 8 | KF Lines: 123 -> 123
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 120 (N=40)
+  > Dir Size: 120
+[Voxel Grid Report]: ID | Incoming: 40 | Accepted: 26 | Rejected (Redundant): 14 | Usage Rate: 65%
+[GaussianMapper] Added 14 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 16
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1850, 4]
+  > Final new_rotation shape: [1852, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3132, 113, 18165
+[MapLineCulling] KF16 | Bad:3 | LowRatio:8 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 22
+[LocalMapping Fuse] Candidates: 121 | Fused: 12 | KF Lines: 133 -> 133
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 105 (N=35)
+  > Dir Size: 105
+[Voxel Grid Report]: ID | Incoming: 35 | Accepted: 15 | Rejected (Redundant): 20 | Usage Rate: 42.8571%
+[GaussianMapper] Added 20 line-sampled gaussians.
+  > new_rotation list size: 1
+  > first tensor in rot list: [1992, 4]
+  > Final new_rotation shape: [1992, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 17
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3258, 116, 19023
+[MapLineCulling] KF17 | Bad:6 | LowRatio:12 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 25
+[LocalMapping Fuse] Candidates: 125 | Fused: 11 | KF Lines: 131 -> 131
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 123 (N=41)
+  > Dir Size: 123
+[Voxel Grid Report]: ID | Incoming: 41 | Accepted: 37 | Rejected (Redundant): 4 | Usage Rate: 90.2439%
+[GaussianMapper] Added 4 line-sampled gaussians.
+  > new_rotation list size: 2
+  > first tensor in rot list: [1846, 4]
+  > Final new_rotation shape: [1848, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 18
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3282, 118, 19780
+[MapLineCulling] KF18 | Bad:8 | LowRatio:10 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 24
+[LocalMapping Fuse] Candidates: 124 | Fused: 12 | KF Lines: 136 -> 136
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 99 (N=33)
+  > Dir Size: 99
+[Voxel Grid Report]: ID | Incoming: 33 | Accepted: 30 | Rejected (Redundant): 3 | Usage Rate: 90.9091%
+[GaussianMapper] Added 3 line-sampled gaussians.
+  > new_rotation list size: 2
+  > first tensor in rot list: [2162, 4]
+  > Final new_rotation shape: [2164, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 19
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3437, 119, 20680
+[MapLineCulling] KF19 | Bad:5 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 22
+[LocalMapping Fuse] Candidates: 123 | Fused: 5 | KF Lines: 111 -> 111
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 102 (N=34)
+  > Dir Size: 102
+[Voxel Grid Report]: ID | Incoming: 34 | Accepted: 28 | Rejected (Redundant): 6 | Usage Rate: 82.3529%
+[GaussianMapper] Added 6 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 20
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1678, 4]
+  > Final new_rotation shape: [1680, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3612, 122, 21571
+[MapLineCulling] KF20 | Bad:1 | LowRatio:11 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 12
+[LocalMapping Fuse] Candidates: 118 | Fused: 4 | KF Lines: 85 -> 85
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 36 (N=12)
+  > Dir Size: 36
+[Voxel Grid Report]: ID | Incoming: 12 | Accepted: 10 | Rejected (Redundant): 2 | Usage Rate: 83.3333%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 21
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 200
+  > new_rotation list size: 2
+  > first tensor in rot list: [2004, 4]
+  > Final new_rotation shape: [2008, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3619, 117, 22200
+[MapLineCulling] KF21 | Bad:1 | LowRatio:3 | LowObs:0 | Graduated(Saved):4
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 116 | Fused: 4 | KF Lines: 115 -> 115
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 45 (N=15)
+  > Dir Size: 45
+[Voxel Grid Report]: ID | Incoming: 15 | Accepted: 13 | Rejected (Redundant): 2 | Usage Rate: 86.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 22
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3661, 116, 22937
+[MapLineCulling] KF22 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 18
+[LocalMapping Fuse] Candidates: 128 | Fused: 5 | KF Lines: 112 -> 112
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 3 | Rejected (Redundant): 0 | Usage Rate: 100%
+  > new_rotation list size: 1
+  > first tensor in rot list: [2146, 4]
+  > Final new_rotation shape: [2146, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 23
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3802, 127, 23845
+[MapLineCulling] KF23 | Bad:1 | LowRatio:8 | LowObs:0 | Graduated(Saved):4
+ created_map_line_num: 16
+[LocalMapping Fuse] Candidates: 130 | Fused: 4 | KF Lines: 95 -> 95
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 90 (N=30)
+  > Dir Size: 90
+[Voxel Grid Report]: ID | Incoming: 30 | Accepted: 26 | Rejected (Redundant): 4 | Usage Rate: 86.6667%
+[GaussianMapper] Added 4 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 24
+  > new_rotation list size: 1
+  > first tensor in rot list: [1866, 4]
+  > Final new_rotation shape: [1866, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3912, 128, 24787
+[MapLineCulling] KF24 | Bad:2 | LowRatio:7 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 24
+[LocalMapping Fuse] Candidates: 138 | Fused: 5 | KF Lines: 127 -> 127
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 72 (N=24)
+  > Dir Size: 72
+[Voxel Grid Report]: ID | Incoming: 24 | Accepted: 19 | Rejected (Redundant): 5 | Usage Rate: 79.1667%
+[GaussianMapper] Added 5 line-sampled gaussians.
+  > new_rotation list size: 2
+  > first tensor in rot list: [1992, 4]
+  > Final new_rotation shape: [1994, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 25
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4018, 136, 25593
+[MapLineCulling] KF25 | Bad:2 | LowRatio:10 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 20
+[LocalMapping Fuse] Candidates: 139 | Fused: 3 | KF Lines: 102 -> 102
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 132 (N=44)
+  > Dir Size: 132
+[Voxel Grid Report]: ID | Incoming: 44 | Accepted: 38 | Rejected (Redundant): 6 | Usage Rate: 86.3636%
+[GaussianMapper] Added 6 line-sampled gaussians.
+  > new_rotation list size: 2
+  > first tensor in rot list: [1768, 4]
+  > Final new_rotation shape: [1774, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 26
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1674, 4]
+  > Final new_rotation shape: [1684, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4018, 138, 26325
+[MapLineCulling] KF26 | Bad:1 | LowRatio:12 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 26
+[LocalMapping Fuse] Candidates: 144 | Fused: 4 | KF Lines: 123 -> 123
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 117 (N=39)
+  > Dir Size: 117
+[Voxel Grid Report]: ID | Incoming: 39 | Accepted: 38 | Rejected (Redundant): 1 | Usage Rate: 97.4359%
+[GaussianMapper] Added 1 line-sampled gaussians.
+  > new_rotation list size: 2
+  > first tensor in rot list: [1668, 4]
+  > Final new_rotation shape: [1680, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 27
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4194, 145, 27245
+[MapLineCulling] KF27 | Bad:0 | LowRatio:17 | LowObs:0 | Graduated(Saved):6
+ created_map_line_num: 11
+[LocalMapping Fuse] Candidates: 135 | Fused: 1 | KF Lines: 82 -> 82
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 171 (N=57)
+  > Dir Size: 171
+[Voxel Grid Report]: ID | Incoming: 57 | Accepted: 55 | Rejected (Redundant): 2 | Usage Rate: 96.4912%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 28
+  > new_rotation list size: 2
+  > first tensor in rot list: [1312, 4]
+  > Final new_rotation shape: [1326, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4270, 136, 27859
+[MapLineCulling] KF28 | Bad:0 | LowRatio:8 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 127 | Fused: 2 | KF Lines: 103 -> 103
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 72 (N=24)
+  > Dir Size: 72
+[Voxel Grid Report]: ID | Incoming: 24 | Accepted: 24 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 29
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1478, 4]
+  > Final new_rotation shape: [1484, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4345, 128, 28634
+[MapLineCulling] KF29 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 128 | Fused: 2 | KF Lines: 122 -> 122
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 30
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1192, 4]
+  > Final new_rotation shape: [1196, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4353, 128, 29401
+[MapLineCulling] KF30 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 13
+[LocalMapping Fuse] Candidates: 141 | Fused: 2 | KF Lines: 127 -> 127
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 31
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1246, 4]
+  > Final new_rotation shape: [1256, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4516, 140, 30307
+[MapLineCulling] KF31 | Bad:1 | LowRatio:12 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 11
+[LocalMapping Fuse] Candidates: 138 | Fused: 1 | KF Lines: 127 -> 127
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 114 (N=38)
+  > Dir Size: 114
+[Voxel Grid Report]: ID | Incoming: 38 | Accepted: 36 | Rejected (Redundant): 2 | Usage Rate: 94.7368%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 32
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1276, 4]
+  > Final new_rotation shape: [1278, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4707, 137, 31105
+[MapLineCulling] KF32 | Bad:1 | LowRatio:10 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 128 | Fused: 1 | KF Lines: 124 -> 124
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 81 (N=27)
+  > Dir Size: 81
+[Voxel Grid Report]: ID | Incoming: 27 | Accepted: 27 | Rejected (Redundant): 0 | Usage Rate: 100%
+  > new_rotation list size: 2
+  > first tensor in rot list: [1096, 4]
+  > Final new_rotation shape: [1098, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 33
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1376, 4]
+  > Final new_rotation shape: [1382, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4866, 128, 31866
+[MapLineCulling] KF33 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 130 | Fused: 3 | KF Lines: 136 -> 136
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 3 | Rejected (Redundant): 1 | Usage Rate: 75%
+[GaussianMapper] Added 1 line-sampled gaussians.
+Frame id: 300
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 34
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [984, 4]
+  > Final new_rotation shape: [988, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4945, 130, 32622
+[MapLineCulling] KF34 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 135 | Fused: 3 | KF Lines: 136 -> 136
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 6 | Rejected (Redundant): 3 | Usage Rate: 66.6667%
+[GaussianMapper] Added 3 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 35
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1272, 4]
+  > Final new_rotation shape: [1280, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5069, 135, 33460
+[MapLineCulling] KF35 | Bad:0 | LowRatio:6 | LowObs:1 | Graduated(Saved):0
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 130 | Fused: 2 | KF Lines: 125 -> 125
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 39 (N=13)
+  > Dir Size: 39
+[Voxel Grid Report]: ID | Incoming: 13 | Accepted: 13 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 36
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1084, 4]
+  > Final new_rotation shape: [1092, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5082, 130, 34044
+[MapLineCulling] KF36 | Bad:0 | LowRatio:4 | LowObs:1 | Graduated(Saved):1
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 126 | Fused: 2 | KF Lines: 127 -> 127
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 21 (N=7)
+  > Dir Size: 21
+[Voxel Grid Report]: ID | Incoming: 7 | Accepted: 7 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 37
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1382, 4]
+  > Final new_rotation shape: [1390, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5058, 126, 34567
+ created_map_line_num: 0
+---------------LoopClosing bFindedRegion false---------------- 
+[LocalMapping Fuse] Candidates: 126 | Fused: 2 | KF Lines: 148 -> 148
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 38
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1036, 4]
+  > Final new_rotation shape: [1042, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5217, 126, 35343
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 128 | Fused: 2 | KF Lines: 151 -> 151
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 39
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [842, 4]
+  > Final new_rotation shape: [846, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5357, 128, 36136
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 131 | Fused: 3 | KF Lines: 153 -> 153
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 1 | Rejected (Redundant): 2 | Usage Rate: 33.3333%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 40
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [762, 4]
+  > Final new_rotation shape: [766, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5513, 131, 37033
+[MapLineCulling] KF40 | Bad:1 | LowRatio:3 | LowObs:0 | Graduated(Saved):0
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 130 | Fused: 1 | KF Lines: 158 -> 158
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 4 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 41
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5582, 130, 37767
+[MapLineCulling] KF41 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):2
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 129 | Fused: 0 | KF Lines: 133 -> 133
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 15 (N=5)
+  > Dir Size: 15
+[Voxel Grid Report]: ID | Incoming: 5 | Accepted: 2 | Rejected (Redundant): 3 | Usage Rate: 40%
+[GaussianMapper] Added 3 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 42
+  > new_rotation list size: 2
+  > first tensor in rot list: [2066, 4]
+  > Final new_rotation shape: [2074, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5705, 129, 38537
+[MapLineCulling] KF42 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 128 | Fused: 2 | KF Lines: 131 -> 131
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 4 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 43
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1214, 4]
+  > Final new_rotation shape: [1216, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5875, 128, 39286
+[MapLineCulling] KF43 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 127 | Fused: 1 | KF Lines: 156 -> 156
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 44
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1194, 4]
+  > Final new_rotation shape: [1196, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5994, 127, 39969
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 128 | Fused: 1 | KF Lines: 151 -> 151
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 45
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 400
+  > new_rotation list size: 2
+  > first tensor in rot list: [838, 4]
+  > Final new_rotation shape: [842, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6102, 128, 40593
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 132 | Fused: 7 | KF Lines: 157 -> 157
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 2 | Rejected (Redundant): 2 | Usage Rate: 50%
+[GaussianMapper] Added 2 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 46
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [848, 4]
+  > Final new_rotation shape: [856, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6311, 123, 41351
+[MapLineCulling] KF46 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 126 | Fused: 1 | KF Lines: 141 -> 141
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 51 (N=17)
+  > Dir Size: 51
+[Voxel Grid Report]: ID | Incoming: 17 | Accepted: 12 | Rejected (Redundant): 5 | Usage Rate: 70.5882%
+[GaussianMapper] Added 5 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 47
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [952, 4]
+  > Final new_rotation shape: [962, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6406, 127, 41977
+[MapLineCulling] KF47 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 127 | Fused: 0 | KF Lines: 156 -> 156
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 48
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [958, 4]
+  > Final new_rotation shape: [960, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6360, 100, 42166
+[MapLineCulling] KF48 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 128 | Fused: 2 | KF Lines: 140 -> 140
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 1 | Rejected (Redundant): 0 | Usage Rate: 100%
+  > new_rotation list size: 1
+  > first tensor in rot list: [1410, 4]
+  > Final new_rotation shape: [1410, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 49
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [508, 4]
+  > Final new_rotation shape: [516, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6358, 72, 42011
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 129 | Fused: 0 | KF Lines: 124 -> 124
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 4 | Rejected (Redundant): 2 | Usage Rate: 66.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 50
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6417, 78, 42942
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 130 | Fused: 0 | KF Lines: 152 -> 152
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 21 (N=7)
+  > Dir Size: 21
+[Voxel Grid Report]: ID | Incoming: 7 | Accepted: 7 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 51
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [890, 4]
+  > Final new_rotation shape: [892, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6487, 88, 43621
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 21 (N=7)
+  > Dir Size: 21
+[Voxel Grid Report]: ID | Incoming: 7 | Accepted: 6 | Rejected (Redundant): 1 | Usage Rate: 85.7143%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[MapLineCulling] KF51 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 131 | Fused: 1 | KF Lines: 163 -> 163
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 52
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [790, 4]
+  > Final new_rotation shape: [798, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6689, 95, 44875
+[MapLineCulling] KF52 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):1
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 30 (N=10)
+  > Dir Size: 30
+[Voxel Grid Report]: ID | Incoming: 10 | Accepted: 10 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 129 | Fused: 0 | KF Lines: 164 -> 164
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 53
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [894, 4]
+  > Final new_rotation shape: [898, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6809, 90, 45554
+[MapLineCulling] KF53 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 128 | Fused: 0 | KF Lines: 182 -> 182
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 2 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 54
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [750, 4]
+  > Final new_rotation shape: [752, 4]
+Frame id: 500
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6286, 46, 42797
+[MapLineCulling] KF54 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 127 | Fused: 2 | KF Lines: 169 -> 169
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 55
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [742, 4]
+  > Final new_rotation shape: [756, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6385, 45, 43331
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 127 | Fused: 0 | KF Lines: 163 -> 163
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 56
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [582, 4]
+  > Final new_rotation shape: [586, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6663, 49, 44803
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 127 | Fused: 1 | KF Lines: 174 -> 174
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 1 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 57
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6116, 34, 41242
+ created_map_line_num: 1
+---------------LoopClosing bFindedRegion false---------------- 
+[LocalMapping Fuse] Candidates: 128 | Fused: 1 | KF Lines: 147 -> 147
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 58
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1172, 4]
+  > Final new_rotation shape: [1178, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6209, 36, 41531
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 129 | Fused: 2 | KF Lines: 140 -> 140
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 0 | Rejected (Redundant): 3 | Usage Rate: 0%
+[GaussianMapper] Added 3 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 59
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [806, 4]
+  > Final new_rotation shape: [810, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6405, 36, 42983
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 112 | Fused: 1 | KF Lines: 155 -> 155
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 60
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6397, 37, 42267
+[MapLineCulling] KF60 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 5
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 1 | Rejected (Redundant): 3 | Usage Rate: 25%
+[LocalMapping Fuse] Candidates: 121 | Fused: 5 | KF Lines: 161 -> 161
+[GaussianMapper] Added 3 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 61
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1032, 4]
+  > Final new_rotation shape: [1038, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6215, 29, 40092
+[MapLineCulling] KF61 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 100 | Fused: 2 | KF Lines: 135 -> 135
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 15 (N=5)
+  > Dir Size: 15
+[Voxel Grid Report]: ID | Incoming: 5 | Accepted: 2 | Rejected (Redundant): 3 | Usage Rate: 40%
+[GaussianMapper] Added 3 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 62
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [706, 4]
+  > Final new_rotation shape: [712, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5686, 21, 35445
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 118 | Fused: 2 | KF Lines: 134 -> 134
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 0 | Rejected (Redundant): 2 | Usage Rate: 0%
+---------------LoopClosing bFindedRegion false---------------- 
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 63
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6200, 21, 38783
+[MapLineCulling] KF63 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 98 | Fused: 2 | KF Lines: 126 -> 126
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 64
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [1210, 4]
+  > Final new_rotation shape: [1210, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5827, 21, 35841
+[MapLineCulling] KF64 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+---------------LoopClosing bFindedRegion false---------------- 
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 111 | Fused: 5 | KF Lines: 120 -> 120
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 1 | Rejected (Redundant): 2 | Usage Rate: 33.3333%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 65
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5761, 21, 34369
+[MapLineCulling] KF65 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 48 | Fused: 2 | KF Lines: 111 -> 111
+---------------LoopClosing bFindedRegion false---------------- 
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 36 (N=12)
+  > Dir Size: 36
+[Voxel Grid Report]: ID | Incoming: 12 | Accepted: 5 | Rejected (Redundant): 7 | Usage Rate: 41.6667%
+[GaussianMapper] Added 7 line-sampled gaussians.
+  > new_rotation list size: 2
+  > first tensor in rot list: [1162, 4]
+  > Final new_rotation shape: [1164, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 66
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 600
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5704, 18, 33435
+[MapLineCulling] KF66 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 44 | Fused: 1 | KF Lines: 90 -> 90
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 4 | Rejected (Redundant): 2 | Usage Rate: 66.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 67
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5520, 15, 31589
+[MapLineCulling] KF67 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 27 | Fused: 0 | KF Lines: 94 -> 94
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 68
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1194, 4]
+  > Final new_rotation shape: [1196, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5531, 13, 31635
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 47 | Fused: 0 | KF Lines: 106 -> 106
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 69
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5574, 11, 31706
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 35 | Fused: 0 | KF Lines: 93 -> 93
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 70
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5867, 12, 34380
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 29 | Fused: 0 | KF Lines: 76 -> 76
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 71
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [948, 4]
+  > Final new_rotation shape: [948, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5879, 12, 34374
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 19 | Fused: 0 | KF Lines: 88 -> 88
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 72
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5903, 10, 34287
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 16 | Fused: 0 | KF Lines: 78 -> 78
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 73
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [900, 4]
+  > Final new_rotation shape: [900, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6245, 12, 36260
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 22 | Fused: 2 | KF Lines: 102 -> 102
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 74
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5347, 12, 29886
+[MapLineCulling] KF74 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 16 | Fused: 1 | KF Lines: 81 -> 81
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 75
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1228, 4]
+  > Final new_rotation shape: [1232, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5668, 11, 31224
+[MapLineCulling] KF75 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 22 | Fused: 0 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 76
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5809, 10, 31673
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 83 | Fused: 0 | KF Lines: 107 -> 107
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 77
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [728, 4]
+  > Final new_rotation shape: [734, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6226, 12, 34197
+[MapLineCulling] KF77 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 17 | Fused: 0 | KF Lines: 127 -> 127
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 78
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6538, 12, 35016
+[MapLineCulling] KF78 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 12 | Fused: 0 | KF Lines: 102 -> 102
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [802, 4]
+  > Final new_rotation shape: [802, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 79
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [670, 4]
+  > Final new_rotation shape: [670, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6353, 10, 32980
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 16 | Fused: 0 | KF Lines: 105 -> 105
+---------------LoopClosing bFindedRegion false---------------- 
+Frame id: 700
+  > new_rotation list size: 2
+  > first tensor in rot list: [672, 4]
+  > Final new_rotation shape: [678, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 80
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [440, 4]
+  > Final new_rotation shape: [440, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6532, 11, 33725
+[MapLineCulling] KF80 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 31 | Fused: 1 | KF Lines: 113 -> 113
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 81
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [670, 4]
+  > Final new_rotation shape: [670, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7895, 20, 47725
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 1 | Rejected (Redundant): 2 | Usage Rate: 33.3333%
+[GaussianMapper] Added 2 line-sampled gaussians.
+[MapLineCulling] KF81 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 50 | Fused: 0 | KF Lines: 133 -> 133
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 82
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [974, 4]
+  > Final new_rotation shape: [974, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8141, 15, 46687
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 35 | Fused: 0 | KF Lines: 145 -> 145
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [694, 4]
+  > Final new_rotation shape: [694, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 83
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [592, 4]
+  > Final new_rotation shape: [592, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8047, 16, 47585
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 52 | Fused: 0 | KF Lines: 162 -> 162
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 84
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [742, 4]
+  > Final new_rotation shape: [742, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8170, 18, 48796
+[MapLineCulling] KF84 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 41 | Fused: 2 | KF Lines: 165 -> 165
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 5 | Rejected (Redundant): 1 | Usage Rate: 83.3333%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 85
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [688, 4]
+  > Final new_rotation shape: [690, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8139, 22, 48641
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 54 (N=18)
+  > Dir Size: 54
+[Voxel Grid Report]: ID | Incoming: 18 | Accepted: 12 | Rejected (Redundant): 6 | Usage Rate: 66.6667%
+[GaussianMapper] Added 6 line-sampled gaussians.
+[MapLineCulling] KF85 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 8
+[LocalMapping Fuse] Candidates: 42 | Fused: 3 | KF Lines: 158 -> 158
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 86
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [476, 4]
+  > Final new_rotation shape: [476, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8097, 21, 48326
+[MapLineCulling] KF86 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 38 | Fused: 2 | KF Lines: 154 -> 154
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 8 | Rejected (Redundant): 1 | Usage Rate: 88.8889%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 87
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [246, 4]
+  > Final new_rotation shape: [246, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8020, 20, 47978
+[MapLineCulling] KF87 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 32 | Fused: 2 | KF Lines: 150 -> 150
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 30 (N=10)
+  > Dir Size: 30
+[Voxel Grid Report]: ID | Incoming: 10 | Accepted: 10 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 88
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 800
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7927, 18, 47061
+[MapLineCulling] KF88 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 11
+[LocalMapping Fuse] Candidates: 38 | Fused: 5 | KF Lines: 142 -> 142
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 9 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1594, 4]
+  > Final new_rotation shape: [1606, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 89
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7784, 19, 45520
+[MapLineCulling] KF89 | Bad:2 | LowRatio:3 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 36 | Fused: 5 | KF Lines: 139 -> 139
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 54 (N=18)
+  > Dir Size: 54
+[Voxel Grid Report]: ID | Incoming: 18 | Accepted: 15 | Rejected (Redundant): 3 | Usage Rate: 83.3333%
+[GaussianMapper] Added 3 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1204, 4]
+  > Final new_rotation shape: [1210, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 90
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7270, 18, 41321
+[MapLineCulling] KF90 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 22 | Fused: 4 | KF Lines: 116 -> 116
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 91
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [394, 4]
+  > Final new_rotation shape: [394, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7380, 20, 42223
+[MapLineCulling] KF91 | Bad:2 | LowRatio:2 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 22 | Fused: 4 | KF Lines: 135 -> 135
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 3 | Rejected (Redundant): 6 | Usage Rate: 33.3333%
+[GaussianMapper] Added 6 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 92
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [736, 4]
+  > Final new_rotation shape: [736, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7393, 21, 42936
+[MapLineCulling] KF92 | Bad:1 | LowRatio:4 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 22 | Fused: 5 | KF Lines: 129 -> 129
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 24 (N=8)
+  > Dir Size: 24
+[Voxel Grid Report]: ID | Incoming: 8 | Accepted: 6 | Rejected (Redundant): 2 | Usage Rate: 75%
+[GaussianMapper] Added 2 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 93
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [1586, 4]
+  > Final new_rotation shape: [1586, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7421, 22, 43994
+[MapLineCulling] KF93 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 16
+[LocalMapping Fuse] Candidates: 33 | Fused: 6 | KF Lines: 140 -> 140
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 48 (N=16)
+  > Dir Size: 48
+[Voxel Grid Report]: ID | Incoming: 16 | Accepted: 7 | Rejected (Redundant): 9 | Usage Rate: 43.75%
+[GaussianMapper] Added 9 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 94
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6823, 29, 40773
+[MapLineCulling] KF94 | Bad:2 | LowRatio:9 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 29
+[LocalMapping Fuse] Candidates: 42 | Fused: 13 | KF Lines: 140 -> 140
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 111 (N=37)
+  > Dir Size: 111
+[Voxel Grid Report]: ID | Incoming: 37 | Accepted: 33 | Rejected (Redundant): 4 | Usage Rate: 89.1892%
+[GaussianMapper] Added 4 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 95
+  > new_rotation list size: 2
+  > first tensor in rot list: [3286, 4]
+  > Final new_rotation shape: [3288, 4]
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7040, 35, 41724
+[MapLineCulling] KF95 | Bad:6 | LowRatio:11 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 26
+[LocalMapping Fuse] Candidates: 38 | Fused: 8 | KF Lines: 115 -> 115
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 159 (N=53)
+  > Dir Size: 159
+[Voxel Grid Report]: ID | Incoming: 53 | Accepted: 50 | Rejected (Redundant): 3 | Usage Rate: 94.3396%
+[GaussianMapper] Added 3 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [1398, 4]
+  > Final new_rotation shape: [1398, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 96
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6890, 31, 41101
+[MapLineCulling] KF96 | Bad:3 | LowRatio:11 | LowObs:0 | Graduated(Saved):4
+ created_map_line_num: 15
+[LocalMapping Fuse] Candidates: 31 | Fused: 6 | KF Lines: 120 -> 120
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 111 (N=37)
+  > Dir Size: 111
+[Voxel Grid Report]: ID | Incoming: 37 | Accepted: 33 | Rejected (Redundant): 4 | Usage Rate: 89.1892%
+[GaussianMapper] Added 4 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [750, 4]
+  > Final new_rotation shape: [750, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 97
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7144, 23, 42583
+[MapLineCulling] KF97 | Bad:4 | LowRatio:5 | LowObs:0 | Graduated(Saved):6
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 23 | Fused: 4 | KF Lines: 107 -> 107
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 36 (N=12)
+  > Dir Size: 36
+[Voxel Grid Report]: ID | Incoming: 12 | Accepted: 10 | Rejected (Redundant): 2 | Usage Rate: 83.3333%
+[GaussianMapper] Added 2 line-sampled gaussians.
+  > new_rotation list size: 2
+  > first tensor in rot list: [1708, 4]
+  > Final new_rotation shape: [1710, 4]
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 98
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 900
+  > new_rotation list size: 1
+  > first tensor in rot list: [692, 4]
+  > Final new_rotation shape: [692, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7266, 19, 43471
+[MapLineCulling] KF98 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 23 | Fused: 2 | KF Lines: 110 -> 110
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 3 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 99
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7173, 18, 42843
+  > new_rotation list size: 1
+  > first tensor in rot list: [226, 4]
+  > Final new_rotation shape: [226, 4]
+[MapLineCulling] KF99 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 27 | Fused: 5 | KF Lines: 135 -> 135
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 100
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7041, 22, 42141
+[MapLineCulling] KF100 | Bad:0 | LowRatio:4 | LowObs:0 | Graduated(Saved):0
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 39 (N=13)
+  > Dir Size: 39
+[Voxel Grid Report]: ID | Incoming: 13 | Accepted: 13 | Rejected (Redundant): 0 | Usage Rate: 100%
+ created_map_line_num: 18
+[LocalMapping Fuse] Candidates: 40 | Fused: 3 | KF Lines: 131 -> 131
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 101
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1360, 4]
+  > Final new_rotation shape: [1366, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7173, 33, 43010
+[MapLineCulling] KF101 | Bad:2 | LowRatio:8 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 19
+[LocalMapping Fuse] Candidates: 36 | Fused: 4 | KF Lines: 136 -> 136
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 108 (N=36)
+  > Dir Size: 108
+[Voxel Grid Report]: ID | Incoming: 36 | Accepted: 30 | Rejected (Redundant): 6 | Usage Rate: 83.3333%
+[GaussianMapper] Added 6 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 102
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7325, 29, 43907
+[MapLineCulling] KF102 | Bad:3 | LowRatio:4 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 20
+[LocalMapping Fuse] Candidates: 36 | Fused: 6 | KF Lines: 113 -> 113
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 60 (N=20)
+  > Dir Size: 60
+[Voxel Grid Report]: ID | Incoming: 20 | Accepted: 20 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 103
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [638, 4]
+  > Final new_rotation shape: [640, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6986, 27, 42149
+[MapLineCulling] KF103 | Bad:4 | LowRatio:4 | LowObs:0 | Graduated(Saved):7
+ created_map_line_num: 14
+[LocalMapping Fuse] Candidates: 37 | Fused: 7 | KF Lines: 125 -> 125
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 36 (N=12)
+  > Dir Size: 36
+[Voxel Grid Report]: ID | Incoming: 12 | Accepted: 11 | Rejected (Redundant): 1 | Usage Rate: 91.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 104
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [2270, 4]
+  > Final new_rotation shape: [2270, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6434, 26, 38462
+[MapLineCulling] KF104 | Bad:3 | LowRatio:5 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 28 | Fused: 3 | KF Lines: 85 -> 85
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 54 (N=18)
+  > Dir Size: 54
+[Voxel Grid Report]: ID | Incoming: 18 | Accepted: 16 | Rejected (Redundant): 2 | Usage Rate: 88.8889%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 105
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6751, 21, 40570
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 30 | Fused: 3 | KF Lines: 105 -> 105
+  > new_rotation list size: 1
+  > first tensor in rot list: [2060, 4]
+  > Final new_rotation shape: [2060, 4]
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 106
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [670, 4]
+  > Final new_rotation shape: [670, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6407, 23, 39209
+[MapLineCulling] KF106 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 30 | Fused: 4 | KF Lines: 94 -> 94
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 6 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 107
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6288, 23, 37166
+[MapLineCulling] KF107 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 29 | Fused: 2 | KF Lines: 68 -> 68
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 108
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [428, 4]
+  > Final new_rotation shape: [428, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6574, 22, 39073
+[MapLineCulling] KF108 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 29 | Fused: 1 | KF Lines: 57 -> 57
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 109
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [2274, 4]
+  > Final new_rotation shape: [2274, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6539, 22, 39292
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 29 | Fused: 1 | KF Lines: 71 -> 71
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 110
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6698, 20, 39461
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 28 | Fused: 0 | KF Lines: 73 -> 73
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 111
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5446, 17, 30018
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 26 | Fused: 0 | KF Lines: 71 -> 71
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [2554, 4]
+  > Final new_rotation shape: [2554, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 112
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1000
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5084, 17, 29250
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 26 | Fused: 0 | KF Lines: 66 -> 66
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 113
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4149, 9, 24133
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 25 | Fused: 0 | KF Lines: 61 -> 61
+  > new_rotation list size: 1
+  > first tensor in rot list: [968, 4]
+  > Final new_rotation shape: [968, 4]
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 114
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4270, 9, 24838
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 23 | Fused: 0 | KF Lines: 51 -> 51
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 115
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4517, 10, 25805
+[MapLineCulling] KF115 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 22 | Fused: 0 | KF Lines: 74 -> 74
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 116
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4388, 9, 26058
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 22 | Fused: 0 | KF Lines: 56 -> 56
+  > new_rotation list size: 1
+  > first tensor in rot list: [2176, 4]
+  > Final new_rotation shape: [2176, 4]
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 117
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4229, 4, 24452
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 22 | Fused: 0 | KF Lines: 90 -> 90
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [2350, 4]
+  > Final new_rotation shape: [2352, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 118
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4103, 4, 24766
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 22 | Fused: 0 | KF Lines: 64 -> 64
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [668, 4]
+  > Final new_rotation shape: [670, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 119
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3916, 3, 24009
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 21 | Fused: 0 | KF Lines: 73 -> 73
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 120
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3895, 3, 23285
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 21 | Fused: 0 | KF Lines: 73 -> 73
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [1072, 4]
+  > Final new_rotation shape: [1072, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 121
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4744, 9, 29158
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 23 | Fused: 1 | KF Lines: 82 -> 82
+  > new_rotation list size: 2
+  > first tensor in rot list: [886, 4]
+  > Final new_rotation shape: [890, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 122
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4809, 10, 30374
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[MapLineCulling] KF122 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 58 | Fused: 0 | KF Lines: 81 -> 81
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 123
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [212, 4]
+  > Final new_rotation shape: [212, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7887, 20, 56291
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 63 | Fused: 2 | KF Lines: 89 -> 89
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 124
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1020, 4]
+  > Final new_rotation shape: [1034, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10130, 37, 72980
+[MapLineCulling] KF124 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 63 | Fused: 1 | KF Lines: 96 -> 96
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 125
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [246, 4]
+  > Final new_rotation shape: [246, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10803, 46, 77148
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 3 | Rejected (Redundant): 1 | Usage Rate: 75%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[MapLineCulling] KF125 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 61 | Fused: 0 | KF Lines: 98 -> 98
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 126
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [478, 4]
+  > Final new_rotation shape: [478, 4]
+Frame id: 1100
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11224, 44, 78787
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 52 | Fused: 1 | KF Lines: 105 -> 105
+  > new_rotation list size: 2
+  > first tensor in rot list: [1266, 4]
+  > Final new_rotation shape: [1272, 4]
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 127
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [238, 4]
+  > Final new_rotation shape: [238, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11335, 45, 79264
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 1 | Rejected (Redundant): 2 | Usage Rate: 33.3333%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 52 | Fused: 1 | KF Lines: 110 -> 110
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 128
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [410, 4]
+  > Final new_rotation shape: [412, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [690, 4]
+  > Final new_rotation shape: [694, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11304, 37, 78039
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 52 | Fused: 3 | KF Lines: 119 -> 119
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 129
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [124, 4]
+  > Final new_rotation shape: [124, 4]
+  > new_rotation list size: 2
+  > first tensor in rot list: [132, 4]
+  > Final new_rotation shape: [134, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11084, 34, 76258
+[MapLineCulling] KF129 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 54 | Fused: 2 | KF Lines: 123 -> 123
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 130
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1276, 4]
+  > Final new_rotation shape: [1278, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11188, 32, 72657
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[MapLineCulling] KF130 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 35 | Fused: 1 | KF Lines: 112 -> 112
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 131
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [136, 4]
+  > Final new_rotation shape: [136, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10946, 30, 71494
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 37 | Fused: 1 | KF Lines: 126 -> 126
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 132
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 1
+  > first tensor in rot list: [982, 4]
+  > Final new_rotation shape: [982, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9477, 25, 59455
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 6 | Rejected (Redundant): 3 | Usage Rate: 66.6667%
+[GaussianMapper] Added 3 line-sampled gaussians.
+[MapLineCulling] KF132 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 36 | Fused: 1 | KF Lines: 139 -> 139
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 133
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [868, 4]
+  > Final new_rotation shape: [872, 4]
+  > new_rotation list size: 1
+  > first tensor in rot list: [128, 4]
+  > Final new_rotation shape: [128, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 9380, 24, 58183
+[MapLineCulling] KF133 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 33 | Fused: 3 | KF Lines: 135 -> 135
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 134
+---------------LoopClosing bFindedRegion false---------------- 
+Frame id: 1200
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [878, 4]
+  > Final new_rotation shape: [878, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11169, 32, 68865
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 6 | Rejected (Redundant): 0 | Usage Rate: 100%
+[MapLineCulling] KF134 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 33 | Fused: 4 | KF Lines: 130 -> 130
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 135
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [174, 4]
+  > Final new_rotation shape: [174, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10095, 27, 60507
+[MapLineCulling] KF135 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 35 | Fused: 3 | KF Lines: 92 -> 92
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 136
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [200, 4]
+  > Final new_rotation shape: [202, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 10366, 29, 62130
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 15 (N=5)
+  > Dir Size: 15
+[Voxel Grid Report]: ID | Incoming: 5 | Accepted: 0 | Rejected (Redundant): 5 | Usage Rate: 0%
+[MapLineCulling] KF136 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+[GaussianMapper] Added 5 line-sampled gaussians.
+ created_map_line_num: 18
+[LocalMapping Fuse] Candidates: 48 | Fused: 8 | KF Lines: 148 -> 148
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 137
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [988, 4]
+  > Final new_rotation shape: [988, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8560, 34, 48730
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 126 (N=42)
+  > Dir Size: 126
+[Voxel Grid Report]: ID | Incoming: 42 | Accepted: 40 | Rejected (Redundant): 2 | Usage Rate: 95.2381%
+[GaussianMapper] Added 2 line-sampled gaussians.
+[MapLineCulling] KF137 | Bad:3 | LowRatio:11 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 20
+[LocalMapping Fuse] Candidates: 47 | Fused: 7 | KF Lines: 142 -> 142
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 138
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [262, 4]
+  > Final new_rotation shape: [262, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8523, 34, 48583
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 117 (N=39)
+  > Dir Size: 117
+[Voxel Grid Report]: ID | Incoming: 39 | Accepted: 37 | Rejected (Redundant): 2 | Usage Rate: 94.8718%
+[GaussianMapper] Added 2 line-sampled gaussians.
+[MapLineCulling] KF138 | Bad:2 | LowRatio:11 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 8
+[LocalMapping Fuse] Candidates: 35 | Fused: 1 | KF Lines: 151 -> 151
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 139
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [492, 4]
+  > Final new_rotation shape: [494, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 8691, 25, 49402
+[MapLineCulling] KF139 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 8
+[LocalMapping Fuse] Candidates: 34 | Fused: 6 | KF Lines: 126 -> 126
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 6 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 140
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7976, 26, 45316
+[MapLineCulling] KF140 | Bad:2 | LowRatio:3 | LowObs:0 | Graduated(Saved):1
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 9 | Rejected (Redundant): 0 | Usage Rate: 100%
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 29 | Fused: 3 | KF Lines: 126 -> 126
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 141
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [1092, 4]
+  > Final new_rotation shape: [1092, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7737, 23, 43913
+[MapLineCulling] KF141 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 24 | Fused: 4 | KF Lines: 137 -> 137
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 142
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1300
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7904, 24, 44930
+[MapLineCulling] KF142 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 26 | Fused: 2 | KF Lines: 141 -> 141
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 5 | Rejected (Redundant): 1 | Usage Rate: 83.3333%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 143
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7848, 23, 45051
+[MapLineCulling] KF143 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 27 | Fused: 4 | KF Lines: 136 -> 136
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 3 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 144
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7910, 25, 45523
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 7 | Rejected (Redundant): 2 | Usage Rate: 77.7778%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 25 | Fused: 4 | KF Lines: 142 -> 142
+  > new_rotation list size: 1
+  > first tensor in rot list: [1342, 4]
+  > Final new_rotation shape: [1342, 4]
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 145
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7699, 23, 44128
+[MapLineCulling] KF145 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 31 | Fused: 5 | KF Lines: 132 -> 132
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 146
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [618, 4]
+  > Final new_rotation shape: [618, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7472, 26, 42160
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 36 (N=12)
+  > Dir Size: 36
+[Voxel Grid Report]: ID | Incoming: 12 | Accepted: 10 | Rejected (Redundant): 2 | Usage Rate: 83.3333%
+[GaussianMapper] Added 2 line-sampled gaussians.
+[MapLineCulling] KF146 | Bad:2 | LowRatio:4 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 29 | Fused: 2 | KF Lines: 126 -> 126
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 147
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7339, 20, 41644
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 27 | Fused: 3 | KF Lines: 135 -> 135
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 148
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7329, 21, 41163
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 26 | Fused: 3 | KF Lines: 120 -> 120
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 149
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7914, 24, 45470
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 3 | Rejected (Redundant): 0 | Usage Rate: 100%
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 34 | Fused: 4 | KF Lines: 129 -> 129
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 150
+  > new_rotation list size: 1
+  > first tensor in rot list: [1104, 4]
+  > Final new_rotation shape: [1104, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7532, 25, 43266
+[MapLineCulling] KF150 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 33 | Fused: 3 | KF Lines: 111 -> 111
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 1 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 151
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7168, 24, 42154
+[MapLineCulling] KF151 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 33 | Fused: 7 | KF Lines: 136 -> 136
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 152
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6988, 26, 41710
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 15 (N=5)
+  > Dir Size: 15
+[Voxel Grid Report]: ID | Incoming: 5 | Accepted: 4 | Rejected (Redundant): 1 | Usage Rate: 80%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[MapLineCulling] KF152 | Bad:3 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 19
+[LocalMapping Fuse] Candidates: 49 | Fused: 11 | KF Lines: 149 -> 149
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 153
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6204, 31, 36174
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 60 (N=20)
+  > Dir Size: 60
+[Voxel Grid Report]: ID | Incoming: 20 | Accepted: 19 | Rejected (Redundant): 1 | Usage Rate: 95%
+[MapLineCulling] KF153 | Bad:6 | LowRatio:7 | LowObs:0 | Graduated(Saved):0
+[GaussianMapper] Added 1 line-sampled gaussians.
+ created_map_line_num: 13
+[LocalMapping Fuse] Candidates: 36 | Fused: 7 | KF Lines: 157 -> 157
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 154
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5202, 22, 27447
+[MapLineCulling] KF154 | Bad:4 | LowRatio:4 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 8
+[LocalMapping Fuse] Candidates: 32 | Fused: 3 | KF Lines: 147 -> 147
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 30 (N=10)
+  > Dir Size: 30
+[Voxel Grid Report]: ID | Incoming: 10 | Accepted: 9 | Rejected (Redundant): 1 | Usage Rate: 90%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 155
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6056, 24, 35925
+[MapLineCulling] KF155 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):1
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 45 (N=15)
+  > Dir Size: 45
+[Voxel Grid Report]: ID | Incoming: 15 | Accepted: 12 | Rejected (Redundant): 3 | Usage Rate: 80%
+[GaussianMapper] Added 3 line-sampled gaussians.
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 31 | Fused: 1 | KF Lines: 142 -> 142
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 156
+  > new_rotation list size: 2
+  > first tensor in rot list: [1524, 4]
+  > Final new_rotation shape: [1526, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+Frame id: 1400
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5333, 21, 29071
+[MapLineCulling] KF156 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 31 | Fused: 4 | KF Lines: 141 -> 141
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 8 | Rejected (Redundant): 1 | Usage Rate: 88.8889%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 157
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5386, 19, 29840
+[MapLineCulling] KF157 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 31 | Fused: 1 | KF Lines: 146 -> 146
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 158
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5364, 21, 29598
+[MapLineCulling] KF158 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):1
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 7 | Rejected (Redundant): 2 | Usage Rate: 77.7778%
+ created_map_line_num: 1
+[GaussianMapper] Added 2 line-sampled gaussians.
+[LocalMapping Fuse] Candidates: 29 | Fused: 1 | KF Lines: 141 -> 141
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 159
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5679, 18, 31606
+[MapLineCulling] KF159 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 31 | Fused: 2 | KF Lines: 152 -> 152
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 160
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5750, 21, 32382
+[MapLineCulling] KF160 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 29 | Fused: 2 | KF Lines: 160 -> 160
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 161
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5451, 18, 30430
+[MapLineCulling] KF161 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 1 | Rejected (Redundant): 0 | Usage Rate: 100%
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 28 | Fused: 2 | KF Lines: 159 -> 159
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 162
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5541, 17, 31170
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 28 | Fused: 2 | KF Lines: 166 -> 166
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 163
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5725, 17, 32003
+  > new_rotation list size: 2
+  > first tensor in rot list: [1540, 4]
+  > Final new_rotation shape: [1542, 4]
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 27 | Fused: 1 | KF Lines: 158 -> 158
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 164
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5838, 17, 32655
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 29 | Fused: 1 | KF Lines: 149 -> 149
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 165
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5936, 18, 33327
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 29 | Fused: 0 | KF Lines: 166 -> 166
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 2 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 166
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6029, 18, 34049
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 30 | Fused: 1 | KF Lines: 172 -> 172
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 167
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6108, 19, 34753
+[MapLineCulling] KF167 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 1 | Rejected (Redundant): 1 | Usage Rate: 50%
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 30 | Fused: 1 | KF Lines: 163 -> 163
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 168
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5640, 16, 32534
+[MapLineCulling] KF168 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 28 | Fused: 0 | KF Lines: 183 -> 183
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 169
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5951, 17, 34496
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 25 | Fused: 0 | KF Lines: 172 -> 172
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 170
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5624, 14, 32931
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 29 | Fused: 1 | KF Lines: 168 -> 168
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 171
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1464, 4]
+  > Final new_rotation shape: [1466, 4]
+Frame id: 1500
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5715, 16, 33656
+[MapLineCulling] KF171 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 29 | Fused: 0 | KF Lines: 187 -> 187
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 172
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6003, 15, 35396
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 29 | Fused: 2 | KF Lines: 177 -> 177
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 173
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5796, 17, 34203
+[MapLineCulling] KF173 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 32 | Fused: 3 | KF Lines: 175 -> 175
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 0 | Rejected (Redundant): 3 | Usage Rate: 0%
+[GaussianMapper] Added 3 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 174
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5980, 17, 35692
+[MapLineCulling] KF174 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 29 | Fused: 1 | KF Lines: 181 -> 181
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 175
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5871, 16, 34628
+[MapLineCulling] KF175 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 30 | Fused: 2 | KF Lines: 147 -> 147
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 176
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6222, 16, 37011
+[MapLineCulling] KF176 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 27 | Fused: 1 | KF Lines: 165 -> 165
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 177
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6197, 16, 36800
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 28 | Fused: 2 | KF Lines: 164 -> 164
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 178
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1708, 4]
+  > Final new_rotation shape: [1710, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6304, 17, 37519
+[MapLineCulling] KF178 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 28 | Fused: 1 | KF Lines: 169 -> 169
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 179
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6416, 17, 38256
+[MapLineCulling] KF179 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 33 | Fused: 4 | KF Lines: 163 -> 163
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 180
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6382, 18, 38215
+[MapLineCulling] KF180 | Bad:3 | LowRatio:3 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 29 | Fused: 3 | KF Lines: 157 -> 157
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 1 | Rejected (Redundant): 3 | Usage Rate: 25%
+[GaussianMapper] Added 3 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 181
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6030, 16, 36838
+[MapLineCulling] KF181 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 28 | Fused: 3 | KF Lines: 152 -> 152
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 0 | Rejected (Redundant): 3 | Usage Rate: 0%
+[GaussianMapper] Added 3 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 182
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6452, 17, 39558
+[MapLineCulling] KF182 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 30 | Fused: 3 | KF Lines: 155 -> 155
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 183
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1600
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6508, 18, 40065
+[MapLineCulling] KF183 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 36 | Fused: 4 | KF Lines: 146 -> 146
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 12 (N=4)
+  > Dir Size: 12
+[Voxel Grid Report]: ID | Incoming: 4 | Accepted: 3 | Rejected (Redundant): 1 | Usage Rate: 75%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 184
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6292, 22, 39036
+[MapLineCulling] KF184 | Bad:2 | LowRatio:5 | LowObs:0 | Graduated(Saved):0
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 185
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 66 (N=22)
+  > Dir Size: 66
+[Voxel Grid Report]: ID | Incoming: 22 | Accepted: 13 | Rejected (Redundant): 9 | Usage Rate: 59.0909%
+[GaussianMapper] Added 9 line-sampled gaussians.
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1474, 4]
+  > Final new_rotation shape: [1476, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6285, 16, 38299
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 24 | Fused: 1 | KF Lines: 80 -> 80
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 186
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6522, 17, 40047
+[MapLineCulling] KF186 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 23 | Fused: 2 | KF Lines: 172 -> 172
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 187
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6940, 21, 42095
+[MapLineCulling] KF187 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 23 | Fused: 3 | KF Lines: 153 -> 153
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 39 (N=13)
+  > Dir Size: 39
+[Voxel Grid Report]: ID | Incoming: 13 | Accepted: 2 | Rejected (Redundant): 11 | Usage Rate: 15.3846%
+[GaussianMapper] Added 11 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 188
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6691, 20, 40740
+[MapLineCulling] KF188 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 28 | Fused: 4 | KF Lines: 149 -> 149
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 189
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 30 (N=10)
+  > Dir Size: 30
+[Voxel Grid Report]: ID | Incoming: 10 | Accepted: 3 | Rejected (Redundant): 7 | Usage Rate: 30%
+---------------LoopClosing bFindedRegion false---------------- 
+[GaussianMapper] Added 7 line-sampled gaussians.
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7139, 24, 43480
+[MapLineCulling] KF189 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 27 | Fused: 5 | KF Lines: 150 -> 150
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 24 (N=8)
+  > Dir Size: 24
+[Voxel Grid Report]: ID | Incoming: 8 | Accepted: 7 | Rejected (Redundant): 1 | Usage Rate: 87.5%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 190
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6708, 21, 41126
+[MapLineCulling] KF190 | Bad:2 | LowRatio:2 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 10
+[LocalMapping Fuse] Candidates: 30 | Fused: 7 | KF Lines: 141 -> 141
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 24 (N=8)
+  > Dir Size: 24
+[Voxel Grid Report]: ID | Incoming: 8 | Accepted: 5 | Rejected (Redundant): 3 | Usage Rate: 62.5%
+[GaussianMapper] Added 3 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 191
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 1
+  > first tensor in rot list: [1682, 4]
+  > Final new_rotation shape: [1682, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7117, 23, 43635
+[MapLineCulling] KF191 | Bad:4 | LowRatio:3 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 18
+[LocalMapping Fuse] Candidates: 39 | Fused: 8 | KF Lines: 141 -> 141
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 5 | Rejected (Redundant): 4 | Usage Rate: 55.5556%
+[GaussianMapper] Added 4 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 192
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6509, 29, 40595
+[MapLineCulling] KF192 | Bad:6 | LowRatio:8 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 22
+[LocalMapping Fuse] Candidates: 42 | Fused: 12 | KF Lines: 133 -> 133
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 78 (N=26)
+  > Dir Size: 78
+[Voxel Grid Report]: ID | Incoming: 26 | Accepted: 22 | Rejected (Redundant): 4 | Usage Rate: 84.6154%
+[GaussianMapper] Added 4 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 193
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 1700
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5952, 29, 37602
+[MapLineCulling] KF193 | Bad:6 | LowRatio:8 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 29 | Fused: 4 | KF Lines: 125 -> 125
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 108 (N=36)
+  > Dir Size: 108
+[Voxel Grid Report]: ID | Incoming: 36 | Accepted: 34 | Rejected (Redundant): 2 | Usage Rate: 94.4444%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 194
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6385, 24, 40270
+[MapLineCulling] KF194 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 15
+[LocalMapping Fuse] Candidates: 32 | Fused: 8 | KF Lines: 134 -> 134
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 195
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 21 (N=7)
+  > Dir Size: 21
+[Voxel Grid Report]: ID | Incoming: 7 | Accepted: 3 | Rejected (Redundant): 4 | Usage Rate: 42.8571%
+[GaussianMapper] Added 4 line-sampled gaussians.
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5932, 24, 37597
+[MapLineCulling] KF195 | Bad:2 | LowRatio:1 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 19
+[LocalMapping Fuse] Candidates: 43 | Fused: 8 | KF Lines: 90 -> 90
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 42 (N=14)
+  > Dir Size: 42
+[Voxel Grid Report]: ID | Incoming: 14 | Accepted: 8 | Rejected (Redundant): 6 | Usage Rate: 57.1429%
+[GaussianMapper] Added 6 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 196
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6147, 31, 39355
+[MapLineCulling] KF196 | Bad:5 | LowRatio:5 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 10
+[LocalMapping Fuse] Candidates: 35 | Fused: 5 | KF Lines: 93 -> 93
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 93 (N=31)
+  > Dir Size: 93
+[Voxel Grid Report]: ID | Incoming: 31 | Accepted: 21 | Rejected (Redundant): 10 | Usage Rate: 67.7419%
+[GaussianMapper] Added 10 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 197
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1456, 4]
+  > Final new_rotation shape: [1458, 4]
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6309, 25, 40238
+[MapLineCulling] KF197 | Bad:2 | LowRatio:1 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 35 | Fused: 5 | KF Lines: 90 -> 90
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 198
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6008, 23, 38314
+[MapLineCulling] KF198 | Bad:3 | LowRatio:2 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 32 | Fused: 2 | KF Lines: 93 -> 93
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 4 | Rejected (Redundant): 2 | Usage Rate: 66.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 199
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5912, 23, 37733
+[MapLineCulling] KF199 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 32 | Fused: 1 | KF Lines: 84 -> 84
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 5 | Rejected (Redundant): 4 | Usage Rate: 55.5556%
+[GaussianMapper] Added 4 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 200
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6110, 25, 38602
+[MapLineCulling] KF200 | Bad:2 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 8
+[LocalMapping Fuse] Candidates: 32 | Fused: 1 | KF Lines: 73 -> 73
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 8 | Rejected (Redundant): 1 | Usage Rate: 88.8889%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 201
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6105, 25, 39285
+[MapLineCulling] KF201 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 32 | Fused: 1 | KF Lines: 78 -> 78
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 9 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 202
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5786, 25, 37151
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 36 (N=12)
+  > Dir Size: 36
+[Voxel Grid Report]: ID | Incoming: 12 | Accepted: 11 | Rejected (Redundant): 1 | Usage Rate: 91.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[MapLineCulling] KF202 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 29 | Fused: 2 | KF Lines: 73 -> 73
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 203
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1586, 4]
+  > Final new_rotation shape: [1592, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5749, 23, 37358
+[MapLineCulling] KF203 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):4
+ created_map_line_num: 8
+[LocalMapping Fuse] Candidates: 34 | Fused: 0 | KF Lines: 68 -> 68
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 204
+Frame id: 1800
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5869, 28, 38026
+[MapLineCulling] KF204 | Bad:1 | LowRatio:5 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 30 | Fused: 1 | KF Lines: 61 -> 61
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 45 (N=15)
+  > Dir Size: 45
+[Voxel Grid Report]: ID | Incoming: 15 | Accepted: 13 | Rejected (Redundant): 2 | Usage Rate: 86.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 205
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5882, 26, 39003
+[MapLineCulling] KF205 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 28 | Fused: 2 | KF Lines: 68 -> 68
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 8 | Rejected (Redundant): 1 | Usage Rate: 88.8889%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 206
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5895, 25, 39254
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 33 | Fused: 1 | KF Lines: 75 -> 75
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 5 | Rejected (Redundant): 1 | Usage Rate: 83.3333%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 207
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5880, 25, 39346
+[MapLineCulling] KF207 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 30 | Fused: 1 | KF Lines: 69 -> 69
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 9 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 208
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5811, 23, 39260
+[MapLineCulling] KF208 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 28 | Fused: 2 | KF Lines: 58 -> 58
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 209
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1546, 4]
+  > Final new_rotation shape: [1558, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6070, 24, 41370
+[MapLineCulling] KF209 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 26 | Fused: 1 | KF Lines: 73 -> 73
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 210
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6136, 22, 41513
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 27 | Fused: 2 | KF Lines: 82 -> 82
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 211
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6188, 22, 41653
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 28 | Fused: 1 | KF Lines: 83 -> 83
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 212
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6340, 22, 41686
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 29 | Fused: 1 | KF Lines: 95 -> 95
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 213
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6443, 21, 42064
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 26 | Fused: 1 | KF Lines: 107 -> 107
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 214
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6068, 22, 39610
+[MapLineCulling] KF214 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 28 | Fused: 3 | KF Lines: 118 -> 118
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 215
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6127, 25, 40069
+[MapLineCulling] KF215 | Bad:1 | LowRatio:3 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 28 | Fused: 0 | KF Lines: 91 -> 91
+  > new_rotation list size: 2
+  > first tensor in rot list: [1234, 4]
+  > Final new_rotation shape: [1238, 4]
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 36 (N=12)
+  > Dir Size: 36
+[Voxel Grid Report]: ID | Incoming: 12 | Accepted: 12 | Rejected (Redundant): 0 | Usage Rate: 100%
+Frame id: 1900
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 216
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5956, 22, 38601
+[MapLineCulling] KF216 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 26 | Fused: 0 | KF Lines: 100 -> 100
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 217
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5973, 21, 38386
+ created_map_line_num: 0
+[LocalMapping Fuse] Candidates: 23 | Fused: 0 | KF Lines: 118 -> 118
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 218
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5732, 19, 36805
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 25 | Fused: 2 | KF Lines: 103 -> 103
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 219
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6175, 23, 40036
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 28 | Fused: 3 | KF Lines: 136 -> 136
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 6 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 220
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5998, 23, 39212
+  > new_rotation list size: 1
+  > first tensor in rot list: [1170, 4]
+  > Final new_rotation shape: [1170, 4]
+[MapLineCulling] KF220 | Bad:1 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 25 | Fused: 1 | KF Lines: 114 -> 114
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 5 | Rejected (Redundant): 1 | Usage Rate: 83.3333%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 221
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5896, 23, 38585
+[MapLineCulling] KF221 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 26 | Fused: 2 | KF Lines: 77 -> 77
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 9 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 222
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5901, 22, 38200
+[MapLineCulling] KF222 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 25 | Fused: 0 | KF Lines: 94 -> 94
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 4 | Rejected (Redundant): 2 | Usage Rate: 66.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 223
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6190, 22, 40521
+[MapLineCulling] KF223 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 28 | Fused: 2 | KF Lines: 102 -> 102
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 224
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6026, 24, 38936
+[MapLineCulling] KF224 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 31 | Fused: 2 | KF Lines: 96 -> 96
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 21 (N=7)
+  > Dir Size: 21
+[Voxel Grid Report]: ID | Incoming: 7 | Accepted: 6 | Rejected (Redundant): 1 | Usage Rate: 85.7143%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 225
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6158, 26, 38802
+[MapLineCulling] KF225 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 12
+[LocalMapping Fuse] Candidates: 32 | Fused: 2 | KF Lines: 99 -> 99
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 45 (N=15)
+  > Dir Size: 45
+[Voxel Grid Report]: ID | Incoming: 15 | Accepted: 14 | Rejected (Redundant): 1 | Usage Rate: 93.3333%
+[GaussianMapper] Added 1 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 226
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1490, 4]
+  > Final new_rotation shape: [1496, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6346, 28, 39343
+[MapLineCulling] KF226 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 11
+[LocalMapping Fuse] Candidates: 33 | Fused: 2 | KF Lines: 73 -> 73
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 54 (N=18)
+  > Dir Size: 54
+[Voxel Grid Report]: ID | Incoming: 18 | Accepted: 17 | Rejected (Redundant): 1 | Usage Rate: 94.4444%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 227
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5653, 25, 35110
+[MapLineCulling] KF227 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):4
+ created_map_line_num: 8
+[LocalMapping Fuse] Candidates: 32 | Fused: 2 | KF Lines: 70 -> 70
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 4 | Rejected (Redundant): 2 | Usage Rate: 66.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+Frame id: 2000
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 228
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4716, 16, 28004
+[MapLineCulling] KF228 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):5
+ created_map_line_num: 3
+[LocalMapping Fuse] Candidates: 32 | Fused: 1 | KF Lines: 65 -> 65
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 229
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3822, 13, 19698
+[MapLineCulling] KF229 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 32 | Fused: 1 | KF Lines: 75 -> 75
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 2 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 230
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3965, 13, 20574
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 34 | Fused: 0 | KF Lines: 52 -> 52
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 231
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3818, 14, 20237
+[MapLineCulling] KF231 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 28 | Fused: 1 | KF Lines: 27 -> 27
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 1 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 232
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3858, 15, 20095
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 31 | Fused: 0 | KF Lines: 32 -> 32
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 1 | Rejected (Redundant): 0 | Usage Rate: 100%
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 233
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+  > new_rotation list size: 2
+  > first tensor in rot list: [1704, 4]
+  > Final new_rotation shape: [1714, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3846, 15, 20028
+[MapLineCulling] KF233 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 2
+[LocalMapping Fuse] Candidates: 28 | Fused: 1 | KF Lines: 54 -> 54
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 234
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3779, 15, 18732
+[MapLineCulling] KF234 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 29 | Fused: 0 | KF Lines: 46 -> 46
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 1 | Rejected (Redundant): 0 | Usage Rate: 100%
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 235
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 3573, 15, 19127
+[MapLineCulling] KF235 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 1
+[LocalMapping Fuse] Candidates: 33 | Fused: 1 | KF Lines: 62 -> 62
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 236
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4074, 16, 23567
+[MapLineCulling] KF236 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 4
+[LocalMapping Fuse] Candidates: 34 | Fused: 3 | KF Lines: 68 -> 68
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 237
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 4310, 17, 25321
+[MapLineCulling] KF237 | Bad:2 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 33 | Fused: 3 | KF Lines: 94 -> 94
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 4 | Rejected (Redundant): 2 | Usage Rate: 66.6667%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 238
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1680, 4]
+  > Final new_rotation shape: [1682, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 5557, 23, 37479
+[MapLineCulling] KF238 | Bad:1 | LowRatio:0 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 37 | Fused: 1 | KF Lines: 77 -> 77
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 24 (N=8)
+  > Dir Size: 24
+[Voxel Grid Report]: ID | Incoming: 8 | Accepted: 6 | Rejected (Redundant): 2 | Usage Rate: 75%
+[GaussianMapper] Added 2 line-sampled gaussians.
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 239
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 6248, 26, 42177
+[MapLineCulling] KF239 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 42 | Fused: 1 | KF Lines: 70 -> 70
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 9 (N=3)
+  > Dir Size: 9
+[Voxel Grid Report]: ID | Incoming: 3 | Accepted: 2 | Rejected (Redundant): 1 | Usage Rate: 66.6667%
+[GaussianMapper] Added 1 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 240
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7946, 41, 53217
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 30 (N=10)
+  > Dir Size: 30
+[Voxel Grid Report]: ID | Incoming: 10 | Accepted: 8 | Rejected (Redundant): 2 | Usage Rate: 80%
+[GaussianMapper] Added 2 line-sampled gaussians.
+[MapLineCulling] KF240 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 10
+[LocalMapping Fuse] Candidates: 48 | Fused: 2 | KF Lines: 72 -> 72
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 241
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+  > new_rotation list size: 2
+  > first tensor in rot list: [1658, 4]
+  > Final new_rotation shape: [1664, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7971, 46, 53906
+[MapLineCulling] KF241 | Bad:0 | LowRatio:4 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 47 | Fused: 0 | KF Lines: 97 -> 97
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 63 (N=21)
+  > Dir Size: 63
+[Voxel Grid Report]: ID | Incoming: 21 | Accepted: 19 | Rejected (Redundant): 2 | Usage Rate: 90.4762%
+[GaussianMapper] Added 2 line-sampled gaussians.
+---------------LoopClosing bFindedRegion false---------------- 
+Frame id: 2100
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 242
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 7627, 42, 50983
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 6 (N=2)
+  > Dir Size: 6
+[Voxel Grid Report]: ID | Incoming: 2 | Accepted: 2 | Rejected (Redundant): 0 | Usage Rate: 100%
+[MapLineCulling] KF242 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 6
+[LocalMapping Fuse] Candidates: 48 | Fused: 0 | KF Lines: 96 -> 96
+---------------------- bFindedRegion true -------------------- 
+*Loop detected
+Local Mapping STOP
+Loop: mpCurrentKF -> 242
+Loop: number of connected KFs -> 52
+  > new_rotation list size: 2
+  > first tensor in rot list: [2084, 4]
+  > Final new_rotation shape: [2090, 4]
+Local Mapping RELEASE
+[Gaussian Mapper]Loop Closure Detected.
+[LineLoop-Gaussian] candidates=232 correctedLineGaussians=0 kfsTotal=242 kfsWithPkf=242 kfsCorrected=0 kfsSkippedByGate=242 corrected=0 skippedBad=0 skippedNull=0 duplicateSkipped=0 nonFinite=0 maxTranslation=0.0430136 maxRotationDeg=0.658901 meanTranslation=0 meanRotationDeg=0 meanScaleRatio=1
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 243
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+iteration= 0	 chi2= 1688537.111169	 time= 0.27152	 cumTime= 0.27152	 edges= 189891	 schur= 1	 lambda= 1441.184190	 levenbergIter= 1
+iteration= 1	 chi2= 1465131.350158	 time= 0.169425	 cumTime= 0.440945	 edges= 189891	 schur= 1	 lambda= 738.150495	 levenbergIter= 1
+iteration= 2	 chi2= 1138813.128111	 time= 0.424795	 cumTime= 0.86574	 edges= 189891	 schur= 1	 lambda= 1968.401319	 levenbergIter= 3
+  > new_rotation list size: 2
+  > first tensor in rot list: [2268, 4]
+  > Final new_rotation shape: [2270, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 12370, 167, 94544
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 3 (N=1)
+  > Dir Size: 3
+[Voxel Grid Report]: ID | Incoming: 1 | Accepted: 0 | Rejected (Redundant): 1 | Usage Rate: 0%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[MapLineCulling] KF243 | Bad:0 | LowRatio:3 | LowObs:0 | Graduated(Saved):3
+ created_map_line_num: 10
+[LocalMapping Fuse] Candidates: 177 | Fused: 13 | KF Lines: 125 -> 125
+iteration= 3	 chi2= 986117.574308	 time= 0.420738	 cumTime= 1.28648	 edges= 189891	 schur= 1	 lambda= 5249.070185	 levenbergIter= 3
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 244
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+iteration= 4	 chi2= 983512.559238	 time= 0.161895	 cumTime= 1.44837	 edges= 189891	 schur= 1	 lambda= 3499.380123	 levenbergIter= 1
+iteration= 5	 chi2= 982460.372443	 time= 0.551956	 cumTime= 2.00033	 edges= 189891	 schur= 1	 lambda= 74653.442631	 levenbergIter= 4
+iteration= 6	 chi2= 982405.398521	 time= 0.164582	 cumTime= 2.16491	 edges= 189891	 schur= 1	 lambda= 30499.906218	 levenbergIter= 1
+  > new_rotation list size: 2
+  > first tensor in rot list: [1922, 4]
+  > Final new_rotation shape: [1928, 4]
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 12102, 168, 92840
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 42 (N=14)
+  > Dir Size: 42
+[Voxel Grid Report]: ID | Incoming: 14 | Accepted: 12 | Rejected (Redundant): 2 | Usage Rate: 85.7143%
+[GaussianMapper] Added 2 line-sampled gaussians.
+[MapLineCulling] KF244 | Bad:5 | LowRatio:4 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 12
+[LocalMapping Fuse] Candidates: 182 | Fused: 5 | KF Lines: 58 -> 58
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 245
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+iteration= 7	 chi2= 982385.329311	 time= 0.420941	 cumTime= 2.58585	 edges= 189891	 schur= 1	 lambda= 81333.083247	 levenbergIter= 3
+iteration= 8	 chi2= 982361.946388	 time= 0.299358	 cumTime= 2.88521	 edges= 189891	 schur= 1	 lambda= 54222.055498	 levenbergIter= 2
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11716, 171, 90910
+[MapLineCulling] KF245 | Bad:2 | LowRatio:8 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 5
+Local Mapping STOP
+GBA: Correct MapPoints and MapLines
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 84 (N=28)
+  > Dir Size: 84
+[Voxel Grid Report]: ID | Incoming: 28 | Accepted: 24 | Rejected (Redundant): 4 | Usage Rate: 85.7143%
+Frame id: 2200
+[GaussianMapper] Added 4 line-sampled gaussians.
+Local Mapping RELEASE
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 246
+[FrozenABL] pre-generated kf sampling sequence: 500 steps (seed 12345)
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+[RasterBackendPin] condition pinned to C
+[GbaRecovery] repeat check: 10 steps x2
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+Invalid depth detected (Z <= 0)!
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11636, 165, 90391
+[MapLineCulling] KF246 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):0
+ created_map_line_num: 9
+[LocalMapping Fuse] Candidates: 178 | Fused: 10 | KF Lines: 121 -> 121
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 247
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 12410, 168, 95275
+[MapLineCulling] KF247 | Bad:1 | LowRatio:4 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 7
+[LocalMapping Fuse] Candidates: 177 | Fused: 5 | KF Lines: 97 -> 97
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 248
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+[GbaRecovery] repeat tensor diffs: xyz=0.000913143 rot=0.0390588 scale=0.0194607 opacity=0.0226073 dc=0.00118685 rest=0.000325598
+[GbaRecovery] repeat check PASS step0_param=1 step0_adam=1 schedule=1 quality=1 post_step_param_diff=0.0390588 post_step_adam_diff=0.00103617
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 14644, 170, 112426
+[MapLineCulling] KF248 | Bad:1 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 180 | Fused: 7 | KF Lines: 128 -> 128
+---------------LoopClosing bFindedRegion false---------------- 
+Frame id: 2300
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 249
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 13802, 163, 108050
+[MapLineCulling] KF249 | Bad:0 | LowRatio:2 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 5
+[LocalMapping Fuse] Candidates: 175 | Fused: 7 | KF Lines: 160 -> 160
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 250
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11799, 162, 93149
+[MapLineCulling] KF250 | Bad:0 | LowRatio:1 | LowObs:0 | Graduated(Saved):1
+ created_map_line_num: 11
+[LocalMapping Fuse] Candidates: 179 | Fused: 6 | KF Lines: 152 -> 152
+---------------LoopClosing bFindedRegion false---------------- 
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 251
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Frame id: 2400
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11362, 169, 91480
+[MapLineCulling] KF251 | Bad:0 | LowRatio:7 | LowObs:0 | Graduated(Saved):0
+ ProcessNewKeyFrameWithLine-> mpCurrentKeyFrame: mnId 252
+---------------LoopClosing bFindedRegion false---------------- 
+LocalMapping:: RunWithLine: start LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+LocalMapping:: RunWithLine: end LocalBundleAdjustmentWithLine_Optimization_Plucker_Reg
+Local bundle adjustment num_MPs, num_MLs, num_MLs_BA: 11603, 164, 92954
+[MapLineCulling] KF252 | Bad:0 | LowRatio:0 | LowObs:0 | Graduated(Saved):2
+ created_map_line_num: 10
+[LocalMapping Fuse] Candidates: 180 | Fused: 0 | KF Lines: 123 -> 123
+---------------LoopClosing bFindedRegion false---------------- 
+Sequence processing finished. Waiting for backend to sync...
+Shutdown
+
+ TIME STATS in ms (mean$\pm$std)
+OpenCV version: 4.10.0
+---------------------------
+Tracking
+
+ORB Extraction: 11.414$\pm$1.4636
+Pose Prediction: 5.4055$\pm$1.4343
+LM Track: 7.8267$\pm$2.7639
+New KF decision: 0.12302$\pm$0.13251
+Total Tracking: 17.35$\pm$14.9
+
+
+
+Local Mapping
+
+KF Insertion: 8.2536$\pm$3.4948
+MP Culling: 0.27299$\pm$0.08188
+MP Creation: 19.259$\pm$7.2927
+LBA: 290.11$\pm$208.08
+KF Culling: 14.556$\pm$7.8095
+Total Local Mapping: 333.83$\pm$224.6
+---------------------------
+
+LBA complexity (mean$\pm$std)
+LBA Edges: 39373$\pm$16837
+LBA KF optimized: 37.454$\pm$18.76
+LBA KF fixed: 51.378$\pm$31.821
+LBA MP: 6303.2$\pm$2138.7
+
+LBA executions: 251
+LBA aborts: 2
+---------------------------
+
+Map complexity
+KFs in map: 251
+MPs in map: 27504
+---------------------------
+
+Place Recognition (mean$\pm$std)
+Database Query: 2.7155$\pm$2.1331
+SE3 estimation: 31.144$\pm$26.068
+Total Place Recognition: 32.765$\pm$28.017
+
+
+Loop Closing (mean$\pm$std)
+Loop Fusion: 197.97$\pm$0
+Essential Graph: 530.82$\pm$0
+Total Loop Closing: 736.95$\pm$0
+
+Num exec: 1
+Number of KFs: 0$\pm$0
+
+Map Merging (mean$\pm$std)
+Merge Maps: 0$\pm$0
+Welding BA: 0$\pm$0
+Optimization Ess.: 0$\pm$0
+Total Map Merging: 0$\pm$0
+
+Num exec: 0
+Number of KFs: 0$\pm$0
+Number of MPs: 0$\pm$0
+
+Full GBA (mean$\pm$std)
+GBA: 3342.4$\pm$0
+Map Update: 212.11$\pm$0
+Total Full GBA: 3554.5$\pm$0
+
+Num exec: 1
+Num abort: 0
+Number of KFs: 242$\pm$0
+Number of MPs: 28268$\pm$0
+[GbaRecovery] arms finished; summary=abl_out/gba_recovery_v1/summary.csv
+[GBA-Apply] evt=1 map=0 kfs=245 in_scene=245 deltas=245 moved=104159 nonzero_moved=99881 line_moved=238 stale=0 unassigned=0 missing_event=169 groups=245 scene_missing=0 pose_mismatch_max=0.0000 translation_mean=0.00334 translation_max=0.17229 ref_in_event=104159 ref_scene_not_event=169 ref_absent_scene=0 ref_unassigned=0 ref_newer_than_event=0 count_before=104328 count_after=104328 created_during_event=0 lm_map_points_created=111433 sync_ms=37006.7 APPLIED
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 27 (N=9)
+  > Dir Size: 27
+[Voxel Grid Report]: ID | Incoming: 9 | Accepted: 9 | Rejected (Redundant): 0 | Usage Rate: 100%
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 39 (N=13)
+  > Dir Size: 39
+[Voxel Grid Report]: ID | Incoming: 13 | Accepted: 9 | Rejected (Redundant): 4 | Usage Rate: 69.2308%
+[GaussianMapper] Added 4 line-sampled gaussians.
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 24 (N=8)
+  > Dir Size: 24
+[Voxel Grid Report]: ID | Incoming: 8 | Accepted: 5 | Rejected (Redundant): 3 | Usage Rate: 62.5%
+[GaussianMapper] Added 3 line-sampled gaussians.
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 18 (N=6)
+  > Dir Size: 18
+[Voxel Grid Report]: ID | Incoming: 6 | Accepted: 5 | Rejected (Redundant): 1 | Usage Rate: 83.3333%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 24 (N=8)
+  > Dir Size: 24
+[Voxel Grid Report]: ID | Incoming: 8 | Accepted: 7 | Rejected (Redundant): 1 | Usage Rate: 87.5%
+[GaussianMapper] Added 1 line-sampled gaussians.
+[DEBUG Mapper] Received Line Sampled Points from SLAM:
+  > Pos Size: 69 (N=23)
+  > Dir Size: 69
+[Voxel Grid Report]: ID | Incoming: 23 | Accepted: 21 | Rejected (Redundant): 2 | Usage Rate: 91.3044%
+[GaussianMapper] Added 2 line-sampled gaussians.
+[Gaussian Mapper] SLAM ended. Resetting remaining_times_of_use for global refinement...
+  > new_rotation list size: 1
+  > first tensor in rot list: [640, 4]
+  > Final new_rotation shape: [640, 4]
+  > new_rotation list size: 1
+  > first tensor in rot list: [548, 4]
+  > Final new_rotation shape: [548, 4]
+[Gaussian Mapper] Final refinement iteration: 142 / 1000
+  > new_rotation list size: 2
+  > first tensor in rot list: [462, 4]
+  > Final new_rotation shape: [464, 4]
+  > new_rotation list size: 1
+  > first tensor in rot list: [436, 4]
+  > Final new_rotation shape: [436, 4]
+[Gaussian Mapper] Final refinement iteration: 342 / 1000
+  > new_rotation list size: 1
+  > first tensor in rot list: [272, 4]
+  > Final new_rotation shape: [272, 4]
+  > new_rotation list size: 1
+  > first tensor in rot list: [420, 4]
+  > Final new_rotation shape: [420, 4]
+[Gaussian Mapper] Final refinement iteration: 542 / 1000
+  > new_rotation list size: 1
+  > first tensor in rot list: [230, 4]
+  > Final new_rotation shape: [230, 4]
+  > new_rotation list size: 1
+  > first tensor in rot list: [230, 4]
+  > Final new_rotation shape: [230, 4]
+[Gaussian Mapper] Final refinement iteration: 742 / 1000
+  > new_rotation list size: 2
+  > first tensor in rot list: [366, 4]
+  > Final new_rotation shape: [368, 4]
+  > new_rotation list size: 1
+  > first tensor in rot list: [302, 4]
+  > Final new_rotation shape: [302, 4]
+[Gaussian Mapper] Final refinement iteration: 942 / 1000
+[Gaussian Mapper] Final refinement completed perfectly! Saving models...
+=====================================================
+[Gaussian Mapper] Total Mapping Time: 89.473 s (1.49122 mins)
+[Gaussian Mapper] Total Iterations: 14658
+=====================================================
+[PhaseTiming] SLAM_end=134.125s mapper_end=134.125s queue_drain=0ms refinement=7.495s
+All threads finished. Saving results...
+=====================================================
+[System] Total Operation Time: 142.85 seconds (2.3809 minutes).
+=====================================================
+All threads finished. Saving results...
+
+Saving camera trajectory to /tmp/gba_recovery_run/CameraTrajectory_TUM.txt ...
+[System] SaveTrajectoryTUM: atlas holds 1 map(s)
+[System] SaveTrajectoryTUM:   map 0 has 251 keyframe(s)  [current]
+[System] SaveTrajectoryTUM: exported map=0 refKFs=251 written=2488 skipped_lost=0 skipped_other_map=0 skipped_no_refkf=0 (of 2488 frame entries)
+[System] SaveTrajectoryTUM: frame entries by reference-KF map: map0=2488 mapTotal=2488
+
+Saving keyframe trajectory to /tmp/gba_recovery_run/KeyFrameTrajectory_TUM.txt ...
+[System] SaveKeyFrameTrajectoryTUM: atlas holds 1 map(s)
+[System] SaveKeyFrameTrajectoryTUM:   map 0 has 251 keyframe(s)  [current]
+[System] SaveKeyFrameTrajectoryTUM: exported map=0 refKFs=251
+
+Saving trajectory to /tmp/gba_recovery_run/CameraTrajectory_EuRoC.txt ...
+[System] SaveTrajectoryEuRoC: atlas holds 1 map(s)
+[System] SaveTrajectoryEuRoC:   map 0 has 251 keyframe(s)  [current]
+
+End of saving trajectory to /tmp/gba_recovery_run/CameraTrajectory_EuRoC.txt ...
+
+Saving keyframe trajectory to /tmp/gba_recovery_run/KeyFrameTrajectory_EuRoC.txt ...
+
+Saving camera trajectory to /tmp/gba_recovery_run/CameraTrajectory_KITTI.txt ...
+[System] SaveTrajectoryKITTI: atlas holds 1 map(s)
+[System] SaveTrajectoryKITTI:   map 0 has 251 keyframe(s)  [current]
+[System] SaveTrajectoryKITTI: exported map=0 refKFs=251 written=2488 skipped_other_map=0 (of 2488 frame entries)
+
+===================================================
+[System] 正在导出全局点线 3D 模型至: /tmp/gba_recovery_run/Global_Final_Map
+[System] 准备写入: 27504 个地图点, 423 条地图线.
+[ExportMapPointsToOBJ] Exported 27504 valid points to /tmp/gba_recovery_run/Global_Final_Map_Points.obj
+[ExportMapLinesToOBJ] Exported 423 lines (846 vertices) to /tmp/gba_recovery_run/Global_Final_Map_Lines.obj
+[System] 全局地图导出完成！
+===================================================

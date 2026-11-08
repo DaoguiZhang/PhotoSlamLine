@@ -1,0 +1,24 @@
+head=undertrain-live-terminal-v1
+source=same_process_natural_end
+complete_optimizer_state=1
+iteration=9091
+frozen_opt_steps=9091
+gaussians=511336
+line_gaussians=717
+active_sh=3
+default_sh=3
+kfs=186
+rng_cpu_defined=1
+rng_cuda_defined=1
+adam_groups=6
+adam_group=0 step=9001 lr=5.53215e-05 exp_avg=1 exp_avg_sq=1
+adam_group=1 step=9001 lr=0.0025 exp_avg=1 exp_avg_sq=1
+adam_group=2 step=9001 lr=0.000125 exp_avg=1 exp_avg_sq=1
+adam_group=3 step=9001 lr=0.05 exp_avg=1 exp_avg_sq=1
+adam_group=4 step=9001 lr=0.005 exp_avg=1 exp_avg_sq=1
+adam_group=5 step=9001 lr=0.001 exp_avg=1 exp_avg_sq=1
+view_sequence_len=1230
+eval_views=3
+topology_frozen=1
+camera_frozen=1
+line_loss_disabled=0

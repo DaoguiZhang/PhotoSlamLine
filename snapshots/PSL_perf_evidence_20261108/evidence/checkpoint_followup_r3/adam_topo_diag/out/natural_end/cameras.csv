@@ -1,0 +1,13 @@
+fid,img_name,qw,qx,qy,qz,tx,ty,tz,fx,fy,cx,cy,width,height
+0,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000000.jpg,1,0,0,0,0,0,0,600,600,599.5,339.5,1200,680
+1,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000010.jpg,0.996688,0.0492453,0.0631588,-0.0140785,-0.0211243,0.0335754,0.0531389,600,600,599.5,339.5,1200,680
+2,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000011.jpg,0.996094,0.0536151,0.0685531,-0.0149485,-0.0225042,0.0353846,0.0601447,600,600,599.5,339.5,1200,680
+3,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000019.jpg,0.989972,0.086283,0.110038,-0.020047,-0.0312427,0.0408382,0.129106,600,600,599.5,339.5,1200,680
+4,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000030.jpg,0.977046,0.130483,0.166845,-0.0227464,-0.0285948,0.0351212,0.231183,600,600,599.5,339.5,1200,680
+5,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000042.jpg,0.95649,0.178386,0.230073,-0.0192795,0.0100696,0.0321853,0.320979,600,600,599.5,339.5,1200,680
+6,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000070.jpg,0.91083,0.220776,0.348591,-0.0114338,0.0937939,0.214089,0.376533,600,600,599.5,339.5,1200,680
+7,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000081.jpg,0.916129,0.177979,0.358131,-0.027812,0.0713256,0.337805,0.350719,600,600,599.5,339.5,1200,680
+8,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000093.jpg,0.92075,0.124451,0.366363,-0.0500992,0.00652246,0.420612,0.323303,600,600,599.5,339.5,1200,680
+9,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000101.jpg,0.918265,0.0951485,0.379028,-0.0638274,-0.0448563,0.438201,0.325811,600,600,599.5,339.5,1200,680
+10,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000108.jpg,0.913294,0.0765456,0.393142,-0.0739946,-0.0860905,0.439206,0.337416,600,600,599.5,339.5,1200,680
+11,/workspace/code/SEGS-SLAM/datasets/replica/room1/results/frame000119.jpg,0.904431,0.0753763,0.412608,-0.0779586,-0.135046,0.432695,0.352197,600,600,599.5,339.5,1200,680

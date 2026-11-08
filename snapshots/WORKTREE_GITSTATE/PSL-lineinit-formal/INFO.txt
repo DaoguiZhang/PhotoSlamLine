@@ -1,0 +1,4 @@
+# worktree: /workspace/code/PSL-lineinit-formal
+# HEAD: 0e2f7fc4001019c61984fc7e266b80f188c8a12e
+# branch: HEAD
+# tracked-dirty files: 20

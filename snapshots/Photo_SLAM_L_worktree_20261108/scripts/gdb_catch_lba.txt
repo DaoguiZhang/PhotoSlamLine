@@ -1,0 +1,16 @@
+set pagination off
+set confirm off
+set print thread-events off
+set logging file /tmp/gdb_catch/bt.log
+set logging overwrite on
+set logging enabled on
+handle SIGPIPE nostop noprint pass
+handle SIGINT nostop noprint pass
+catch signal SIGSEGV
+catch signal SIGABRT
+run
+echo ====SIGNAL-CAUGHT====\n
+thread apply all bt full
+info threads
+info registers
+quit

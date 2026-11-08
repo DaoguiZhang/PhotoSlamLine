@@ -1,0 +1,8 @@
+code_read_key,yaml_alternate_key,yaml_alternate_value,actual_value,source,bound_to_yaml,notes
+Optimization.absolute_max_ratio,absolute_max_ratio,100.0,1500.0,explicit_default,no,materially different: 100 vs 1500
+Optimization.lambda_anisotropy,lambda_anisotropy,0.01,0.01,explicit_default,no,
+Optimization.line_sample_step,Line.SampleStep,0.10,0.2,explicit_default,no,materially different: 0.10 vs 0.2
+Optimization.line_sigma,Line.Sigma,3.0,3.0,explicit_default,no,
+Optimization.line_top_k,Line.TopK,3,3,explicit_default,no,
+Optimization.line_view_weight,Line.ViewWeight,2.0,2.0,explicit_default,no,
+Optimization.max_anisotropy_threshold,max_anisotropy_threshold,100.0,600.0,explicit_default,no,materially different: 100 vs 600

@@ -1,0 +1,19 @@
+F=/workspace/code/PSL-perf/evidence/frozen_A_clean_20261023
+ROOT=/workspace/code/PSL-perf
+OUT=/tmp/room1_A_frozen
+mkdir -p "$OUT"
+LD_LIBRARY_PATH="$F/bin" \
+env -u CUDA_LAUNCH_BLOCKING \
+  -u PHOTO_SLAM_STAGE_COUNTERS -u PHOTO_SLAM_ADAM_TOPO_DIAG_DIR \
+  -u PHOTO_SLAM_ONLINE_CHECKPOINT_DIR -u PHOTO_SLAM_SHUTDOWN_DIAG \
+  -u PHOTO_SLAM_RASTER_AGG_SELFCHECK -u PHOTO_SLAM_RASTER_PROF \
+  -u PHOTO_SLAM_GPU_PROF \
+  PHOTO_SLAM_LINE_MODE=2 PHOTO_SLAM_LINE_LOOP=0 \
+  PHOTO_SLAM_GBA_APPLY_CORRECTION=0 PHOTO_SLAM_APPEND_STEPS=0 \
+  PHOTO_SLAM_SEED=0 PHOTO_SLAM_RASTER_BACKEND=A \
+  "$F/bin/replica_rgbd" \
+  "$ROOT/ORB-SLAM3/Vocabulary/ORBvoc.txt" \
+  "$ROOT/cfg/ORB_SLAM3/RGB-D/Replica/room1.yaml" \
+  "$ROOT/cfg/gaussian_mapper/RGB-D/Replica/A_baseline/room1.yaml" \
+  /workspace/code/SEGS-SLAM/datasets/replica/room1 \
+  "$OUT/out" no_viewer

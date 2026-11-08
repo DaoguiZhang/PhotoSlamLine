@@ -1,0 +1,5 @@
+arm,binary,LINE_MODE,LINE_LOOP,GBA_strategy,SEED,viewer,stage_counters,adam_topo_diag,online_checkpoint,shutdown_diag,selfcheck_prof,effective_from,config,status
+clean_a600,bin/replica_rgbd final packaged,2,0,APPLY_CORRECTION=0,0,no_viewer,off,off,off,off,off,600 canonical,room1_gaussian.yaml 731b,complete exit0
+final_a600,bin/replica_rgbd (diagnostic build),2,0,APPLY_CORRECTION=0,0,no_viewer,on,on,on,on,unset (not enabled),600 canonical,room1_gaussian.yaml 731b,complete exit0; stage/adam/checkpoint enabled
+from0_full,bin/replica_rgbd (diagnostic build),2,0,APPLY_CORRECTION=0,0,omitted (viewer thread created; blocked),on,on,on,off,unset (not enabled),0 canonical,room1_from0.yaml (canonical edited to 0),mapping complete; viewer join blocked; not complete
+historical_A,old h-round3 binary (not preserved as a command),2 (from log),unknown,unknown,unknown,unknown,on (stage_updates.csv exists),unknown,on (checkpoints exist),unknown,unknown,0 inferred from calls-Adam and 97 densify events,/tmp/psl-room1-control/config/room1_gaussian.yaml,quality snapshot only; command/env not fully preserved

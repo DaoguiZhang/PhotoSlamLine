@@ -1,0 +1,48 @@
+==============================================================================
+LINE QUALITY: /tmp/lr_abc_interleave/r1_B/log.txt
+==============================================================================
+PO calls parsed: 2105
+calls WITH line edges: 445 (21.1%)
+calls with NO line edge (point-only fallback): 1660
+
+calls with >=1 unique MapLine: 445
+
+lnSpread (deg) over line-edge calls:
+   min=0.0 p25=0.0 median=58.8 p75=99.9 max=106.4
+   spread <   10 deg : 202 calls (45.4%)  <- near-parallel/degenerate
+   spread <   25 deg : 203 calls (45.6%)  <- near-parallel/degenerate
+   spread <   45 deg : 207 calls (46.5%)  <- near-parallel/degenerate
+   of the 269 calls with >=2 line edges, 27 had spread < 25 deg
+
+line-edge outlier behaviour:
+   calls with >=1 rejected line edge : 188 (42.2% of line-edge calls)
+   calls where ALL line edges rejected: 56
+      frames: [140, 181, 185, 192, 223, 242, 294, 295, 296, 299, 300, 304, 305, 308, 344, 346, 350, 358, 368, 376, 385, 387, 389, 391, 394] ...
+   aggregate rejected/total line edges: 283/1258 (22.5%)
+
+summed accepted-line chi2 over calls with >=1 unique MapLine: median=0.6252 max=42.7043
+
+==============================================================================
+LINE QUALITY: /tmp/lr_abc_interleave/r1_C/log.txt
+==============================================================================
+PO calls parsed: 2104
+calls WITH line edges: 427 (20.3%)
+calls with NO line edge (point-only fallback): 1677
+
+calls with >=1 unique MapLine: 427
+
+lnSpread (deg) over line-edge calls:
+   min=0.0 p25=0.0 median=11.3 p75=99.5 max=115.7
+   spread <   10 deg : 211 calls (49.4%)  <- near-parallel/degenerate
+   spread <   25 deg : 227 calls (53.2%)  <- near-parallel/degenerate
+   spread <   45 deg : 233 calls (54.6%)  <- near-parallel/degenerate
+   of the 262 calls with >=2 line edges, 62 had spread < 25 deg
+
+line-edge outlier behaviour:
+   calls with >=1 rejected line edge : 170 (39.8% of line-edge calls)
+   calls where ALL line edges rejected: 47
+      frames: [147, 192, 242, 296, 300, 346, 352, 366, 368, 386, 387, 389, 399, 419, 424, 427, 428, 431, 437, 438, 439, 440, 441, 442, 443] ...
+   aggregate rejected/total line edges: 248/1175 (21.1%)
+
+summed accepted-line chi2 over calls with >=1 unique MapLine: median=0.5995 max=29.2589
+

@@ -1,0 +1,2 @@
+iteration,kind,rows_before,rows_after,delta,from_iter,from_source,interval,trigger
+700,ordinary_densify,23886,14668,-9218,600,canonical,100,iteration>from_and_iteration%interval==0

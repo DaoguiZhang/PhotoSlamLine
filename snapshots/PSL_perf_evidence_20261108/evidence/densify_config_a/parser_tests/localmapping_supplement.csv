@@ -1,0 +1,17 @@
+iteration,kind,rows_before,rows_after,delta,line_rows_before,line_rows_after
+1,localmapping_increasePcd,1637,2396,759,91,91
+244,localmapping_increasePcd,2396,3070,674,91,91
+244,localmapping_increasePcd,3070,3073,3,91,91
+264,localmapping_increasePcd,3073,3697,624,94,94
+264,localmapping_increasePcd,3697,3699,2,94,94
+294,localmapping_increasePcd,3699,4237,538,96,96
+316,localmapping_increasePcd,4237,4745,508,96,96
+345,localmapping_increasePcd,4745,5269,524,96,96
+369,localmapping_increasePcd,5269,5768,499,96,96
+404,localmapping_increasePcd,5768,6334,566,96,96
+453,localmapping_increasePcd,6334,6988,654,96,96
+490,localmapping_increasePcd,6988,7675,687,96,96
+544,localmapping_increasePcd,7675,22409,14734,96,96
+544,localmapping_increasePcd,22409,23147,738,96,96
+620,localmapping_increasePcd,23147,23886,739,96,96
+706,localmapping_increasePcd,14668,15457,789,61,61

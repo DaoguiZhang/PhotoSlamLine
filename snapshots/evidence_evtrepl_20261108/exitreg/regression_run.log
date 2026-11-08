@@ -1,0 +1,11 @@
+nohup: ignoring input
+[normal_exit] rc=0 (normal) orphan=no terminate=no products=yes audit_lines=0
+[early_fail] rc=4 (normal) orphan=no terminate=no products=no audit_lines=0
+[audit_loop] rc=0 (normal) orphan=no terminate=no products=yes audit_lines=66
+[audit_merge] rc=0 (normal) orphan=no terminate=no products=yes audit_lines=10
+
+case,scene,steps,conds,exit_code,exit_note,orphan,terminate_seen,products_ok,extra
+normal_exit,office0_mono,150,"A,V,N,VN",0,normal,no,no,yes,evtaudit_lines=0
+early_fail,office0_mono,150,"A,V,N,VN",4,normal,no,no,no,evtaudit_lines=0
+audit_loop,office0_mono,2000,"A",0,normal,no,no,yes,evtaudit_lines=66
+audit_merge,desk3_rgbd,2900,"A",0,normal,no,no,yes,evtaudit_lines=10

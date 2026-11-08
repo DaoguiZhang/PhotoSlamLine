@@ -1,0 +1,5 @@
+scene,cfg,steps,exit_code,structural_active,structural_active_steps,coherence_terms,shape_terms,loss_photometric_only
+office0_mono,OFF,200,0,0,0,0,0,1
+office0_mono,ON,200,0,1,200,200,200,0
+desk3_rgbd,OFF,200,0,0,0,0,0,1
+desk3_rgbd,ON,200,0,1,200,200,200,0

@@ -1,0 +1,13 @@
+checkpoint=natural_end
+input_frame=128
+total_input_frames=2000
+mapper_kfs=12
+iteration=200
+optimizer_steps=200
+gaussians=4322
+line_gaussians=101
+active_sh=0
+default_sh=0
+record_rendered_image=1
+record_ground_truth_image=0
+render_width=1200

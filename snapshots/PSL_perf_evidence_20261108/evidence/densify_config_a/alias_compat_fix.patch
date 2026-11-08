@@ -1,0 +1,218 @@
+diff --git a/include/gaussian_mapper_line.h b/include/gaussian_mapper_line.h
+index 7b30088..90f7c91 100755
+--- a/include/gaussian_mapper_line.h
++++ b/include/gaussian_mapper_line.h
+@@ -719,6 +719,13 @@ public:
+     std::string densify_until_iter_source_;
+     std::string densification_interval_source_;
+     bool densify_legacy_present_ = false;
++    std::string line_sample_step_source_;
++    std::string line_view_weight_source_;
++    std::string line_sigma_source_;
++    std::string line_top_k_source_;
++    std::string max_anisotropy_threshold_source_;
++    std::string lambda_anisotropy_source_;
++    std::string absolute_max_ratio_source_;
+     long long train_backward_rounds_ = 0;
+     long long optimizer_step_calls_ = 0;  // same event as frozen_opt_steps_
+     long long adam_advance_total_ = 0;    // sum over groups of actual Adam steps
+diff --git a/src/gaussian_mapper_line.cpp b/src/gaussian_mapper_line.cpp
+index a2c66fd..f673a82 100755
+--- a/src/gaussian_mapper_line.cpp
++++ b/src/gaussian_mapper_line.cpp
+@@ -78,12 +78,120 @@ bool readIntNode(const cv::FileNode& node, int& value)
+     return false;
+ }
+ 
+-const char* sourceOf(const cv::FileNode& node, const char* key)
++bool readFloatNode(const cv::FileNode& node, float& value)
+ {
+-    static thread_local std::string buf;
+-    buf = node.isNone() ? std::string("missing(") + key + ")"
+-                        : std::string("config:") + key;
+-    return buf.c_str();
++    if (node.isNone())
++        return false;
++    if (node.isInt() || node.isReal())
++    {
++        value = static_cast<float>(static_cast<double>(node));
++        return true;
++    }
++    return false;
++}
++
++float readFloatAlias(const cv::FileStorage& file, const char* canonical_key,
++                     const char* alias_key, float default_value,
++                     std::string& source)
++{
++    const cv::FileNode canonical = file[canonical_key];
++    const cv::FileNode alias = file[alias_key];
++    const bool has_canonical = !canonical.isNone();
++    const bool has_alias = !alias.isNone();
++    float cv = 0.0f, av = 0.0f;
++    const bool canonical_ok = has_canonical && readFloatNode(canonical, cv);
++    const bool alias_ok = has_alias && readFloatNode(alias, av);
++    if (has_canonical && !canonical_ok)
++    {
++        std::cerr << "[Config][ERROR] " << canonical_key
++                  << " exists but is not numeric\n";
++        std::exit(EXIT_FAILURE);
++    }
++    if (has_alias && !alias_ok)
++    {
++        std::cerr << "[Config][ERROR] " << alias_key
++                  << " exists but is not numeric\n";
++        std::exit(EXIT_FAILURE);
++    }
++    if (has_canonical && has_alias && std::abs(cv - av) > 1e-6f)
++    {
++        std::cerr << "[Config][ERROR] conflicting keys " << canonical_key
++                  << "=" << cv << " and " << alias_key << "=" << av
++                  << "\n";
++        std::exit(EXIT_FAILURE);
++    }
++    if (has_canonical)
++    {
++        source = has_alias ? "canonical (alias same)" : "canonical";
++        std::cerr << "[ConfigAlias] " << canonical_key << '=' << cv
++                  << " source=" << source << '\n';
++        return cv;
++    }
++    if (has_alias)
++    {
++        source = "alias";
++        std::cerr << "[ConfigAlias][WARN] " << canonical_key
++                  << " absent; using alias " << alias_key << '=' << av
++                  << '\n';
++        return av;
++    }
++    source = "explicit_default";
++    std::cerr << "[ConfigAlias][WARN] " << canonical_key << " and "
++              << alias_key << " absent; using explicit default "
++              << default_value << '\n';
++    return default_value;
++}
++
++int readIntAlias(const cv::FileStorage& file, const char* canonical_key,
++                 const char* alias_key, int default_value,
++                 std::string& source)
++{
++    const cv::FileNode canonical = file[canonical_key];
++    const cv::FileNode alias = file[alias_key];
++    const bool has_canonical = !canonical.isNone();
++    const bool has_alias = !alias.isNone();
++    int cv = 0, av = 0;
++    const bool canonical_ok = has_canonical && readIntNode(canonical, cv);
++    const bool alias_ok = has_alias && readIntNode(alias, av);
++    if (has_canonical && !canonical_ok)
++    {
++        std::cerr << "[Config][ERROR] " << canonical_key
++                  << " exists but is not an integer\n";
++        std::exit(EXIT_FAILURE);
++    }
++    if (has_alias && !alias_ok)
++    {
++        std::cerr << "[Config][ERROR] " << alias_key
++                  << " exists but is not an integer\n";
++        std::exit(EXIT_FAILURE);
++    }
++    if (has_canonical && has_alias && cv != av)
++    {
++        std::cerr << "[Config][ERROR] conflicting keys " << canonical_key
++                  << "=" << cv << " and " << alias_key << "=" << av
++                  << "\n";
++        std::exit(EXIT_FAILURE);
++    }
++    if (has_canonical)
++    {
++        source = has_alias ? "canonical (alias same)" : "canonical";
++        std::cerr << "[ConfigAlias] " << canonical_key << '=' << cv
++                  << " source=" << source << '\n';
++        return cv;
++    }
++    if (has_alias)
++    {
++        source = "alias";
++        std::cerr << "[ConfigAlias][WARN] " << canonical_key
++                  << " absent; using alias " << alias_key << '=' << av
++                  << '\n';
++        return av;
++    }
++    source = "explicit_default";
++    std::cerr << "[ConfigAlias][WARN] " << canonical_key << " and "
++              << alias_key << " absent; using explicit default "
++              << default_value << '\n';
++    return default_value;
+ }
+ 
+ int readDensifyFromIter(const cv::FileStorage& file, std::string& source,
+@@ -613,10 +721,18 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
+         settings_file["Optimization.weight_line_shape_ecc"].operator float();
+     //added by zdg
+     opt_params_.voxel_size_ = settings_file["Optimization.voxel_size"].isNone() ? 0.25f : settings_file["Optimization.voxel_size"].operator float();
+-    opt_params_.line_sample_step_ = settings_file["Optimization.line_sample_step"].isNone() ? 0.2f : settings_file["Optimization.line_sample_step"].operator float();
+-    opt_params_.line_view_weight_ = settings_file["Optimization.line_view_weight"].isNone() ? 2.0f : settings_file["Optimization.line_view_weight"].operator float();
+-    opt_params_.line_sigma_ = settings_file["Optimization.line_sigma"].isNone() ? 3.0f : settings_file["Optimization.line_sigma"].operator float();
+-    opt_params_.line_top_k_ = settings_file["Optimization.line_top_k"].isNone() ? 3 : settings_file["Optimization.line_top_k"].operator int();
++    opt_params_.line_sample_step_ = readFloatAlias(
++        settings_file, "Optimization.line_sample_step", "Line.SampleStep",
++        0.2f, line_sample_step_source_);
++    opt_params_.line_view_weight_ = readFloatAlias(
++        settings_file, "Optimization.line_view_weight", "Line.ViewWeight",
++        2.0f, line_view_weight_source_);
++    opt_params_.line_sigma_ = readFloatAlias(
++        settings_file, "Optimization.line_sigma", "Line.Sigma", 3.0f,
++        line_sigma_source_);
++    opt_params_.line_top_k_ = readIntAlias(
++        settings_file, "Optimization.line_top_k", "Line.TopK", 3,
++        line_top_k_source_);
+     opt_params_.refined_gaussian_max_iter_num_ = settings_file["Optimization.refined_gaussian_max_iter_num"].isNone() ? 10000 : settings_file["Optimization.refined_gaussian_max_iter_num"].operator int();
+ 
+     prune_big_point_after_iter_ =
+@@ -624,13 +740,16 @@ void GaussianMapperLine::readConfigFromFile(std::filesystem::path cfg_path)
+     densify_min_opacity_ =
+         settings_file["Optimization.densify_min_opacity"].operator float();
+ 
+-    // 建议在 Optimization Parameters 块中添加
+-    opt_params_.max_anisotropy_threshold_ = 
+-        settings_file["Optimization.max_anisotropy_threshold"].isNone() ? 600.0f : settings_file["Optimization.max_anisotropy_threshold"].operator float();
+-    opt_params_.lambda_anisotropy_ = 
+-        settings_file["Optimization.lambda_anisotropy"].isNone() ? 0.01f : settings_file["Optimization.lambda_anisotropy"].operator float();
+-    opt_params_.absolute_max_ratio_ = 
+-        settings_file["Optimization.absolute_max_ratio"].isNone() ? 1500.0f : settings_file["Optimization.absolute_max_ratio"].operator float();
++    opt_params_.max_anisotropy_threshold_ = readFloatAlias(
++        settings_file, "Optimization.max_anisotropy_threshold",
++        "max_anisotropy_threshold", 600.0f,
++        max_anisotropy_threshold_source_);
++    opt_params_.lambda_anisotropy_ = readFloatAlias(
++        settings_file, "Optimization.lambda_anisotropy", "lambda_anisotropy",
++        0.01f, lambda_anisotropy_source_);
++    opt_params_.absolute_max_ratio_ = readFloatAlias(
++        settings_file, "Optimization.absolute_max_ratio",
++        "absolute_max_ratio", 1500.0f, absolute_max_ratio_source_);
+ 
+     // Viewer Parameters
+     rendered_image_viewer_scale_ =
+@@ -664,6 +783,22 @@ void GaussianMapperLine::run()
+                 << "\ndensification_interval_source="
+                 << densification_interval_source_
+                 << "\nopacity_reset_interval=" << opt_params_.opacity_reset_interval_
++                << "\nline_sample_step=" << opt_params_.line_sample_step_
++                << "\nline_sample_step_source=" << line_sample_step_source_
++                << "\nline_view_weight=" << opt_params_.line_view_weight_
++                << "\nline_view_weight_source=" << line_view_weight_source_
++                << "\nline_sigma=" << opt_params_.line_sigma_
++                << "\nline_sigma_source=" << line_sigma_source_
++                << "\nline_top_k=" << opt_params_.line_top_k_
++                << "\nline_top_k_source=" << line_top_k_source_
++                << "\nmax_anisotropy_threshold="
++                << opt_params_.max_anisotropy_threshold_
++                << "\nmax_anisotropy_threshold_source="
++                << max_anisotropy_threshold_source_
++                << "\nlambda_anisotropy=" << opt_params_.lambda_anisotropy_
++                << "\nlambda_anisotropy_source=" << lambda_anisotropy_source_
++                << "\nabsolute_max_ratio=" << opt_params_.absolute_max_ratio_
++                << "\nabsolute_max_ratio_source=" << absolute_max_ratio_source_
+                 << "\niterations=" << opt_params_.iterations_ << '\n';
+         }
+     }

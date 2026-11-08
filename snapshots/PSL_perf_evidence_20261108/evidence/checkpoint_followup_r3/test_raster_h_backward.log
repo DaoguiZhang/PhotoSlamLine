@@ -1,0 +1,8 @@
+[RasterBackend] mode = H SH-stage protection
+[RasterBackendPin] condition pinned to H
+[RasterH] switch sh=0 backend=C a=0 c=1
+[RasterBackendPin] condition pinned to C
+[RasterBackendPin] condition pinned to H
+[RasterH] switch sh=3 backend=A a=1 c=1
+[RasterBackendPin] condition pinned to A
+[RasterHBackward] H A=1 C=1 switches=2 PASS

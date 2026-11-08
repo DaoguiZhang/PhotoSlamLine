@@ -1,0 +1,2 @@
+arm,effective_from,binary,optimizer_step_calls,adam_advance_per_group,ordinary_densify_events,kfs,gaussians,line_gaussians,mapping_seconds,total_operation_seconds,native_psnr_all_frames,common_frames_with_fixed,common_psnr
+legacy_historical_A,0,pre-change formal bin,9770,9673,97,179,496296,1422,65.824,89.0165,30.99334509,48,31.53561548

@@ -1,0 +1,19 @@
+VALIDATION of the MapLine resampler geometry guard (desk_3 drop30, RUN_TIMEOUT=600)
+
+run                        rc       traj    last_frame   complete   wall_s
+r1_B_drop30                0        2053    2060         1          97
+r1_C_drop30                0        2057    2060         1          97
+r2_B_drop30                0        2056    2060         1          97
+r2_C_drop30                124      0       1798         0          600
+r3_B_drop30                124      0       1823         0          600
+r3_C_drop30                124      0       2049         0          601
+regression_nostress        0        2060    2060         1          98
+
+RESULT: 3/6 stress runs still time out (frames 1798, 1823, 2049). ACCEPTANCE FAILS.
+The stress-off regression passes (2060/2060 frames, complete=1, 571 LoopClosing lines),
+so the guard does not regress the normal path.
+
+The guard bounds the resampler to <= kMaxLineLengthM/sample_step = 1000/0.2 = 5000
+samples, which cannot account for a 600 s stall. So the resampler runaway was a REAL
+bug but NOT the (only) cause of the merge stall; another runaway remains and is not
+yet identified. No timeout / merge-skip / loop-cap workaround was used as a fix.

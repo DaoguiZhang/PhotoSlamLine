@@ -1,0 +1,54 @@
+阶段	实际耗时
+临时表（--no-lpips --stage tmp）	0 s
+CPU/GPU 核对（4 对图）	< 30 s
+最终表（192 run，GPU LPIPS）	442 s（7 min 22 s）
+（被杀的 CPU 版对照）	74 min 挂钟 / 23 h CPU，零产出
+3. 配置差异
+Variant	Line Init	L_str(coh/ecc/ori)	Dir. Dens.
+A Point-only mapper	关	0 / 0 / 0	关（普通密化）
+B + line init	开	0 / 0 / 0	关
+C + L_str	开	0.001 / 0.002 / 0.005	关
+D + Dir. dens.	开	0.001 / 0.002 / 0.005	开
+公共项全部固定：同一冻结快照、500 帧/场景、恰好 10000 次真实 optimizer step、同一 10000 步 KF 采样序列、分辨率/背景/LR/SH/密化/透明度重置计划一致、评价图像/位姿/mask 同一实现；Mono 视图目录不含 depth 符号链接。
+
+已核验：48 个 combo 内 B/C/D 的 gaussians_init 完全相同（不一致数 = 0）；每个 combo 内 3 个哈希三元组唯一（1 个）→ 四组确为同一输入。
+
+4. 主结果表（8 场景等权平均 → 3 次配对重复 mean±std(n−1)）
+RGB-D
+
+Variant	PSNR↑	SSIM↑	LPIPS↓	Train Time(s)↓	Final Gauss(×10³)
+Point-only mapper	37.704±0.218	0.9575±0.0020	0.1008±0.0028	76.4±1.4	150.6±4.5
++ line init	37.828±0.414	0.9576±0.0024	0.1014±0.0025	75.9±0.5	150.7±2.0
++ L_str	37.776±0.334	0.9575±0.0022	0.1007±0.0021	88.4±1.1	150.3±12.3
++ Dir. dens.	37.714±0.368	0.9571±0.0023	0.1006±0.0024	92.2±0.6	149.6±4.1
+Mono
+
+Variant	PSNR↑	SSIM↑	LPIPS↓	Train Time(s)↓	Final Gauss(×10³)
+Point-only mapper	35.057±0.122	0.9396±0.0001	0.1413±0.0010	79.9±2.3	39.1±1.6
++ line init	35.098±0.347	0.9395±0.0016	0.1407±0.0036	84.3±1.2	39.5±1.3
++ L_str	34.906±0.139	0.9388±0.0015	0.1432±0.0020	93.5±0.2	38.6±0.7
++ Dir. dens.	35.104±0.211	0.9401±0.0009	0.1415±0.0009	94.1±1.1	39.7±0.8
+
+
+5. 结论
+没有可定位的收益。 各变体间差 ≤0.12 dB（RGB-D）/≤0.20 dB（Mono），而重复间 std 为 0.12–0.41 dB——差异小于噪声。因此谈不上"收益集中在少数场景"：不存在稳定的收益方向可供定位。
+两种模式的最优变体相反（RGB-D 最佳 PSNR/SSIM = B，最佳 LPIPS = D，最快 = B；Mono 最佳 PSNR/SSIM = D，最佳 LPIPS = B，最快 = A）。这种交叉正是无效应时的典型表现，不能宣称 D 最优。
+代价是稳健且一致的：RGB-D 76.4→92.2 s（A→D，+21%），Mono 79.9→94.1 s（+18%）；其中 L_str 单独贡献约 +16%/+17%。Gaussian 容量几乎不变（RGB-D ≈150k、Mono ≈39k），C 在 RGB-D 上方差最大（±12.3k）说明容量分配更不稳定。
+失败情况：零失败。 192/192 exit=0、opt_steps=10000、nan=0、grad_finite=1；8 场景齐全、无 partial coverage、无 SKIP/WARNING。
+6. 未解决项
+C 的线高斯几乎消失：末端线高斯数 A=0 / B=84.3 / C=2.2（48 次中 22 次恰为 0） / D=4425.4。普通密化下 C 的 L_str 作用在近乎空集上，C−B 的"结构正则"检验因此是弱/退化检验；D 则靠方向性密化把线群体恢复到 ~4400。这使 D−C 同时改变了密化策略与线群体规模，不能纯归因于密化策略。
+每场景仅取前 500 帧（非全 2000 帧），为控制 48 次进程 × 4 变体的可行运行时间所作的记录性选择。
+仅 3 次重复 → 不作显著性声明；本表只给 mean±std。
+不涉及 ATE：几何被冻结，设计上无法对 SLAM 精度作任何结论；A 是 point-only mapper，不是 point-only SLAM。
+逐场景 A−B / C−B / D−C 的配对差已包含在补充 CSV，但未在主表内做集中度检验。
+7. 文件路径
+内容	路径
+LaTeX 主表（booktabs + multirow + table*，10 列，8 行）	main_ablation.tex
+逐 run 完整 CSV（192 行，含哈希与 LPIPS）	runs_full.csv
+逐场景 mean±std 补充表（321 行）	per_scene.csv
+聚合 JSON（含 coverage/失败信息）	summary.json
+临时表（LPIPS 列已核实为全空）	report_tmp
+LPIPS 可续跑缓存（192 行）	lpips_cache.jsonl
+原始 runs 表 / 运行环境快照	results/mapper_ablation_full/{runs.csv,run_env.json}
+运行脚本 / 报告脚本	mapper_ablation_full.sh、mapper_ablation_report.py
+（results 在 .gitignore 内，旧 10K 结果未被覆盖；本轮新增输出全部写入新目录 mapper_ablation_full。）
