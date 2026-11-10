@@ -293,6 +293,84 @@ int main()
         (void)r;
     }
 
+    // 12. PURESCALE with a parent that does NOT move. Requested case: the parent sits
+    //     on the similarity's fixed point, so its pose is unchanged (D = I) while a
+    //     live child WOULD move (its centre is scaled). A generic conjugation carry
+    //     therefore does nothing and leaves the child behind; the same-rule carry
+    //     used for ApplyScaledRotation is exact. This is precisely why the fix is
+    //     scoped per pose rule instead of being one blanket conjugation.
+    {
+        Result r("12 pure scale, parent does NOT move (s=0.2, parent at origin)");
+        const int nTrial = 200;
+        const float s = 0.2f;
+        const Quaternionf Ryw = Quaternionf::Identity();
+        const Vector3f tyw(0, 0, 0);
+        for(int t = 0; t < nTrial; ++t)
+        {
+            SE3f Pp(PoseRule(Quaternionf::Identity(), Vector3f(0, 0, 0), 1.0));      // origin: stays put
+            SE3f Pc(PoseRule(RandAxis(rng, 20.0f, axGen), Vector3f(0.9f, 0.3f, -0.5f), 1.0));
+            const SE3f mTcpFrozen = Pc * Pp.inverse();
+            auto ApplyScaled = [&](const SE3f &P) {
+                SE3f Twc = P.inverse();
+                Twc.translation() *= s;
+                return (SE3f(Ryw, tyw) * Twc).inverse();
+            };
+            const SE3f PpNew = ApplyScaled(Pp);
+            const SE3f PcLiveNew = ApplyScaled(Pc);
+            const SE3f Dparent = PpNew * Pp.inverse();
+            r.carry_err += PosErr(PcLiveNew * PpNew.inverse() * PpNew, PcLiveNew);   // same-rule: exact
+            r.nocarry_err += PosErr(mTcpFrozen * PpNew, PcLiveNew);
+            r.control_err += PosErr(Carry(mTcpFrozen, Dparent) * PpNew, PcLiveNew);  // generic conjugation
+            r.bControl = true;
+        }
+        r.carry_err /= nTrial; r.nocarry_err /= nTrial; r.control_err /= nTrial;
+        vRes.push_back(r);
+    }
+
+    // 13. three-level frozen chain (P <- C1 <- C2 <- C3) with Sim3 merge: every link
+    //     carried; checks the transitive walk KeyFrame::CarryCulledDependents does.
+    {
+        Result r("13 three-level chain (P<-C1<-C2<-C3) + Sim3 merge");
+        const int nTrial = 200;
+        for(int t = 0; t < nTrial; ++t)
+        {
+            SE3f Pp(PoseRule(Quaternionf::Identity(), Vector3f(1.0f, 0.1f, 0.3f), 1.0));
+            SE3f P1(PoseRule(RandAxis(rng, 15.0f, Vector3f::UnitX()), Vector3f(1.2f, 0.4f, 0.1f), 1.0));
+            SE3f P2(PoseRule(RandAxis(rng, -10.0f, Vector3f::UnitY()), Vector3f(1.5f, 0.7f, 0.2f), 1.0));
+            SE3f P3(PoseRule(RandAxis(rng, 8.0f, Vector3f::UnitZ()), Vector3f(1.7f, 0.9f, 0.35f), 1.0));
+            const SE3f m1 = P1 * Pp.inverse(), m2 = P2 * P1.inverse(), m3 = P3 * P2.inverse();
+            const SE3f D = PoseRule(RandAxis(rng, 60.0f, axGen), Vector3f(0.5f, -1.0f, 0.6f), 0.31);
+            const SE3f PpNew = D * Pp, P3Live = D * P3;
+            r.carry_err += PosErr(Carry(m3, D) * Carry(m2, D) * Carry(m1, D) * PpNew, P3Live);
+            r.nocarry_err += PosErr(m3 * m2 * m1 * PpNew, P3Live);
+        }
+        r.carry_err /= nTrial; r.nocarry_err /= nTrial;
+        vRes.push_back(r);
+    }
+
+    // 14. ordinary BA with a TRANSLATION-ONLY parent update: here carrying is not a
+    //     matter of taste - the frozen link is exact and the no-carry form is off by
+    //     |d - R_m d| <= 2|d| sin(theta_m/2), i.e. by the rotation inside the frozen
+    //     link. Separates "BA carry is a modelling choice" from "BA carry is exact
+    //     for the translation part".
+    {
+        Result r("14 BA, parent translation-only update (|d|=0.3 m)");
+        const int nTrial = 200;
+        for(int t = 0; t < nTrial; ++t)
+        {
+            SE3f Pp(PoseRule(Quaternionf::Identity(), Vector3f(0.2f, -0.1f, 0.4f), 1.0));
+            SE3f Pc(PoseRule(RandAxis(rng, 25.0f, axGen), Vector3f(1.0f, 0.2f, -0.3f), 1.0));
+            const SE3f mTcpFrozen = Pc * Pp.inverse();
+            const SE3f D(Quaternionf::Identity(), Vector3f(0.3f, 0, 0));   // pure translation
+            const SE3f PpNew = D * Pp;
+            const SE3f PcLiveNew = D * Pc;                // a sibling carried by the same d
+            r.carry_err += PosErr(Carry(mTcpFrozen, D) * PpNew, PcLiveNew);
+            r.nocarry_err += PosErr(mTcpFrozen * PpNew, PcLiveNew);
+        }
+        r.carry_err /= nTrial; r.nocarry_err /= nTrial;
+        vRes.push_back(r);
+    }
+
     printf("\n  %-56s %11s %11s %12s\n", "case", "carry [m]", "no carry [m]", "control [m]");
     printf("  %-56s %11s %11s %12s\n", "", "", "(defect size)", "");
     for(const Result &r : vRes)

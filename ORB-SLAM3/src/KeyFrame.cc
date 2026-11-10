@@ -17,6 +17,7 @@
 */
 
 #include "KeyFrame.h"
+#include <algorithm>
 #include "Converter.h"
 #include "ImuTypes.h"
 #include "AuditTrail.h"
@@ -89,6 +90,12 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mLineSampleStep(F.mLineSampleStep), mLineViewWeight(F.mLineViewWeight), mLineSigma(F.mLineSigma), mLineTopK(F.mLineTopK), mvLineAdaptiveSteps(F.mvLineAdaptiveSteps)
 {
     mnId=nNextId++;
+
+    // [CRASH FIX, root cause] mvpMapLines was never sized, so it stayed empty
+    // while NL > 0 and every reader that indexes it by line index ran off the
+    // end of an empty vector. One null slot per detected line, as the readers
+    // already assume.
+    mvpMapLines.assign(NL, static_cast<MapLine*>(NULL));
 
     mGrid.resize(mnGridCols);
     if(F.Nleft != -1)  mGridRight.resize(mnGridCols);
@@ -2081,11 +2088,21 @@ void KeyFrame::GetKeyLineInfo(
     unique_lock<mutex> lock(mMutexFeatures);
 
     // Save the id of each MapLine in this KF, there can be null pointer in the vector
+    // [CRASH FIX] NL is copied from the Frame, but mvKeyLines / mvpMapLines can
+    // be shorter than NL. Clamp the loop; when the invariant holds it is
+    // unchanged.
+    const int nLines = std::min(NL, (int)std::min(mvKeyLines.size(),
+                                                  mvpMapLines.size()));
+    if (nLines != NL) {
+        std::cerr << "[KF-NL-MISMATCH] kf=" << mnId << " NL=" << NL
+                  << " mvKeyLines=" << mvKeyLines.size()
+                  << " mvpMapLines=" << mvpMapLines.size() << std::endl;
+    }
     pixelsUndist.clear();
-    pixelsUndist.reserve(NL * 4);
+    pixelsUndist.reserve(nLines * 4);
     pointsLocal.clear();
-    pointsLocal.reserve(NL * 6);
-    for(int i = 0; i < NL; ++i)
+    pointsLocal.reserve(nLines * 6);
+    for(int i = 0; i < nLines; ++i)
     {
         pixelsUndist.push_back(mvKeyLines[i].startPointX);
         pixelsUndist.push_back(mvKeyLines[i].startPointY);

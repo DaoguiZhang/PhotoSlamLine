@@ -153,7 +153,8 @@ def main():
         if k1 - k0 != 1 or valid[k0]["refmap"] != valid[k1]["refmap"]:
             continue
         steps.append((k1, dist(inv(valid[k0]["Tcw"])[1], inv(valid[k1]["Tcw"])[1])))
-    max_step, arg_step = (max(steps, key=lambda x: x[1]) if steps else (None, 0.0))
+    # NOTE: (frame, step) pairs -> the FIRST element is the frame index.
+    arg_step, max_step = (max(steps, key=lambda x: x[1]) if steps else (None, 0.0))
 
     # online pose -> final export pose, and reference-KF pose change
     Two_inv = inv(Two) if Two else None
@@ -167,6 +168,12 @@ def main():
             kfdiff.append((k, dist(inv(used_then)[1], inv(e["TrwKF"])[1])))
     max_dev, arg_dev = (max(dev, key=lambda x: x[1]) if dev else (None, 0.0))
     max_kf, arg_kf = (max(kfdiff, key=lambda x: x[1]) if kfdiff else (None, 0.0))
+    arg_dev, max_dev = (arg_dev, max_dev) if isinstance(arg_dev, int) else (None, max_dev)
+    arg_kf, max_kf = (arg_kf, max_kf) if isinstance(arg_kf, int) else (None, max_kf)
+    if dev:
+        arg_dev, max_dev = max(dev, key=lambda x: x[1])
+    if kfdiff:
+        arg_kf, max_kf = max(kfdiff, key=lambda x: x[1])
 
     res = dict(input_frames=len(fed), online_pose_frames=len(valid),
                exported_frames=written, maps=maps,
@@ -182,8 +189,9 @@ def main():
             json.dump(res, f, indent=2)
 
     if arg_step is not None:
-        lo, hi = arg_step - a.window, arg_step + a.window
-        print(f"window around the largest adjacent online step (frame {arg_step}):")
+        lo, hi = int(arg_step) - a.window, int(arg_step) + a.window
+        print(f"window around the largest adjacent online step (frame {arg_step}, "
+              f"step {max_step:.4f} m):")
         for k in range(lo, hi + 1):
             if k not in online:
                 continue

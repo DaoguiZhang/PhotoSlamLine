@@ -89,3 +89,7 @@ my_settings.txt
 borrar/*
 
 */ExecMean.txt
+
+# ASAN build outputs (must never be committed)
+build_asan/
+lib_asan/

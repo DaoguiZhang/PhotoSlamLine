@@ -122,3 +122,20 @@ docker_data/
 *.local.yaml
 .env
 
+
+# ==========================
+# Local run outputs / build artefacts (never commit)
+# ==========================
+myresult/
+no_viewer/
+formal_metrics_*/
+ORB-SLAM3/build_asan/
+ORB-SLAM3/lib_asan/
+.cache/
+2_Keyframe_*.obj
+2_Keyframe_*.txt
+*Stats.txt
+ExecMean.txt
+SessionInfo.txt
+artifact_manifest.sha256
+消融实验的总结/
