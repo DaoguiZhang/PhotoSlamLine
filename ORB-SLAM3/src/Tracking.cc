@@ -684,7 +684,308 @@ void Tracking::PrintTimeStats()
 Tracking::~Tracking()
 {
     //f_track_stats.close();
+    if (mnAssistAttempts > 0 || mnRescueAttempts > 0)
+    {
+        std::cerr << "[ApprovalCounters] assistAttempts=" << mnAssistAttempts
+                  << " assistAccepted=" << mnAssistAccepted
+                  << " assistRejected=" << mnAssistRejected
+                  << " rescueAttempts=" << mnRescueAttempts
+                  << " rescueRejected=" << mnRescueRejected
+                  << " rescueCommitted=" << mnRescueCommitted
+                  << " rescueSustainedNextFrame=" << mnRescueSustained
+                  << " mode=" << GetTrackModeRaw() << std::endl;
+    }
+}
 
+
+// ===========================================================================
+// Tracking modes: POINT / ASSIST / ASSIST_RESCUE
+//
+// The committed pose is always produced by the POINT solve first.  ASSIST then
+// builds a point+line candidate on an ISOLATED copy of the frame and commits it
+// only when the independent acceptance test passes; otherwise nothing that was
+// committed changes, so the result is identical to POINT by construction.
+// ===========================================================================
+
+void Tracking::BuildRescueObservations(const Frame& F,
+                                       Eigen::Matrix3d& K,
+                                       std::vector<RescueAccept::PointObs>& pts,
+                                       std::vector<RescueAccept::LineObs>& lns,
+                                       Eigen::Matrix4d& Tcw,
+                                       double& medianDepth) const
+{
+    K.setZero();
+    if (F.mpCamera)
+    {
+        const cv::Mat Km = F.mpCamera->toK();
+        if (Km.rows == 3 && Km.cols == 3)
+        {
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 3; ++c)
+                    K(r, c) = Km.at<float>(r, c);
+        }
+    }
+    const Sophus::SE3f T = F.GetPose();
+    // Must be a proper affine matrix: the finite-difference Jacobian applies
+    // exp(d) * Tcw, and a zero homogeneous entry (3,3) would silently scale the
+    // translation perturbation to zero and disable the whole geometric test.
+    Tcw = Eigen::Matrix4d::Identity();
+    Tcw.block<3, 3>(0, 0) = T.rotationMatrix().cast<double>();
+    Tcw.block<3, 1>(0, 3) = T.translation().cast<double>();
+
+    pts.clear();
+    lns.clear();
+    std::vector<double> depths;
+
+    for (int i = 0; i < F.N; ++i)
+    {
+        MapPoint* pMP = F.mvpMapPoints[i];
+        if (!pMP || pMP->isBad())
+            continue;
+        RescueAccept::PointObs p;
+        p.u = F.mvKeysUn[i].pt.x;
+        p.v = F.mvKeysUn[i].pt.y;
+        p.Xw = pMP->GetWorldPos().cast<double>();
+        const int oc = F.mvKeysUn[i].octave;
+        const double sig2 = (oc >= 0 && oc < (int)F.mvInvLevelSigma2.size())
+                                ? (double)F.mvInvLevelSigma2[oc] : 1.0;
+        p.w = 1.0 / std::max(1e-6, sig2);
+        // Points the point-only solve rejected are not evidence for the pose;
+        // they are simply left out (they would otherwise empty the geometric
+        // block on frames where the solve flags many of them).
+        if ((i < (int)F.mvbOutlier.size()) && F.mvbOutlier[i])
+            continue;
+        // A deterministic one-in-seven subset is held out of the geometric
+        // evidence and used ONLY to check that the candidate explains it.
+        p.heldout = ((int)pts.size() % 7) == 3;
+        pts.push_back(p);
+        if (F.mvDepth[i] > 0.0f)
+            depths.push_back((double)F.mvDepth[i]);
+    }
+
+    for (int i = 0; i < F.NL; ++i)
+    {
+        MapLine* pML = F.mvpMapLines[i];
+        if (!pML || pML->isBad())
+            continue;
+        if (i >= (int)F.mvKeyLines.size())
+            continue;
+        const cv::line_descriptor::KeyLine& kl = F.mvKeyLines[i];
+        RescueAccept::LineObs L;
+        L.a = Eigen::Vector2d(kl.startPointX, kl.startPointY);
+        L.b = Eigen::Vector2d(kl.endPointX, kl.endPointY);
+        const std::pair<Eigen::Vector3f, Eigen::Vector3f> wp = pML->GetLineWorldPos();
+        L.Xw1 = wp.first.cast<double>();
+        L.Xw2 = wp.second.cast<double>();
+        L.mapId = (int)pML->mnId;
+        L.nObs = pML->Observations();
+        const int oc = kl.octave;
+        const double sig2 = (oc >= 0 && oc < (int)F.mvInvLevelSigma2.size())
+                                ? (double)F.mvInvLevelSigma2[oc] : 1.0;
+        L.w = 1.0 / std::max(1e-6, sig2);
+        L.round = (i < (int)F.mvbLineOutlier.size() && F.mvbLineOutlier[i]) ? 1 : 0;
+        lns.push_back(L);
+        if (F.mvDepth[i] > 0.0f)
+            depths.push_back((double)F.mvDepth[i]);
+    }
+
+    medianDepth = 0.0;
+    if (!depths.empty())
+    {
+        std::nth_element(depths.begin(), depths.begin() + depths.size() / 2, depths.end());
+        medianDepth = depths[depths.size() / 2];
+    }
+}
+
+void Tracking::AssistCandidate(Frame& F, int nInliersPointOnly)
+{
+    if (F.NL <= 0)
+        return;
+    ++mnAssistAttempts;
+
+    const Sophus::SE3f Tbase = F.GetPose();
+
+    // Signature of everything the committed frame must keep when the candidate is
+    // rejected: pose, the point associations, and both outlier flags.  This is
+    // checked explicitly instead of relying on "we never commit" by inspection.
+    auto frameSig = [](const Frame& Fr) {
+        size_t h = 0;
+        const Sophus::SE3f T = Fr.GetPose();
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j) {
+                const double v = (i < 3 ? T.matrix()(i, j) : (i == j ? 1.0 : 0.0));
+                h = h * 1000003u ^ (size_t)(int64_t)(v * 1e9);
+            }
+        for (int i = 0; i < Fr.N; ++i)
+            h = h * 1000003u ^ (size_t)(uintptr_t)Fr.mvpMapPoints[i];
+        for (size_t i = 0; i < Fr.mvbOutlier.size(); ++i)
+            h = h * 1000003u ^ (size_t)(Fr.mvbOutlier[i] ? 1 : 0);
+        for (size_t i = 0; i < Fr.mvbLineOutlier.size(); ++i)
+            h = h * 1000003u ^ (size_t)(Fr.mvbLineOutlier[i] ? 2 : 0);
+        return h;
+    };
+    const size_t sigBefore = frameSig(F);
+
+    // Isolated candidate: the optimizer only READS MapPoint/MapLine and writes
+    // to the copy's own pose and outlier flags.
+    Frame cand = F;
+    Optimizer::PoseOptimizationWithLine(&cand);
+
+    Eigen::Matrix3d K;
+    std::vector<RescueAccept::PointObs> pts;
+    std::vector<RescueAccept::LineObs> lns;
+    Eigen::Matrix4d Tcw;
+    double medDepth = 0.0;
+    BuildRescueObservations(cand, K, pts, lns, Tcw, medDepth);
+
+    RescueAccept::Params pr;
+    const RescueAccept::Result rCand = RescueAccept::evaluate(K, Tcw, pts, lns, pr);
+
+    // The same point correspondences scored at the committed POINT pose.
+    Eigen::Matrix4d TbaseM = Eigen::Matrix4d::Identity();
+    TbaseM.block<3, 3>(0, 0) = Tbase.rotationMatrix().cast<double>();
+    TbaseM.block<3, 1>(0, 3) = Tbase.translation().cast<double>();
+    const RescueAccept::Result rBase = RescueAccept::evaluate(K, TbaseM, pts,
+                                                              std::vector<RescueAccept::LineObs>(), pr);
+
+    auto centre = [](const Sophus::SE3f& T) {
+        return Eigen::Vector3f(-(T.rotationMatrix().transpose() * T.translation()));
+    };
+    const double dPose = (centre(cand.GetPose()) - centre(Tbase)).norm();
+    const double depthForStep = std::max(medDepth, rCand.medianDepth);
+    const double stepCap = 0.05 * std::max(1e-6, depthForStep);
+
+    const bool bPointKept = (rCand.nPointInliers >= nInliersPointOnly - 1) &&
+                            (rBase.medPointReprojPx < 0.0 ||
+                             rCand.medPointReprojPx <= rBase.medPointReprojPx + 0.5);
+    const bool bStepOk = (depthForStep <= 0.0) || (dPose <= stepCap);
+    const bool bAccept = rCand.ok && bPointKept && bStepOk;
+    const bool bCommit = bAccept && !GetAssistDryRun();
+
+    const size_t sigAfter = bCommit ? 0 : frameSig(F);
+    const bool bUnchangedOnReject = bCommit || (sigBefore == sigAfter);
+
+    if (bCommit)
+    {
+        F.SetPose(cand.GetPose());
+        for (size_t i = 0; i < F.mvbOutlier.size() && i < cand.mvbOutlier.size(); ++i)
+            F.mvbOutlier[i] = cand.mvbOutlier[i];
+        for (size_t i = 0; i < F.mvbLineOutlier.size() && i < cand.mvbLineOutlier.size(); ++i)
+            F.mvbLineOutlier[i] = cand.mvbLineOutlier[i];
+        ++mnAssistAccepted;
+    }
+    else
+    {
+        ++mnAssistRejected;
+    }
+
+    if (IsLineRescueDiag())
+    {
+        std::cerr << "[Assist] frame=" << F.mnId
+                  << " decision=" << (bAccept ? "accept" : "reject")
+                  << (bAccept && !bCommit ? "(dryrun)" : "")
+                  << " reason=" << RescueAccept::ReasonName(rCand.reason)
+                  << " pointKept=" << (bPointKept ? 1 : 0)
+                  << " stepOk=" << (bStepOk ? 1 : 0)
+                  << " nPt=" << rCand.nPoints
+                  << " nPtInBase=" << rBase.nPointInliers
+                  << " nPtInCand=" << rCand.nPointInliers
+                  << " medEBase=" << rBase.medPointReprojPx
+                  << " medECand=" << rCand.medPointReprojPx
+                  << " nLnRaw=" << rCand.nLinesRaw << " nLn=" << rCand.nLinesAccepted
+                  << " transObs=" << rCand.transObsPx
+                  << " rotObs=" << rCand.rotObsPx
+                  << " medDepthEval=" << rCand.medianDepth
+                  << " condRatio=" << rCand.transCondRatio
+                  << " dbgHtt=" << rCand.dbgHttRaw << " dbgHww=" << rCand.dbgHwwDiag
+                  << " dbgZ=" << rCand.dbgZnorm << " dbgJt=" << rCand.dbgJtNorm
+                  << " spread=" << rCand.spreadDeg
+                  << " dPose=" << dPose
+                  << " medDepth=" << medDepth
+                  << " committed=" << (bCommit ? 1 : 0)
+                  << " rejectUnchanged=" << (bUnchangedOnReject ? 1 : 0)
+                  << std::endl;
+    }
+}
+
+bool Tracking::HasReliableLineSupportStrict(int& reason)
+{
+    ++mnRescueAttempts;
+    Eigen::Matrix3d K;
+    std::vector<RescueAccept::PointObs> pts;
+    std::vector<RescueAccept::LineObs> lns;
+    Eigen::Matrix4d Tcw;
+    double medDepth = 0.0;
+    BuildRescueObservations(mCurrentFrame, K, pts, lns, Tcw, medDepth);
+
+    RescueAccept::Params pr;
+    const RescueAccept::Result r = RescueAccept::evaluate(K, Tcw, pts, lns, pr);
+    reason = r.reason;
+    mLineRescueInliers = r.nLinesAccepted;
+    mLineRescueEdges = r.nLinesRaw;
+
+    if (r.ok)
+        ++mnRescueCommitted;
+    else
+        ++mnRescueRejected;
+
+    if (IsLineRescueDiag())
+    {
+        std::cerr << "[RescueStrict] frame=" << mCurrentFrame.mnId
+                  << " ok=" << (r.ok ? 1 : 0)
+                  << " reason=" << RescueAccept::ReasonName(r.reason)
+                  << " nPt=" << r.nPoints
+                  << " nPtIn=" << r.nPointInliers
+                  << " medE=" << r.medPointReprojPx
+                  << " nLnRaw=" << r.nLinesRaw
+                  << " nLnAcc=" << r.nLinesAccepted
+                  << " spread=" << r.spreadDeg
+                  << " transObs=" << r.transObsPx
+                  << " rotObs=" << r.rotObsPx
+                  << " medDepth=" << medDepth
+                  << std::endl;
+    }
+    return r.ok;
+}
+
+int Tracking::PoseOptimizationForMode(Frame& F)
+{
+    // Controlled rescue experiment (diagnostic, default off): detach all but one
+    // point correspondence in every `stride` inside the declared window. Applied
+    // before ANY solve so every mode consumes exactly the same starved input.
+    const int maskLo = GetRescueTestMaskLo();
+    const int maskHi = GetRescueTestMaskHi();
+    const int maskStride = GetRescueTestMaskStride();
+    if (maskStride > 1 && maskLo >= 0 && (int)F.mnId >= maskLo && (int)F.mnId <= maskHi)
+    {
+        int seen = 0, removed = 0;
+        for (int i = 0; i < F.N; ++i)
+        {
+            if (!F.mvpMapPoints[i])
+                continue;
+            if ((seen++ % maskStride) != 0)
+            {
+                F.mvpMapPoints[i] = nullptr;
+                ++removed;
+            }
+        }
+        if (IsLineRescueDiag())
+            std::cerr << "[Mask] frame=" << F.mnId << " kept=" << (seen - removed)
+                      << " removed=" << removed << " stride=" << maskStride << std::endl;
+    }
+
+    // Released behaviour (PHOTO_SLAM_TRACK_MODE unset): unchanged call.
+    if (!TrackModeIsAssist() && !TrackModeIsPoint())
+        return Optimizer::PoseOptimizationWithLine(&F);
+    if (TrackModeIsPoint())
+        return Optimizer::PoseOptimization(&F);
+
+    // ASSIST / ASSIST_RESCUE: commit the point-only solve, then consider the
+    // point+line candidate.  The candidate can only ever replace the committed
+    // pose through AssistCandidate, which commits exactly once.
+    const int nInl = Optimizer::PoseOptimization(&F);
+    AssistCandidate(F, nInl);
+    return nInl;
 }
 
 void Tracking::newParameterLoader(Settings *settings) {
@@ -4913,7 +5214,7 @@ bool Tracking::TrackReferenceKeyFrameWithLine()
 
     // cout << " TrackReferenceKeyFrame mLastFrame.mTcw:  " << mLastFrame.mTcw << endl;
     //Optimizer::PoseOptimization(&mCurrentFrame);
-    Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
+    PoseOptimizationForMode(mCurrentFrame);
     //std::cerr << "After PoseOptimizationWithLine-> Line Matches: " << nline_matches << std::endl;
 
     // Discard outliers
@@ -5436,7 +5737,7 @@ bool Tracking::TrackWithMotionModelWithLine()
         // Optimize frame pose with all matches
         //Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
         // Optimize frame pose with all matches
-        Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
+        PoseOptimizationForMode(mCurrentFrame);
         //Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
         //std::cerr <<" After PoseOptimizationWithLine " << std::endl;
     }
@@ -5829,9 +6130,22 @@ bool Tracking::ApplyLineRescue(const char* stage_tag, bool old_ok)
                   << " state=" << mState << std::endl;
     }
 
-    if (GetLineRescueEnabled() && !old_ok)
+    // Continuity of a previous rescue: if the frame right after a committed
+    // rescue reaches this gate with the point verdict already OK, the rescue was
+    // sustained by the following frame rather than being a one-frame revival.
+    if (mnLastRescueFrame >= 0 && mCurrentFrame.mnId == mnLastRescueFrame + 1 && old_ok)
+        ++mnRescueSustained;
+
+    // Tracking mode: POINT never rescues; ASSIST_RESCUE uses the independent
+    // acceptance; with PHOTO_SLAM_TRACK_MODE unset this is the released switch.
+    const bool bRescueAllowed = !TrackModeIsPoint() &&
+                                (TrackModeIsRescue() || GetLineRescueEnabled());
+    if (bRescueAllowed && !old_ok)
     {
-        final_ok = HasReliableLineSupport(reason);
+        final_ok = TrackModeIsRescue() ? HasReliableLineSupportStrict(reason)
+                                       : HasReliableLineSupport(reason);
+        if (final_ok)
+            mnLastRescueFrame = mCurrentFrame.mnId;
     }
     if (final_ok && !old_ok)
         mLineRescueReason = reason;
@@ -5895,7 +6209,7 @@ bool Tracking::TrackLocalMapWithLine()
     if (!mpAtlas->isImuInitialized())
     {
         //Optimizer::PoseOptimization(&mCurrentFrame);
-        Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
+        PoseOptimizationForMode(mCurrentFrame);
     }
     else
     {
@@ -5903,7 +6217,7 @@ bool Tracking::TrackLocalMapWithLine()
         {
             Verbose::PrintMess("TLM: PoseOptimization ", Verbose::VERBOSITY_DEBUG);
             //Optimizer::PoseOptimization(&mCurrentFrame);
-            Optimizer::PoseOptimizationWithLine(&mCurrentFrame);
+            PoseOptimizationForMode(mCurrentFrame);
         }
         else
         {

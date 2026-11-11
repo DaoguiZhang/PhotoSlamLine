@@ -18,6 +18,8 @@
 #define ORB_SLAM3_LINEMODE_H
 
 #include <cstdlib>
+#include <cctype>
+#include <string>
 #include <cmath>
 #include <string>
 #include <thread>
@@ -208,13 +210,127 @@ inline bool StressDropPoint(int frameId, int matchedIndex)
     return (matchedIndex % k) == 0;
 }
 
+// ---------------------------------------------------------------------------
+// Tracking mode: how much of the line pipeline is allowed to influence the
+// pose that is COMMITTED for a frame.
+//
+//   POINT          point-only tracking, point-only pose optimization, point-only
+//                  local BA.  The control and the fallback.
+//   ASSIST         the committed pose is the POINT result.  A point+line
+//                  candidate is computed on an isolated copy of the frame and
+//                  committed only if it passes RescueAccept::evaluate() with
+//                  the SAME point correspondences; otherwise every committed
+//                  quantity stays byte-identical to POINT.
+//   ASSIST_RESCUE  ASSIST, plus: when the point criterion fails at a tracking
+//                  gate, a line rescue is attempted once (existing map, valid
+//                  pose prior) and accepted only through the same independent
+//                  test.
+//
+// "PHOTO_SLAM_TRACK_MODE=POINT|ASSIST|ASSIST_RESCUE".  UNSET (the default)
+// keeps the released behaviour exactly as it is today: the historical
+// PHOTO_SLAM_PO_LINE / PHOTO_SLAM_LBA_LINE / PHOTO_SLAM_LINE_RESCUE switches
+// keep their own meaning and nothing else changes.
+// ---------------------------------------------------------------------------
+enum TrackMode
+{
+    TM_LEGACY = 0,
+    TM_POINT = 1,
+    TM_ASSIST = 2,
+    TM_ASSIST_RESCUE = 3
+};
+
+inline int GetTrackModeRaw()
+{
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_TRACK_MODE");
+        if (!e) return (int)TM_LEGACY;
+        std::string s(e);
+        for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+        if (s == "POINT") return (int)TM_POINT;
+        if (s == "ASSIST") return (int)TM_ASSIST;
+        if (s == "ASSIST_RESCUE" || s == "ASSIST-RESCUE") return (int)TM_ASSIST_RESCUE;
+        return (int)TM_LEGACY;
+    }();
+    return v;
+}
+
+inline bool TrackModeIsPoint()   { return GetTrackModeRaw() == (int)TM_POINT; }
+inline bool TrackModeIsAssist()  { return GetTrackModeRaw() >= (int)TM_ASSIST; }
+inline bool TrackModeIsRescue()  { return GetTrackModeRaw() == (int)TM_ASSIST_RESCUE; }
+
+// Dry run: compute and score every candidate but never commit it.  Used to
+// prove, on real runs, that a rejecting ASSIST commit path leaves the SLAM
+// output identical to POINT.
+inline bool GetAssistDryRun()
+{
+    static const bool v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_ASSIST_DRYRUN");
+        return e != nullptr && std::string(e) == "1";
+    }();
+    return v;
+}
+
+// ---------------------------------------------------------------------------
+// Controlled rescue experiment (diagnostic only, default OFF).
+//
+// "PHOTO_SLAM_RESCUE_TEST_MASK=lo-hi:stride".  For frames whose id is in
+// [lo,hi] only one point correspondence in every `stride` is kept; the rest are
+// detached BEFORE pose optimization.  Identical for every mode, so POINT,
+// ASSIST and ASSIST_RESCUE see exactly the same deliberately starved input.
+// A `stride` of 0 or 1 disables it.  This exists so the rescue path can be
+// exercised on a real frame window of a real sequence with a fixed rule that
+// was written down before any run, instead of waiting for a rare natural
+// failure.
+// ---------------------------------------------------------------------------
+inline int GetRescueTestMaskLo()
+{
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_RESCUE_TEST_MASK");
+        if (!e) return -1;
+        std::string s(e);
+        std::size_t p = s.find('-');
+        return p == std::string::npos ? -1 : std::atoi(s.substr(0, p).c_str());
+    }();
+    return v;
+}
+
+inline int GetRescueTestMaskHi()
+{
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_RESCUE_TEST_MASK");
+        if (!e) return -1;
+        std::string s(e);
+        std::size_t p = s.find('-');
+        std::size_t q = s.find(':');
+        if (p == std::string::npos || q == std::string::npos || q < p) return -1;
+        return std::atoi(s.substr(p + 1, q - p - 1).c_str());
+    }();
+    return v;
+}
+
+inline int GetRescueTestMaskStride()
+{
+    static const int v = []() {
+        const char* e = std::getenv("PHOTO_SLAM_RESCUE_TEST_MASK");
+        if (!e) return 0;
+        std::string s(e);
+        std::size_t q = s.find(':');
+        return q == std::string::npos ? 0 : std::atoi(s.substr(q + 1).c_str());
+    }();
+    return v;
+}
+
 // Independent toggles for line edges in the two SLAM optimizers (used for the
 // B/P/L/C ablation). They only take effect when PHOTO_SLAM_LINE_MODE >= 2
 // (i.e., the line frontend is active). Default is enabled to preserve the
 // existing full point-line behavior.
+//
+// PHOTO_SLAM_TRACK_MODE=POINT additionally forces both off, so that POINT is a
+// complete point-only pipeline rather than a relabelled full point-line one.
 inline bool GetPoseOptLineEnabled()
 {
     static const bool enabled = []() {
+        if (TrackModeIsPoint()) return false;
         const char* v = std::getenv("PHOTO_SLAM_PO_LINE");
         return !(v != nullptr && std::string(v) == "0");
     }();
@@ -224,6 +340,7 @@ inline bool GetPoseOptLineEnabled()
 inline bool GetLbaLineEnabled()
 {
     static const bool enabled = []() {
+        if (TrackModeIsPoint()) return false;
         const char* v = std::getenv("PHOTO_SLAM_LBA_LINE");
         return !(v != nullptr && std::string(v) == "0");
     }();

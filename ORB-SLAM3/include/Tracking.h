@@ -38,6 +38,7 @@
 #include "ImuTypes.h"
 #include "Settings.h"
 #include "LSDextractor.h"
+#include "RescueAcceptance.h"
 
 #include "GeometricCamera.h"
 
@@ -372,8 +373,7 @@ protected:
     //Current matches in frame with line
     int mnMatchesInliersLine;
 
-    // ---- Line-rescue (PHOTO_SLAM_LINE_RESCUE, default off) ----
-    // Reliability test on the POST-optimisation evidence. Unique MapLine
+    // ---- Line-rescue (PHOTO_SLAM_LINE_RESCUE, default off) ----    // Reliability test on the POST-optimisation evidence. Unique MapLine
     // inliers only (each MapLine counted once), residual (outlier-flag) based,
     // requires angular spread so all-parallel / single-direction line sets are
     // rejected as under-constrained, plus a point floor, an inlier ratio and a
@@ -388,6 +388,38 @@ protected:
     // Central decision used by every gate: returns `old_ok` unchanged when the
     // rescue is disabled, so the default path is identical to the original.
     bool ApplyLineRescue(const char* stage_tag, bool old_ok);
+
+    // ---- Tracking modes (PHOTO_SLAM_TRACK_MODE, default unset = released) ----
+    // Pose optimization dispatch used by the monocular tracking stages.
+    //   released / unset : Optimizer::PoseOptimizationWithLine (unchanged)
+    //   POINT            : Optimizer::PoseOptimization (points only)
+    //   ASSIST/_RESCUE   : points-only solve is committed, then a point+line
+    //                      candidate is built on an isolated Frame copy and
+    //                      committed only if it passes the independent test.
+    int PoseOptimizationForMode(Frame& F);
+    // Builds the candidate, scores it, and commits it only on acceptance.
+    // Never mutates the map: the candidate solves on a copy of the Frame and
+    // MapPoint/MapLine are only read by the optimizer.
+    void AssistCandidate(Frame& F, int nInliersPointOnly);
+    // Strict rescue acceptance (matching + geometry + consistency) built on
+    // RescueAccept::evaluate over this frame's own observations.
+    bool HasReliableLineSupportStrict(int& reason);
+    // Fills the observation arrays used by RescueAccept::evaluate for `F`.
+    void BuildRescueObservations(const Frame& F,
+                                 Eigen::Matrix3d& K,
+                                 std::vector<RescueAccept::PointObs>& pts,
+                                 std::vector<RescueAccept::LineObs>& lns,
+                                 Eigen::Matrix4d& Tcw,
+                                 double& medianDepth) const;
+    // Per-process counters, printed at shutdown and after every event.
+    long mnAssistAttempts = 0;
+    long mnAssistAccepted = 0;
+    long mnAssistRejected = 0;
+    long mnRescueAttempts = 0;
+    long mnRescueRejected = 0;
+    long mnRescueCommitted = 0;
+    long mnRescueSustained = 0;   // next frame after an accepted rescue tracked OK
+    int  mnLastRescueFrame = -1;
     int mLineRescueInliers = 0;   // unique non-outlier MapLines
     int mLineRescueEdges = 0;     // lines actually handed to the optimizer
     int mLineRescueReason = -1;   // 0 ok, 1..6 rejection reason
