@@ -6184,6 +6184,33 @@ bool Tracking::TrackLocalMapWithLine()
     UpdateLocalMapWithLine();
     SearchLocalPointsAndLine();
 
+    // Line supply chain, keyed by the real frame id:
+    //   alive     - MapLines in the current map that are not bad
+    //   selected  - MapLines the local-map search actually considered
+    //   matched   - MapLines that ended up associated with this frame
+    //   detected  - line keylines detected in the image (the demand side)
+    // Whichever level goes to zero first is the one worth fixing.
+    if (IsLineRescueDiag() && (int)mCurrentFrame.mnId % 5 == 0)
+    {
+        int nAlive = 0, nSelected = 0, nMatched = 0;
+        for (MapLine* pML : mpAtlas->GetAllMapLines())
+            if (pML && !pML->isBad())
+                nAlive++;
+        for (MapLine* pML : mvpLocalMapLines)
+            if (pML && !pML->isBad())
+                nSelected++;
+        for (int i = 0; i < mCurrentFrame.NL; ++i)
+            if (mCurrentFrame.mvpMapLines[i])
+                nMatched++;
+        std::cerr << "[LineSupply] frame=" << mCurrentFrame.mnId
+                  << " detected=" << mCurrentFrame.NL
+                  << " alive=" << nAlive
+                  << " selected=" << nSelected
+                  << " toMatch=" << mnLinesToMatch
+                  << " matchRes=" << mnLineMatchResult
+                  << " matched=" << nMatched << std::endl;
+    }
+
     // TOO check outliers before PO
     int aux1 = 0, aux2=0;
     for(int i=0; i<mCurrentFrame.N; i++)
@@ -7155,7 +7182,8 @@ void Tracking::SearchLocalPointsAndLine()
                                cv::Point2f(pML->mLeTrackProjX, pML->mLeTrackProjY));
         }
     }
-    //std::cerr << "projection: To Match Points: " << nToMatchPoints << ", To Match Lines: " << nToMatchLines << std::endl;
+    mnLinesToMatch = nToMatchLines;
+    mnLinesSelected = (int)mvpLocalMapLines.size();
 
     ////debug
     //std::cerr << "Local Map Lines Seen in Frame: " << LocalMapLinesSeenInFrame.size() << ", Not Seen in Frame: " << LocalMapLinesNotSeenInFrame.size() << std::endl;
@@ -7233,6 +7261,7 @@ void Tracking::SearchLocalPointsAndLine()
         // //line_matcher.DebugLineProjectionNew(mCurrentFrame, mLastFrame.mvpMapLines, "Debug_Line_LastFrame_projection_Frame1_Method");
 
         int nLinematches = line_matcher.SearchByProjection(mCurrentFrame, mvpLocalMapLines, thLine);
+        mnLineMatchResult = nLinematches;
         //std::cerr << "Line Matches by Projection: " << nLinematches << std::endl;
 #if 0
         // line_matcher.DebugDrawLineMatches(mLastFrame, mCurrentFrame);

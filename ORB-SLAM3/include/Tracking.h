@@ -420,6 +420,10 @@ protected:
     long mnRescueCommitted = 0;
     long mnRescueSustained = 0;   // next frame after an accepted rescue tracked OK
     int  mnLastRescueFrame = -1;
+    // Line supply chain counters, written by SearchLocalPointsAndLine.
+    int mnLinesToMatch = 0;      // lines that passed the frustum test
+    int mnLineMatchResult = 0;   // associations the matcher actually produced
+    int mnLinesAlive = 0, mnLinesSelected = 0;
     int mLineRescueInliers = 0;   // unique non-outlier MapLines
     int mLineRescueEdges = 0;     // lines actually handed to the optimizer
     int mLineRescueReason = -1;   // 0 ok, 1..6 rejection reason
