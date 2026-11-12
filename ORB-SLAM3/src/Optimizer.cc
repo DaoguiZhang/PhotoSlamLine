@@ -2752,8 +2752,12 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesMono[i];
             size_t idx = vnIndexEdgeMono[i];
+            // Judge at the CURRENT pose: g2o caches chi2() from the last
+            // computeError(); edges parked at level 1 were excluded from the
+            // optimization that just ran, so their cached value is stale.
+            e->computeError();
             const float chi2 = e->chi2();
-            if (chi2 > chi2Mono[it]) {
+            if (!std::isfinite(chi2) || chi2 > chi2Mono[it]) {
                 pFrame->mvbOutlier[idx] = true;
                 e->setLevel(1);
                 nBad++;
@@ -2768,8 +2772,10 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesStereo[i];
             size_t idx = vnIndexEdgeStereo[i];
+            // Refresh at the current pose before judging (see the note above).
+            e->computeError();
             const float chi2 = e->chi2();
-            if (chi2 > chi2Stereo[it]) {
+            if (!std::isfinite(chi2) || chi2 > chi2Stereo[it]) {
                 pFrame->mvbOutlier[idx] = true;
                 e->setLevel(1);
                 nBad++;
@@ -2785,8 +2791,10 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesLineMono[i];
             size_t idx = vnIndexEdgeLineMono[i];
+            // Refresh at the current pose before judging (see the note above).
+            e->computeError();
             const float chi2 = e->chi2();
-            if (chi2 > chi2LineMono[it]) {
+            if (!std::isfinite(chi2) || chi2 > chi2LineMono[it]) {
                 pFrame->mvbLineOutlier[idx] = true;
                 e->setLevel(1);
                 nBad++;
@@ -2802,8 +2810,10 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
         {
             auto *e = vpEdgesLineStereo[i];
             size_t idx = vnIndexEdgeLineStereo[i];
+            // Refresh at the current pose before judging (see the note above).
+            e->computeError();
             const float chi2 = e->chi2();
-            if (chi2 > chi2LineStereo[it]) {
+            if (!std::isfinite(chi2) || chi2 > chi2LineStereo[it]) {
                 pFrame->mvbLineOutlier[idx] = true;
                 e->setLevel(1);
                 nBad++;
