@@ -753,6 +753,7 @@ void Tracking::BuildRescueObservations(const Frame& F,
         const double sig2 = (oc >= 0 && oc < (int)F.mvInvLevelSigma2.size())
                                 ? (double)F.mvInvLevelSigma2[oc] : 1.0;
         p.w = 1.0 / std::max(1e-6, sig2);
+        p.frameIdx = i;
         // Points the point-only solve rejected are not evidence for the pose;
         // they are simply left out (they would otherwise empty the geometric
         // block on frames where the solve flags many of them).
@@ -923,15 +924,94 @@ bool Tracking::CommitLineRescue(const char* stage_tag)
     Frame cand = mCurrentFrame;                 // isolated: map is only read
     const Sophus::SE3f Tbefore = cand.GetPose();
 
-    // Only the accepted lines and the trusted points may take part.
+    // ---- fix the SOLVE and VERIFY sets before anything is optimised --------
+    // Deterministic, disjoint partition of the trusted correspondences.  The
+    // solve set may enter the optimizer; the verify set must never do so, and is
+    // what the candidate is judged with.  A MapLine contributes at most one
+    // solve segment, so two detections of the same line cannot act as two
+    // independent verifications.
+    Eigen::Matrix3d K;
+    std::vector<RescueAccept::PointObs> allPts;
+    std::vector<RescueAccept::LineObs> allLns;
+    Eigen::Matrix4d Tcw;
+    double medDepthEnv = 0.0;
+    BuildRescueObservations(cand, K, allPts, allLns, Tcw, medDepthEnv);
+
+    std::vector<int> ptSolveIdx, ptVerifyIdx, lnSolveIdx, lnVerifyIdx;
+    std::set<int> seenLineSolve, seenLineVerify;
+    for (size_t k = 0; k < allPts.size(); ++k)
+        ((allPts[k].frameIdx % 3) == 0 ? ptVerifyIdx : ptSolveIdx).push_back(allPts[k].frameIdx);
+    for (size_t k = 0; k < allLns.size(); ++k)
+    {
+        const RescueAccept::LineObs& L = allLns[k];
+        if (L.round != 0)                       // outlier-flagged: neither set
+            continue;
+        if ((L.frameIdx % 3) == 0)
+        {
+            if (seenLineVerify.count(L.mapId)) continue;   // one segment per line
+            seenLineVerify.insert(L.mapId);
+            lnVerifyIdx.push_back(L.frameIdx);
+        }
+        else
+        {
+            if (seenLineSolve.count(L.mapId)) continue;
+            seenLineSolve.insert(L.mapId);
+            lnSolveIdx.push_back(L.frameIdx);
+        }
+    }
+    // Disjointness assertion (construction guarantees it; this makes it explicit).
+    for (int a : ptSolveIdx)
+        if (std::find(ptVerifyIdx.begin(), ptVerifyIdx.end(), a) != ptVerifyIdx.end())
+            return false;
+    for (int a : lnSolveIdx)
+        if (std::find(lnVerifyIdx.begin(), lnVerifyIdx.end(), a) != lnVerifyIdx.end())
+            return false;
+
+    if ((int)ptVerifyIdx.size() < 3 || (int)lnVerifyIdx.size() < 2 || lnSolveIdx.empty())
+    {
+        if (IsLineRescueDiag())
+            std::cerr << "[RescueSolve] stage=" << stage_tag
+                      << " frame=" << mCurrentFrame.mnId << " ok=0 reason=insufficient_independent"
+                      << " verifyPts=" << (int)ptVerifyIdx.size()
+                      << " verifyLns=" << (int)lnVerifyIdx.size()
+                      << " solveLns=" << (int)lnSolveIdx.size() << std::endl;
+        return false;                        // never fall back to self-verification
+    }
+
+    // ---- scene scale from reliable map points in the reference camera ------
+    // NOT from mvDepth (monocular leaves it at -1).  Depth in the camera frame of
+    // the current pose; the same frame the pose correction is measured in.
+    {
+        std::vector<double> zs;
+        const Eigen::Matrix3d Rcw = Tcw.block<3, 3>(0, 0);
+        const Eigen::Vector3d tcw = Tcw.block<3, 1>(0, 3);
+        for (const auto& po : allPts)
+        {
+            const double z = (Rcw * po.Xw + tcw)(2);
+            if (z > 1e-3 && std::isfinite(z))
+                zs.push_back(z);
+        }
+        if ((int)zs.size() < 5)
+        {
+            if (IsLineRescueDiag())
+                std::cerr << "[RescueSolve] stage=" << stage_tag
+                          << " frame=" << mCurrentFrame.mnId << " ok=0 reason=no_scale"
+                          << " validDepths=" << (int)zs.size() << std::endl;
+            return false;                    // explicit, never silently skipped
+        }
+        std::sort(zs.begin(), zs.end());
+        medDepthEnv = zs[zs.size() / 2];
+    }
+
+    // ---- restrict the optimizer to the SOLVE set ---------------------------
     std::vector<char> keepPt(cand.N, 0);
-    for (int i : mRescuePointIdx)
+    for (int i : ptSolveIdx)
         if (i >= 0 && i < cand.N) keepPt[i] = 1;
     for (int i = 0; i < cand.N; ++i)
         if (!keepPt[i]) cand.mvpMapPoints[i] = nullptr;
 
     std::vector<char> keepLn(cand.NL, 0);
-    for (int i : mRescueLineIdx)
+    for (int i : lnSolveIdx)
         if (i >= 0 && i < cand.NL) keepLn[i] = 1;
     int nLineEdges = 0;
     for (int i = 0; i < cand.NL; ++i)
@@ -949,35 +1029,57 @@ bool Tracking::CommitLineRescue(const char* stage_tag)
 
     Optimizer::PoseOptimizationWithLine(&cand);
 
-    // Post-solve check on the SAME observations, excluding the correspondences
-    // that took part in the solve from the evidence.
-    Eigen::Matrix3d K;
-    std::vector<RescueAccept::PointObs> pts;
-    std::vector<RescueAccept::LineObs> lns;
-    Eigen::Matrix4d Tcw;
-    double medDepth = 0.0;
-    BuildRescueObservations(cand, K, pts, lns, Tcw, medDepth);
+    // ---- independent verification on the held-out set ----------------------
+    Eigen::Matrix4d Tpost = Eigen::Matrix4d::Identity();
+    Tpost.block<3, 3>(0, 0) = cand.GetPose().rotationMatrix().cast<double>();
+    Tpost.block<3, 1>(0, 3) = cand.GetPose().translation().cast<double>();
+
+    std::vector<RescueAccept::PointObs> vPts;
+    std::vector<RescueAccept::LineObs> vLns;
+    for (const auto& po : allPts)
+        if (std::find(ptVerifyIdx.begin(), ptVerifyIdx.end(), po.frameIdx) != ptVerifyIdx.end())
+            vPts.push_back(po);
+    for (const auto& L : allLns)
+        if (std::find(lnVerifyIdx.begin(), lnVerifyIdx.end(), L.frameIdx) != lnVerifyIdx.end())
+            vLns.push_back(L);
+
     RescueAccept::Params pr;
-    const RescueAccept::Result rPost = RescueAccept::evaluate(K, Tcw, pts, lns, pr);
+    const RescueAccept::Result rVer = RescueAccept::evaluate(K, Tpost, vPts, vLns, pr);
+    // The candidate must also explain the held-out set BETTER than the pose it
+    // replaced, otherwise the solve simply moved the error around.
+    const RescueAccept::Result rVerBase = RescueAccept::evaluate(K, Tcw, vPts, vLns, pr);
 
-    const Eigen::Quaterniond q0(Tbefore.rotationMatrix().cast<double>());
-    const Eigen::Quaterniond q1(cand.GetPose().rotationMatrix().cast<double>());
+    // ---- mono pose-step check in scene units -------------------------------
+    auto centre = [](const Sophus::SE3f& T) {
+        return Eigen::Vector3d(-(T.rotationMatrix().transpose().cast<double>() * T.translation().cast<double>()));
+    };
+    const double dStep = (centre(cand.GetPose()) - centre(Tbefore)).norm();
+    const bool bStepOk = (medDepthEnv > 0.0) && (dStep <= 0.05 * medDepthEnv);
+
     const bool bFinite = cand.GetPose().matrix().allFinite();
-    const double dRot = 2.0 * std::acos(std::min(1.0, std::fabs(q0.dot(q1))));
+    const bool bVerOk = rVer.ok && rVerBase.ok &&
+                        (rVer.medPointReprojPx <= rVerBase.medPointReprojPx + 0.25) &&
+                        (rVer.transObsPx >= 0.5 * rVerBase.transObsPx);
 
-    if (!bFinite || !rPost.ok)
+    if (!bFinite || !bVerOk || !bStepOk)
     {
         if (IsLineRescueDiag())
             std::cerr << "[RescueSolve] stage=" << stage_tag
                       << " frame=" << mCurrentFrame.mnId << " ok=0"
-                      << " nPt=" << (int)mRescuePointIdx.size()
+                      << " reason=" << (bFinite ? (bVerOk ? "pose_step" : RescueAccept::ReasonName(rVer.reason))
+                                                : "pose_invalid")
+                      << " nPtSolve=" << (int)ptSolveIdx.size()
                       << " nLnEdges=" << nLineEdges
-                      << " postReason=" << RescueAccept::ReasonName(rPost.reason)
-                      << " dRotDeg=" << (dRot * 57.2957795) << std::endl;
-        return false;
+                      << " verifyPts=" << (int)ptVerifyIdx.size()
+                      << " verifyLns=" << (int)lnVerifyIdx.size()
+                      << " verMedE=" << rVer.medPointReprojPx
+                      << " baseMedE=" << rVerBase.medPointReprojPx
+                      << " medDepth=" << medDepthEnv
+                      << " dStep=" << dStep << std::endl;
+        return false;                        // leave the point-path verdict alone
     }
 
-    // Commit exactly once.
+    // ---- commit exactly once ----------------------------------------------
     mCurrentFrame.SetPose(cand.GetPose());
     for (size_t i = 0; i < mCurrentFrame.mvbOutlier.size() && i < cand.mvbOutlier.size(); ++i)
         mCurrentFrame.mvbOutlier[i] = cand.mvbOutlier[i];
@@ -988,11 +1090,15 @@ bool Tracking::CommitLineRescue(const char* stage_tag)
     if (IsLineRescueDiag())
         std::cerr << "[RescueSolve] stage=" << stage_tag
                   << " frame=" << mCurrentFrame.mnId << " ok=1"
-                  << " nPt=" << (int)mRescuePointIdx.size()
+                  << " nPtSolve=" << (int)ptSolveIdx.size()
                   << " nLnEdges=" << nLineEdges
-                  << " postReason=ok"
-                  << " transObs=" << rPost.transObsPx
-                  << " dRotDeg=" << (dRot * 57.2957795) << std::endl;
+                  << " verifyPts=" << (int)ptVerifyIdx.size()
+                  << " verifyLns=" << (int)lnVerifyIdx.size()
+                  << " verMedE=" << rVer.medPointReprojPx
+                  << " baseMedE=" << rVerBase.medPointReprojPx
+                  << " medDepth=" << medDepthEnv
+                  << " dStep=" << dStep
+                  << " transObs=" << rVer.transObsPx << std::endl;
     return true;
 }
 

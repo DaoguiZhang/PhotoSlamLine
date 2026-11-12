@@ -42,6 +42,7 @@ struct PointObs
     double u = 0.0, v = 0.0;   // observed pixel
     Eigen::Vector3d Xw = Eigen::Vector3d::Zero();
     double w = 1.0;            // information weight (1 / sigma_px^2)
+    int frameIdx = -1;         // index of the keypoint in the frame
     bool heldout = false;      // excluded from the geometric evidence
 };
 
