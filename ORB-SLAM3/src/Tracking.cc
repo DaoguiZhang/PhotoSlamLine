@@ -693,6 +693,9 @@ Tracking::~Tracking()
                   << " rescueRejected=" << mnRescueRejected
                   << " rescueCommitted=" << mnRescueCommitted
                   << " rescueSustainedNextFrame=" << mnRescueSustained
+                  << " rescueSolveAttempts=" << mnRescueSolveAttempts
+                  << " rescueSolveOk=" << mnRescueSolveOk
+                  << " rescueSolveNoLineEdge=" << mnRescueSolveNoLineEdge
                   << " mode=" << GetTrackModeRaw() << std::endl;
     }
 }
@@ -783,6 +786,7 @@ void Tracking::BuildRescueObservations(const Frame& F,
         const double sig2 = (oc >= 0 && oc < (int)F.mvInvLevelSigma2.size())
                                 ? (double)F.mvInvLevelSigma2[oc] : 1.0;
         L.w = 1.0 / std::max(1e-6, sig2);
+        L.frameIdx = i;
         L.round = (i < (int)F.mvbLineOutlier.size() && F.mvbLineOutlier[i]) ? 1 : 0;
         lns.push_back(L);
         if (F.mvDepth[i] > 0.0f)
@@ -908,6 +912,90 @@ void Tracking::AssistCandidate(Frame& F, int nInliersPointOnly)
     }
 }
 
+
+bool Tracking::CommitLineRescue(const char* stage_tag)
+{
+    ++mnRescueSolveAttempts;
+
+    if (mRescueLineIdx.empty() || mRescuePointIdx.empty())
+        return false;
+
+    Frame cand = mCurrentFrame;                 // isolated: map is only read
+    const Sophus::SE3f Tbefore = cand.GetPose();
+
+    // Only the accepted lines and the trusted points may take part.
+    std::vector<char> keepPt(cand.N, 0);
+    for (int i : mRescuePointIdx)
+        if (i >= 0 && i < cand.N) keepPt[i] = 1;
+    for (int i = 0; i < cand.N; ++i)
+        if (!keepPt[i]) cand.mvpMapPoints[i] = nullptr;
+
+    std::vector<char> keepLn(cand.NL, 0);
+    for (int i : mRescueLineIdx)
+        if (i >= 0 && i < cand.NL) keepLn[i] = 1;
+    int nLineEdges = 0;
+    for (int i = 0; i < cand.NL; ++i)
+    {
+        if (keepLn[i] && cand.mvpMapLines[i] && !cand.mvpMapLines[i]->isBad())
+            ++nLineEdges;
+        else
+            cand.mvpMapLines[i] = nullptr;
+    }
+    if (nLineEdges <= 0)
+    {
+        ++mnRescueSolveNoLineEdge;
+        return false;
+    }
+
+    Optimizer::PoseOptimizationWithLine(&cand);
+
+    // Post-solve check on the SAME observations, excluding the correspondences
+    // that took part in the solve from the evidence.
+    Eigen::Matrix3d K;
+    std::vector<RescueAccept::PointObs> pts;
+    std::vector<RescueAccept::LineObs> lns;
+    Eigen::Matrix4d Tcw;
+    double medDepth = 0.0;
+    BuildRescueObservations(cand, K, pts, lns, Tcw, medDepth);
+    RescueAccept::Params pr;
+    const RescueAccept::Result rPost = RescueAccept::evaluate(K, Tcw, pts, lns, pr);
+
+    const Eigen::Quaterniond q0(Tbefore.rotationMatrix().cast<double>());
+    const Eigen::Quaterniond q1(cand.GetPose().rotationMatrix().cast<double>());
+    const bool bFinite = cand.GetPose().matrix().allFinite();
+    const double dRot = 2.0 * std::acos(std::min(1.0, std::fabs(q0.dot(q1))));
+
+    if (!bFinite || !rPost.ok)
+    {
+        if (IsLineRescueDiag())
+            std::cerr << "[RescueSolve] stage=" << stage_tag
+                      << " frame=" << mCurrentFrame.mnId << " ok=0"
+                      << " nPt=" << (int)mRescuePointIdx.size()
+                      << " nLnEdges=" << nLineEdges
+                      << " postReason=" << RescueAccept::ReasonName(rPost.reason)
+                      << " dRotDeg=" << (dRot * 57.2957795) << std::endl;
+        return false;
+    }
+
+    // Commit exactly once.
+    mCurrentFrame.SetPose(cand.GetPose());
+    for (size_t i = 0; i < mCurrentFrame.mvbOutlier.size() && i < cand.mvbOutlier.size(); ++i)
+        mCurrentFrame.mvbOutlier[i] = cand.mvbOutlier[i];
+    for (size_t i = 0; i < mCurrentFrame.mvbLineOutlier.size() && i < cand.mvbLineOutlier.size(); ++i)
+        mCurrentFrame.mvbLineOutlier[i] = cand.mvbLineOutlier[i];
+    ++mnRescueSolveOk;
+
+    if (IsLineRescueDiag())
+        std::cerr << "[RescueSolve] stage=" << stage_tag
+                  << " frame=" << mCurrentFrame.mnId << " ok=1"
+                  << " nPt=" << (int)mRescuePointIdx.size()
+                  << " nLnEdges=" << nLineEdges
+                  << " postReason=ok"
+                  << " transObs=" << rPost.transObsPx
+                  << " dRotDeg=" << (dRot * 57.2957795) << std::endl;
+    return true;
+}
+
 bool Tracking::HasReliableLineSupportStrict(int& reason)
 {
     ++mnRescueAttempts;
@@ -923,6 +1011,21 @@ bool Tracking::HasReliableLineSupportStrict(int& reason)
     reason = r.reason;
     mLineRescueInliers = r.nLinesAccepted;
     mLineRescueEdges = r.nLinesRaw;
+
+    // The solve set: only the point correspondences the frame already trusts and
+    // only the lines the acceptance actually accepted. Masked, gated-out and
+    // held-out correspondences are never re-introduced.
+    mRescuePointIdx.clear();
+    for (int i = 0; i < mCurrentFrame.N; ++i)
+    {
+        MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+        if (!pMP || pMP->isBad())
+            continue;
+        if (i < (int)mCurrentFrame.mvbOutlier.size() && mCurrentFrame.mvbOutlier[i])
+            continue;
+        mRescuePointIdx.push_back(i);
+    }
+    mRescueLineIdx = r.acceptedLineIdx;
 
     if (r.ok)
         ++mnRescueCommitted;
@@ -6176,6 +6279,14 @@ bool Tracking::ApplyLineRescue(const char* stage_tag, bool old_ok)
     {
         final_ok = TrackModeIsRescue() ? HasReliableLineSupportStrict(reason)
                                        : HasReliableLineSupport(reason);
+        if (final_ok && TrackModeIsRescue())
+        {
+            // The acceptance only says the evidence is sufficient; the pose is
+            // still the point-only one. Solve jointly and commit, or fail.
+            final_ok = CommitLineRescue(stage_tag);
+            if (!final_ok && reason == 0)
+                reason = 7;                 // accepted then failed the solve
+        }
         if (final_ok)
             mnLastRescueFrame = mCurrentFrame.mnId;
     }

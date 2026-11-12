@@ -405,6 +405,14 @@ protected:
     // Strict rescue acceptance (matching + geometry + consistency) built on
     // RescueAccept::evaluate over this frame's own observations.
     bool HasReliableLineSupportStrict(int& reason);
+    // Joint point+line pose solve on an isolated copy, then a post-solve check.
+    // Returns true only if lines actually entered the solve AND the solved pose
+    // passes the acceptance again; on true the pose/matches/outlier flags are
+    // committed exactly once.
+    bool CommitLineRescue(const char* stage_tag);
+    std::vector<int> mRescuePointIdx;   // point correspondences allowed to solve
+    std::vector<int> mRescueLineIdx;    // keyline indices of accepted MapLines
+    long mnRescueSolveAttempts = 0, mnRescueSolveOk = 0, mnRescueSolveNoLineEdge = 0;
     // Fills the observation arrays used by RescueAccept::evaluate for `F`.
     void BuildRescueObservations(const Frame& F,
                                  Eigen::Matrix3d& K,

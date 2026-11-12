@@ -54,6 +54,7 @@ struct LineObs
     int mapId = -1;
     int nObs = 0;              // MapLine::Observations() - multi-view support
     double w = 1.0;            // information weight
+    int frameIdx = -1;         // index of the keyline in the frame
     int round = 0;             // 0 = constrained, 1 = held-out (redundant) line
 };
 
@@ -121,6 +122,7 @@ struct Result
     bool ok = false;
     int reason = R_NO_LINES;
 
+    std::vector<int> acceptedLineIdx;   // frameIdx of each accepted line
     int nLinesRaw = 0, nLinesUnique = 0, nLinesAccepted = 0;
     int nLinesHeldout = 0, nLinesHeldoutOk = 0;
     int nPoints = 0, nPointsHeldout = 0, nHeldoutInliers = 0;
@@ -249,6 +251,7 @@ inline Result evaluate(const Eigen::Matrix3d& K, const Eigen::Matrix4d& Tcw,
             redundant.push_back(L);
     }
     r.nLinesUnique = (int)(used.size() + redundant.size());
+    for (const auto& L : used) r.acceptedLineIdx.push_back(L.frameIdx);
     r.nLinesAccepted = (int)used.size();
     r.nLinesHeldout = (int)redundant.size();
     if (!lineDists.empty()) {
