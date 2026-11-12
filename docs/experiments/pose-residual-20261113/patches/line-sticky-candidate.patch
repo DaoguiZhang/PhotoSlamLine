@@ -1,0 +1,82 @@
+diff --git a/ORB-SLAM3/src/Optimizer.cc b/ORB-SLAM3/src/Optimizer.cc
+index e599cc2fa5..f71a88436e 100755
+--- a/ORB-SLAM3/src/Optimizer.cc
++++ b/ORB-SLAM3/src/Optimizer.cc
+@@ -2738,6 +2738,10 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+     }
+ 
+     int nBad = 0;
++    // A line edge rejected in this call stays out for the rest of the call; it
++    // is re-judged on the next frame, when fresh edges are built.
++    std::vector<char> poStuckLnMono(vpEdgesLineMono.size(), 0);
++    std::vector<char> poStuckLnStereo(vpEdgesLineStereo.size(), 0);
+     for (int it = 0; it < 4; it++)
+     {
+         Tcw = pFrame->GetPose();
+@@ -2752,8 +2756,12 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesMono[i];
+             size_t idx = vnIndexEdgeMono[i];
++            // Judge at the CURRENT pose (g2o caches chi2() from the last
++            // computeError(); level-1 edges were not solved for, so their cache
++            // is stale). Non-finite residuals are outliers.
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2Mono[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2Mono[it]) {
+                 pFrame->mvbOutlier[idx] = true;
+                 e->setLevel(1);
+                 nBad++;
+@@ -2768,8 +2776,9 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesStereo[i];
+             size_t idx = vnIndexEdgeStereo[i];
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2Stereo[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2Stereo[it]) {
+                 pFrame->mvbOutlier[idx] = true;
+                 e->setLevel(1);
+                 nBad++;
+@@ -2785,14 +2794,18 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesLineMono[i];
+             size_t idx = vnIndexEdgeLineMono[i];
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2LineMono[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2LineMono[it]) {
+                 pFrame->mvbLineOutlier[idx] = true;
+                 e->setLevel(1);
++                poStuckLnMono[i] = 1;
+                 nBad++;
+-            } else {
++            } else if (!poStuckLnMono[i]) {
+                 pFrame->mvbLineOutlier[idx] = false;
+                 e->setLevel(0);
++            } else {
++                pFrame->mvbLineOutlier[idx] = true;      // stays out, level stays 1
+             }
+             if (it==2) e->setRobustKernel(0);
+         }
+@@ -2802,14 +2815,18 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesLineStereo[i];
+             size_t idx = vnIndexEdgeLineStereo[i];
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2LineStereo[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2LineStereo[it]) {
+                 pFrame->mvbLineOutlier[idx] = true;
+                 e->setLevel(1);
++                poStuckLnStereo[i] = 1;
+                 nBad++;
+-            } else {
++            } else if (!poStuckLnStereo[i]) {
+                 pFrame->mvbLineOutlier[idx] = false;
+                 e->setLevel(0);
++            } else {
++                pFrame->mvbLineOutlier[idx] = true;
+             }
+             if (it==2) e->setRobustKernel(0);
+         }

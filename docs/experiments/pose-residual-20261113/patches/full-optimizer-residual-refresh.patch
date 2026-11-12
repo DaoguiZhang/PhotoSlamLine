@@ -1,0 +1,72 @@
+commit f94543c3f498a859f82e23e2b63d1d03d7c6f452
+Author: pose-fix <pose-fix@local>
+Date:   Thu Nov 12 08:12:25 2026 +0000
+
+    fix(optimizer): judge pose-opt-line outliers on the residual at the current pose
+    
+    PoseOptimizationWithLine() read chi2() straight out of g2o's cached _error.
+    Edges parked at level 1 are excluded from initializeOptimization(0), so
+    optimize() never recomputes their residual: a line that the current pose has
+    already pulled back inside the threshold stayed an outlier for the remaining
+    three rounds and never re-entered the graph. Each of the four judging loops
+    (vpEdgesMono, vpEdgesStereo, vpEdgesLineMono, vpEdgesLineStereo) now calls
+    computeError() first, and a non-finite chi2 counts as an outlier.
+    
+    Thresholds, outlier flags, setLevel(), nBad and the robust-kernel schedule are
+    unchanged; the point-only PoseOptimization() and everything outside these four
+    loops are untouched.
+
+diff --git a/ORB-SLAM3/src/Optimizer.cc b/ORB-SLAM3/src/Optimizer.cc
+index d355867bda..ea3387d0ba 100755
+--- a/ORB-SLAM3/src/Optimizer.cc
++++ b/ORB-SLAM3/src/Optimizer.cc
+@@ -2774,8 +2774,12 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesMono[i];
+             size_t idx = vnIndexEdgeMono[i];
++            // Judge at the CURRENT pose: g2o caches chi2() from the last
++            // computeError(); edges parked at level 1 were excluded from the
++            // optimization that just ran, so their cached value is stale.
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2Mono[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2Mono[it]) {
+                 pFrame->mvbOutlier[idx] = true;
+                 e->setLevel(1);
+                 nBad++;
+@@ -2790,8 +2794,10 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesStereo[i];
+             size_t idx = vnIndexEdgeStereo[i];
++            // Refresh at the current pose before judging (see the note above).
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2Stereo[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2Stereo[it]) {
+                 pFrame->mvbOutlier[idx] = true;
+                 e->setLevel(1);
+                 nBad++;
+@@ -2807,8 +2813,10 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesLineMono[i];
+             size_t idx = vnIndexEdgeLineMono[i];
++            // Refresh at the current pose before judging (see the note above).
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2LineMono[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2LineMono[it]) {
+                 pFrame->mvbLineOutlier[idx] = true;
+                 e->setLevel(1);
+                 nBad++;
+@@ -2824,8 +2832,10 @@ int Optimizer::PoseOptimizationWithLine(Frame *pFrame)
+         {
+             auto *e = vpEdgesLineStereo[i];
+             size_t idx = vnIndexEdgeLineStereo[i];
++            // Refresh at the current pose before judging (see the note above).
++            e->computeError();
+             const float chi2 = e->chi2();
+-            if (chi2 > chi2LineStereo[it]) {
++            if (!std::isfinite(chi2) || chi2 > chi2LineStereo[it]) {
+                 pFrame->mvbLineOutlier[idx] = true;
+                 e->setLevel(1);
+                 nBad++;
