@@ -948,6 +948,35 @@ bool Tracking::HasReliableLineSupportStrict(int& reason)
     return r.ok;
 }
 
+// Controlled rescue experiment: detach all but one point correspondence in every
+// `stride` for frames inside the declared window.  Applied BEFORE any counting,
+// matching bookkeeping or solve, and re-applied after the local-map search so a
+// re-match cannot put the masked points back.  Returns how many were removed.
+int Tracking::ApplyRescueTestMask(Frame& F, const char* where)
+{
+    const int lo = GetRescueTestMaskLo();
+    const int hi = GetRescueTestMaskHi();
+    const int stride = GetRescueTestMaskStride();
+    if (stride <= 1 || lo < 0 || (int)F.mnId < lo || (int)F.mnId > hi)
+        return 0;
+    int seen = 0, removed = 0;
+    for (int i = 0; i < F.N; ++i)
+    {
+        if (!F.mvpMapPoints[i])
+            continue;
+        if ((seen++ % stride) != 0)
+        {
+            F.mvpMapPoints[i] = nullptr;
+            ++removed;
+        }
+    }
+    if (IsLineRescueDiag() && removed > 0)
+        std::cerr << "[Mask] frame=" << F.mnId << " at=" << where
+                  << " kept=" << (seen - removed) << " removed=" << removed
+                  << " stride=" << stride << std::endl;
+    return removed;
+}
+
 int Tracking::PoseOptimizationForMode(Frame& F)
 {
     // Controlled rescue experiment (diagnostic, default off): detach all but one
@@ -2695,6 +2724,9 @@ void Tracking::ResetFrameIMU()
 
 void Tracking::Track()
 {
+    // Before anything is counted or solved, so the starved set is what every
+    // later verdict sees.
+    ApplyRescueTestMask(mCurrentFrame, "track_entry");
 #ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartTrackTotal = std::chrono::steady_clock::now();
 #endif
@@ -6183,6 +6215,14 @@ bool Tracking::TrackLocalMapWithLine()
 
     UpdateLocalMapWithLine();
     SearchLocalPointsAndLine();
+    {
+        // A re-match could re-attach the points the experiment removed; the
+        // assertion makes that visible instead of silently invalidating it.
+        const int nAgain = ApplyRescueTestMask(mCurrentFrame, "post_search");
+        if (nAgain > 0 && IsLineRescueDiag())
+            std::cerr << "[MaskAssert] frame=" << mCurrentFrame.mnId
+                      << " restoredByRematch=" << nAgain << std::endl;
+    }
 
     // Line supply chain, keyed by the real frame id:
     //   alive     - MapLines in the current map that are not bad

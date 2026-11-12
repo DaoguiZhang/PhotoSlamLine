@@ -397,6 +397,7 @@ protected:
     //                      candidate is built on an isolated Frame copy and
     //                      committed only if it passes the independent test.
     int PoseOptimizationForMode(Frame& F);
+    int ApplyRescueTestMask(Frame& F, const char* where);
     // Builds the candidate, scores it, and commits it only on acceptance.
     // Never mutates the map: the candidate solves on a copy of the Frame and
     // MapPoint/MapLine are only read by the optimizer.
