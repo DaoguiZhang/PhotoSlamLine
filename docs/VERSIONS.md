@@ -36,28 +36,34 @@ Never uploaded:
 
 | item | count |
 |---|---|
-| local branches | 25 |
-| remote branches on `origin` | 33 |
-| local tags | 7 (3 of them not on GitHub, see §2) |
+| local branches | 26 |
+| remote branches on `origin` | 41 |
+| tags | 7, all on GitHub |
 | git worktrees on this machine | 19 |
-| tracked files | 724 |
+| tracked files | ~726 |
 | experiment directories under `/workspace/code` | 100 (87 named `PSL-*`) |
 
 The project is a **single** repository with many worktrees — there is no second
 copy of the source under version control. Everything else on disk is either a
 worktree, a build tree, a results folder, or an untracked source snapshot (§4).
 
-## 2. Branches that are NOT on GitHub (as of this commit)
+## 2. Branches that used to be local-only
 
-| branch | commits not on any remote | purpose |
+Until 2026-11-18 four branches had commits that existed on no remote ref; they
+were pushed together with their tags in that session, so as of now
+`git rev-list --count <branch> --not --remotes` is 0 for every branch. The table
+is kept because it records **why** those branches exist.
+
+| branch | commits that were local-only | purpose |
 |---|---|---|
 | `feat/point-assist-rescue-modes` | 5 | **Main line of the paper.** POINT / ASSIST / ASSIST_RESCUE tracking modes with an independent acceptance test, per-frame four-level line supply-chain diagnostics, point-mask-before-count`fix`, joint point+line solve with post-solve check, and verification of the solved candidate on a disjoint held-out set. Local tag `rescue-experiment-sealed-20261112` points here. |
 | `fix/pose-opt-line-residual` | 6 | Superset of the branch above **plus** the pose-optimisation fix: line outliers are judged on the residual at the *current* pose instead of the stale one (`ORB-SLAM3/src/Optimizer.cc`, `LineMode.h`, `Tracking.*`). |
 | `fix/pose-residual-refresh` | 1 | The same optimizer fix re-applied on the archived base (`archive/pose-residual-20261113`), used to compare “fix only” against “fix + rescue modes”. |
 | `fix/line-reproj-triangulate-po-reeval` | 1 | Eval-only change: merged settlement root, merge-boundary audit and a staged preview report for the re-evaluated line-reprojection / triangulation runs (`eval/build_merged_root.py`, `eval/report_preview.py`). |
 
-Tags that exist locally but not on GitHub: `rescue-experiment-sealed-20261112`,
-`d6-fix-backup-20260919`, `pre-mapper-ablation-feat-eth3d-rover-line`.
+The three tags that pointed at them (`rescue-experiment-sealed-20261112`,
+`d6-fix-backup-20260919`, `pre-mapper-ablation-feat-eth3d-rover-line`) are now
+on GitHub as well.
 
 None of these commits touch results, build output or datasets; they only change
 `src/`, `include/`, `ORB-SLAM3/`, `cfg/`, `scripts/`, `tests/` and `eval/` scripts.
@@ -91,6 +97,7 @@ None of these commits touch results, build output or datasets; they only change
 | `fix/pose-opt-line-residual` | 2026-11-12 | **no** | Pose-opt line-outlier fix on the current-pose residual (see §2). |
 | `fix/pose-residual-refresh` | 2026-11-12 | **no** | Same fix, refreshed on the archived base (see §2). |
 | `archive/pose-residual-20261113` | 2026-11-12 | yes | Archive of the pose-residual experiments and the release decision that followed. |
+| `exp/voxel-filter-ablation` | 2026-11-18 | yes | Voxel-occupancy filter switch (`PHOTO_SLAM_VOXEL_FILTER`, default on) plus candidate-provenance dump (`PHOTO_SLAM_DEBUG_VOXEL`) for the incremental line-gaussian seeding ablation. Default behaviour unchanged; the mechanism was measured to move 0–56 candidates (≤0.06 % of the final gaussian count), so no quality claim is attached. |
 
 ## 4. Source snapshots on disk that are NOT version-controlled
 
