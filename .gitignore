@@ -139,3 +139,6 @@ ExecMean.txt
 SessionInfo.txt
 artifact_manifest.sha256
 消融实验的总结/
+
+# Ablation scratch: rendered views, ref views and per-run metrics
+voxel_ablation/

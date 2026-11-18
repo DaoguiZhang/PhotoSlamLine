@@ -743,6 +743,35 @@ void GaussianMapperLine::run()
                 gaussians_->trainingSetup(opt_params_);
             }
 
+            // [voxel-ablation] Provenance of the common starting point: the
+            // initial map is built here, BEFORE any incremental line-gaussian
+            // insertion, so both arms must report the same numbers.
+            if (ORB_SLAM3::IsVoxelDumpDiag()) {
+                const std::string dir = ORB_SLAM3::GetVoxelDumpDir();
+                if (!dir.empty()) {
+                    std::filesystem::create_directories(dir);
+                    std::ofstream js(std::filesystem::path(dir) / "voxel_init.json");
+                    js << "{\n"
+                       << "  \"stage\": \"initial_map\",\n"
+                       << "  \"n_gaussians\": " << gaussians_->xyz_.size(0) << ",\n"
+                       << "  \"n_points_cached\": " << scene_->cached_point_cloud_.size() << ",\n"
+                       << "  \"n_voxels\": " << scene_->getVoxelCount() << ",\n"
+                       << "  \"voxel_size\": " << opt_params_.voxel_size_ << ",\n"
+                       << "  \"line_sample_step\": " << opt_params_.line_sample_step_ << ",\n"
+                       << "  \"voxel_filter\": "
+                       << (ORB_SLAM3::GetVoxelFilterEnabled() ? 1 : 0) << ",\n"
+                       << "  \"iteration\": " << getIteration() << "\n"
+                       << "}\n";
+                    std::cerr << "[VoxelABL] initial map: n_gaussians="
+                              << gaussians_->xyz_.size(0)
+                              << " n_voxels=" << scene_->getVoxelCount()
+                              << " voxel_size=" << opt_params_.voxel_size_
+                              << " filter="
+                              << (ORB_SLAM3::GetVoxelFilterEnabled() ? 1 : 0)
+                              << std::endl;
+                }
+            }
+
             // Invoke training once
             //trainForOneIteration();
 
@@ -2483,12 +2512,59 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                     int raw_points = l_positions.size() / 3;
                     int filtered_points = 0;
 
+                    // ------------------------------------------------------------------
+                    // Voxel-filter ablation bookkeeping.
+                    // PHOTO_SLAM_VOXEL_FILTER=0 skips ONLY the occupancy rejection
+                    // test below; every other step (voxel bookkeeping of accepted
+                    // samples, point insertion, densification, pruning, losses) is
+                    // untouched. PHOTO_SLAM_DEBUG_VOXEL=1 records every candidate
+                    // sample BEFORE the decision, so the two arms can be diffed
+                    // sample by sample.
+                    // ------------------------------------------------------------------
+                    const bool voxelFilter = ORB_SLAM3::GetVoxelFilterEnabled();
+                    const std::string voxelDumpDir = ORB_SLAM3::GetVoxelDumpDir();
+                    const bool voxelDump = ORB_SLAM3::IsVoxelDumpDiag()
+                                           && !voxelDumpDir.empty();
+                    static int s_voxelBatch = 0;
+                    ++s_voxelBatch;
+                    const std::size_t n_gauss_before = gaussians_->xyz_.size(0);
+                    int n_occupied = 0;
+                    std::ofstream candCsv;
+                    if (voxelDump) {
+                        std::filesystem::create_directories(voxelDumpDir);
+                        const std::filesystem::path cp =
+                            std::filesystem::path(voxelDumpDir) / "voxel_candidates.csv";
+                        const bool fresh = !std::filesystem::exists(cp)
+                                           || std::filesystem::file_size(cp) == 0;
+                        candCsv.open(cp, std::ios::app);
+                        if (fresh)
+                            candCsv << "batch,idx,iter,px,py,pz,dx,dy,dz,vx,vy,vz,"
+                                       "occupied,accepted\n";
+                    }
+
                     for (size_t i = 0; i < num_l_points; ++i) {
 
                         Eigen::Vector3f p_pos(l_positions[i*3], l_positions[i*3+1], l_positions[i*3+2]);
                 
                         // 🌟 核心去重判断：O(1) 复杂度
-                        if (scene_->isVoxelOccupied(p_pos, opt_params_.voxel_size_)) {
+                        const bool occupied =
+                            scene_->isVoxelOccupied(p_pos, opt_params_.voxel_size_);
+                        if (occupied) ++n_occupied;
+                        const bool rejected = occupied && voxelFilter;
+                        if (voxelDump) {
+                            const float vs = opt_params_.voxel_size_;
+                            candCsv << s_voxelBatch << ',' << i << ',' << getIteration()
+                                    << ',' << std::fixed << std::setprecision(6)
+                                    << p_pos.x() << ',' << p_pos.y() << ',' << p_pos.z()
+                                    << ',' << l_dirs[i*3] << ',' << l_dirs[i*3+1]
+                                    << ',' << l_dirs[i*3+2] << ','
+                                    << static_cast<int>(std::floor(p_pos.x() / vs)) << ','
+                                    << static_cast<int>(std::floor(p_pos.y() / vs)) << ','
+                                    << static_cast<int>(std::floor(p_pos.z() / vs)) << ','
+                                    << (occupied ? 1 : 0) << ',' << (rejected ? 0 : 1)
+                                    << '\n';
+                        }
+                        if (rejected) {
                             filtered_points++;
                             continue; // 空间上已经存在线段高斯，跳过
                         }
@@ -2542,6 +2618,26 @@ void GaussianMapperLine::combineMappingOperations_withLine()
                         
                         std::cerr << "[GaussianMapper] Added " << new_line_sample_points.size() 
                                    << " line-sampled gaussians." << std::endl;
+                    }
+
+                    // [voxel-ablation] one row per insertion batch, written AFTER
+                    // the upload so n_gauss_after is the real post-insertion count.
+                    if (voxelDump) {
+                        const std::filesystem::path bp =
+                            std::filesystem::path(voxelDumpDir) / "voxel_batches.csv";
+                        const bool fresh = !std::filesystem::exists(bp)
+                                           || std::filesystem::file_size(bp) == 0;
+                        std::ofstream bc(bp, std::ios::app);
+                        if (fresh)
+                            bc << "batch,iter,n_candidates,n_voxel_occupied,"
+                                  "n_accepted,n_rejected,n_gauss_before,"
+                                  "n_gauss_after,voxel_filter\n";
+                        bc << s_voxelBatch << ',' << getIteration() << ','
+                           << raw_points << ',' << n_occupied << ','
+                           << (raw_points - filtered_points) << ','
+                           << filtered_points << ',' << n_gauss_before << ','
+                           << gaussians_->xyz_.size(0) << ','
+                           << (voxelFilter ? 1 : 0) << '\n';
                     }
                 }
             }

@@ -370,6 +370,49 @@ inline bool IsLineLossDiag()
     return enabled;
 }
 
+// ---------------------------------------------------------------------------
+// Voxel occupancy filter for INCREMENTAL line-gaussian seeding.
+// Controlled by PHOTO_SLAM_VOXEL_FILTER (default 1 = current behaviour):
+//   1 = a candidate line sample whose voxel is already occupied by an existing
+//       line gaussian is rejected (existing dedup step)
+//   0 = that single rejection test is skipped; every candidate is inserted.
+// Nothing else changes: the initial map, the voxel bookkeeping of ACCEPTED
+// samples, point insertion, densification, pruning and every loss stay as is.
+// ---------------------------------------------------------------------------
+inline bool GetVoxelFilterEnabled()
+{
+    static const bool enabled = []() {
+        const char* v = std::getenv("PHOTO_SLAM_VOXEL_FILTER");
+        if (v == nullptr) return true;
+        const std::string s(v);
+        return !(s == "0" || s == "off" || s == "false");
+    }();
+    return enabled;
+}
+
+// Candidate recorder, OFF by default. PHOTO_SLAM_DEBUG_VOXEL=1 writes
+//   <PHOTO_SLAM_VOXEL_DUMP>/voxel_init.json      initial-map gaussian count
+//   <PHOTO_SLAM_VOXEL_DUMP>/voxel_batches.csv    one row per insertion batch
+//   <PHOTO_SLAM_VOXEL_DUMP>/voxel_candidates.csv one row per candidate sample
+// BEFORE the occupancy decision, so both arms can be diffed sample by sample.
+inline bool IsVoxelDumpDiag()
+{
+    static const bool enabled = []() {
+        const char* v = std::getenv("PHOTO_SLAM_DEBUG_VOXEL");
+        return v != nullptr && std::string(v) == "1";
+    }();
+    return enabled;
+}
+
+inline std::string GetVoxelDumpDir()
+{
+    static const std::string dir = []() {
+        const char* v = std::getenv("PHOTO_SLAM_VOXEL_DUMP");
+        return v != nullptr ? std::string(v) : std::string();
+    }();
+    return dir;
+}
+
 // Monocular-init diagnostics (PHOTO_SLAM_DEBUG_MONO_INIT=1). Mirrors the
 // file-local MonoInitLineDebug() in Tracking.cc / LSDmatcher.cc.
 inline bool IsMonoInitDiag()
